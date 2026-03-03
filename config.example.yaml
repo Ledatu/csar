@@ -1,0 +1,337 @@
+# CSAR - Centralized Smart API Router
+# Example configuration using OpenAPI-style x-csar-* extensions
+
+listen_addr: ":8080"
+
+# --- Security Policy ---
+# Controls environment-level invariants. In "prod" mode, insecure options
+# are rejected at startup (fail-fast).
+# security_policy:
+#   environment: "prod"          # "dev", "stage", "prod"
+#   forbid_insecure_in_prod: true
+#   require_mtls_for_coordinator: true
+#   redact_sensitive_logs: true
+
+# --- TLS (inbound) ---
+# Uncomment to enable HTTPS for clients connecting to CSAR.
+# tls:
+#   cert_file: "/etc/csar/tls/server-cert.pem"
+#   key_file: "/etc/csar/tls/server-key.pem"
+#   # Mutual TLS: require client certificates signed by this CA.
+#   # client_ca_file: "/etc/csar/tls/client-ca.pem"
+#   min_version: "1.2"   # "1.2" (default) or "1.3"
+
+# --- Global IP Access Control ---
+# If set, only clients from these IPs/CIDRs can reach ANY route.
+# Per-route x-csar-access overrides this list for specific routes.
+# access_control:
+#   allow_cidrs:
+#     - "10.0.0.0/8"          # Internal network
+#     - "172.16.0.0/12"       # Docker / private range
+#     - "192.168.1.100"       # Specific host
+#     - "::1"                 # IPv6 loopback
+#   trust_proxy: false        # Set true to use X-Forwarded-For / X-Real-IP
+
+# --- SSRF Protection ---
+# Blocks outbound proxy connections to internal/private/metadata IPs.
+# All options default to true (block) for maximum security.
+# ssrf_protection:
+#   block_private: true        # RFC 1918 private subnets (10.x, 172.16.x, 192.168.x)
+#   block_loopback: true       # 127.0.0.0/8, ::1
+#   block_link_local: true     # 169.254.0.0/16, fe80::/10
+#   block_metadata: true       # Cloud metadata endpoint 169.254.169.254
+#   allowed_internal_hosts:    # Explicit allowlist for internal services
+#     - "internal-api.local"
+
+# --- KMS (Key Management Service) ---
+# Global settings for the KMS provider used for token encryption/decryption.
+# kms:
+#   provider: "yandexapi"        # "local" for dev, "yandexapi" for production
+#   default_key_id: "abj-xxx"   # optional default key
+#   operation_timeout: "2s"
+#   retry:
+#     max_attempts: 3
+#     base_delay: "100ms"
+#     max_delay: "2s"
+#     jitter: true
+#   cache:
+#     enabled: true
+#     ttl: "60s"
+#     max_entries: 10000
+#   yandex:
+#     endpoint: "https://kms.api.cloud.yandex.net/kms/v1/keys"  # default
+#     auth_mode: "metadata"                        # "iam_token", "oauth_token", "metadata"
+#     # iam_token: ""        # static IAM token (dev only)
+#     # oauth_token: ""      # for IAM exchange
+#     # sa_key_file: ""      # service-account JSON key
+#   # local_keys:            # for provider: "local"
+#   #   key1: "passphrase1"
+#   #   key2: "passphrase2"
+
+# --- Redis (Distributed Rate Limiting) ---
+# Optional Redis backend for globally coordinated rate limiting across pods.
+# Required when any route uses traffic.backend: "redis".
+# redis:
+#   address: "redis.internal:6379"
+#   password: ""                    # Redis AUTH password (optional)
+#   db: 0                           # Redis database number (default: 0)
+#   key_prefix: "csar:rl:"          # prefix for all rate limiting keys
+
+coordinator:
+  enabled: false
+  # address: "localhost:9090"
+  # discovery_method: "static"
+  #
+  # --- TLS for router → coordinator gRPC connection ---
+  # ca_file: "/etc/csar/tls/coordinator-ca.pem"
+  # # Optional mTLS: client cert the router presents to the coordinator.
+  # cert_file: "/etc/csar/tls/router-client-cert.pem"
+  # key_file: "/etc/csar/tls/router-client-key.pem"
+  # # For dev only — allows plaintext gRPC (NEVER use in production):
+  # allow_insecure: false
+
+circuit_breakers:
+  standard:
+    max_requests: 5
+    interval: "60s"
+    timeout: "30s"
+    failure_threshold: 3
+  strict:
+    max_requests: 3
+    interval: "30s"
+    timeout: "60s"
+    failure_threshold: 2
+
+paths:
+  # --- Multi-Credential + Dynamic Token Resolution ---
+  # Demonstrates injecting a static client secret, a fixed User-Agent,
+  # AND a dynamic per-account bearer token — all on the same route.
+  #
+  # Flow: client sends GET /api/v1/products?account_id=12345
+  #   1. Inbound auth-validate (JWT) checks the caller is authorized.
+  #   2. x-csar-headers injects the fixed User-Agent.
+  #   3. x-csar-security[0] injects x-client-secret from KMS (same for all calls).
+  #   4. x-csar-security[1] resolves "bearer_{query.account_id}" → "bearer_12345",
+  #      fetches + decrypts that token, and injects "Authorization: Bearer <token>".
+  #   5. The request is proxied to the upstream with all headers set.
+  /api/v1/products:
+    get:
+      x-csar-backend:
+        target_url: "https://upstream-api.example.com/v1/products"
+        # tls:
+        #   ca_file: "/etc/csar/tls/upstream-ca.pem"
+        #   cert_file: "/etc/csar/tls/client-cert.pem"
+        #   key_file: "/etc/csar/tls/client-key.pem"
+
+      # --- Static Headers (x-csar-headers) ---
+      # Injected into every upstream request for this route. Useful for
+      # headers that don't need KMS decryption (User-Agent, custom static keys).
+      x-csar-headers:
+        User-Agent: "CSAR/1.0"
+
+      # --- Multi-Credential Security (x-csar-security as array) ---
+      # Each entry is resolved, decrypted, and injected independently.
+      # Dynamic placeholders: {query.param} or {header.Header-Name}.
+      x-csar-security:
+        # 1. Static client secret (same KMS key for all calls)
+        - kms_key_id: "key-1"
+          token_ref: "client_secret"
+          inject_header: "X-Client-Secret"
+          inject_format: "{token}"
+          on_kms_error: "serve_stale"
+
+        # 2. Dynamic per-account bearer token.
+        #    {query.account_id} is replaced at runtime from the URL query string.
+        #    e.g. ?account_id=12345 → token_ref resolves to "bearer_12345"
+        - kms_key_id: "key-1"
+          token_ref: "bearer_{query.account_id}"
+          inject_header: "Authorization"
+          inject_format: "Bearer {token}"
+          on_kms_error: "fail_closed"
+
+      # --- Inbound JWT Validation ---
+      # Ensures only YOUR authorized consumers can reach this route.
+      # x-csar-auth-validate:
+      #   jwks_url: "https://auth.example.com/.well-known/jwks.json"
+      #   issuer: "https://auth.example.com/"
+      #   audiences:
+      #     - "my-api"
+
+      x-csar-traffic:
+        rps: 3.0
+        burst: 5
+        max_wait: "30s"
+        # backend: "local"          # "local" (default), "redis", or "coordinator"
+        #                           # "redis" requires top-level redis config
+        #                           # "coordinator" uses dynamic quotas from the coordinator
+      x-csar-resilience:
+        circuit_breaker: "standard"
+      x-csar-retry:
+        max_attempts: 3
+        backoff: "1s"
+        max_backoff: "10s"
+
+  # --- Single Credential (backward-compatible syntax) ---
+  # x-csar-security as a single object still works — it is automatically
+  # treated as a one-element array internally.
+  /api/v1/orders:
+    post:
+      x-csar-backend:
+        target_url: "https://orders-api.example.com/v1/orders"
+      # Per-route IP allowlist — overrides global access_control for this route.
+      # x-csar-access:
+      #   allow_cidrs:
+      #     - "10.10.0.0/16"
+      #   trust_proxy: true
+      x-csar-security:
+        kms_key_id: "key-2"
+        token_ref: "orders_api_token"
+        inject_header: "Api-Key"
+        inject_format: "{token}"
+      x-csar-traffic:
+        rps: 5.0
+        burst: 10
+        max_wait: "15s"
+      x-csar-resilience:
+        circuit_breaker: "strict"
+
+  # --- Path Rewriting & Regex Routes ---
+  # Use {name:pattern} for regex path variables. Back-references ($1, $2) in path_rewrite.
+  # /api/v1/users/{id:[0-9]+}:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://users-service.internal/api"
+  #       path_rewrite: "/users/$1"    # /api/v1/users/42 → /users/42
+
+  # --- Inbound JWT/JWKS Validation ---
+  # Validates bearer tokens against a JWKS endpoint before proxying.
+  # /api/v1/protected:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://internal-service.local"
+  #     x-csar-auth-validate:
+  #       jwks_url: "https://auth.example.com/.well-known/jwks.json"
+  #       issuer: "https://auth.example.com/"
+  #       audiences:
+  #         - "my-api"
+  #       # header_name: "Authorization"    # default
+  #       # token_prefix: "Bearer "         # default
+  #       # cache_ttl: "5m"                 # JWKS key cache TTL
+  #       required_claims:
+  #         role: "admin"
+  #       forward_claims:                   # copy JWT claims to request headers
+  #         sub: "X-User-ID"
+  #         email: "X-User-Email"
+
+  # --- Payload Redaction / DLP ---
+  # Masks specified JSON fields in upstream responses before returning to client.
+  # /api/v1/customers:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://crm-api.internal/customers"
+  #     x-csar-redact:
+  #       fields:
+  #         - "ssn"
+  #         - "customers.*.email"
+  #         - "billing.card_number"
+  #       mask: "***REDACTED***"           # default mask value
+  #       # enabled: true                  # set false to disable without removing config
+
+  # --- Multi-Tenant Gateway ---
+  # Routes to different backends based on a tenant identifier in headers.
+  # /api/v1/products:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://default-api.internal"   # ignored when tenant routing is active
+  #     x-csar-tenant:
+  #       header: "X-Tenant-ID"           # or "Host" for host-based routing
+  #       backends:
+  #         acme: "https://api-acme.internal"
+  #         globex: "https://api-globex.internal"
+  #       default: "https://api-default.internal"  # fallback; omit for 404 on unknown tenant
+
+  # --- Load Balancing ---
+  # Distribute traffic across multiple upstream targets with Round-Robin or Random.
+  # Active health checking can be enabled to automatically remove unhealthy targets.
+  # /api/v1/balanced:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://api-node1.internal"     # primary target
+  #       targets:                                      # additional targets
+  #         - "https://api-node2.internal"
+  #         - "https://api-node3.internal"
+  #       load_balancer: "round_robin"    # "round_robin" (default) or "random"
+  #       health_check:
+  #         enabled: true
+  #         mode: "http"                  # "http" (default) or "tcp"
+  #         path: "/health"              # HTTP endpoint to probe (required for mode: http)
+  #         interval: "10s"              # time between probes (default: 10s)
+  #         timeout: "3s"                # probe timeout (default: 3s)
+  #         unhealthy_threshold: 3       # consecutive failures to mark down (default: 3)
+  #         healthy_threshold: 2         # consecutive successes to recover (default: 2)
+
+  # --- CORS ---
+  # Cross-Origin Resource Sharing — automatic preflight handling.
+  # /api/v1/frontend:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://backend.internal"
+  #     x-csar-cors:
+  #       allowed_origins:
+  #         - "https://app.example.com"
+  #         - "https://admin.example.com"
+  #       allowed_methods: ["GET", "POST", "PUT", "DELETE"]
+  #       allowed_headers: ["Content-Type", "Authorization"]
+  #       exposed_headers: ["X-Request-ID"]
+  #       allow_credentials: true
+  #       max_age: 86400                   # 24 hours
+
+  # --- Response Caching ---
+  # RFC-compliant in-memory response caching for idempotent routes.
+  # /api/v1/catalog:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://catalog-api.internal"
+  #     x-csar-cache:
+  #       ttl: "5m"                         # default TTL (overridden by Cache-Control max-age)
+  #       max_entries: 1000                 # LRU cache capacity
+  #       max_body_size: 1048576            # max response size to cache (1MB)
+  #       methods: ["GET", "HEAD"]          # HTTP methods to cache
+
+  # --- Distributed Rate Limiting ---
+  # Use Redis for globally coordinated rate limiting across all CSAR pods.
+  # /api/v1/shared-limit:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://shared-api.internal"
+  #     x-csar-traffic:
+  #       rps: 100.0
+  #       burst: 20
+  #       max_wait: "5s"
+  #       backend: "redis"            # use Redis sliding window instead of local token bucket
+  #
+  # Use coordinator-assigned quotas (dynamic per-pod allocation):
+  # /api/v1/coordinated-limit:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://coordinated-api.internal"
+  #     x-csar-traffic:
+  #       rps: 50.0
+  #       burst: 10
+  #       max_wait: "10s"
+  #       backend: "coordinator"      # quotas dynamically assigned by coordinator
+
+  # --- Response Size Limits ---
+  # Enforce max response size for DLP/Retry buffering to prevent DoS.
+  # /api/v1/data:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://data-api.internal"
+  #     max_response_size: 10485760         # 10MB — responses larger than this are rejected
+  #     x-csar-redact:
+  #       fields: ["ssn", "credit_card"]
+
+  /health:
+    get:
+      x-csar-backend:
+        target_url: "http://localhost:8080"

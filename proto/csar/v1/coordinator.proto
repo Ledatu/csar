@@ -1,0 +1,129 @@
+syntax = "proto3";
+
+package csar.v1;
+
+option go_package = "github.com/ledatu/csar/proto/csar/v1;csarv1";
+
+import "google/protobuf/duration.proto";
+
+// CoordinatorService is the internal gRPC service for Coordinator <-> Router communication.
+// Routers connect to the Coordinator to receive configuration and quota assignments.
+// Token delivery is handled exclusively via AuthService.GetEncryptedToken.
+service CoordinatorService {
+  // Subscribe opens a server-side stream that pushes configuration updates
+  // and quota assignments to the Router.
+  rpc Subscribe(SubscribeRequest) returns (stream ConfigUpdate);
+
+  // ReportHealth allows Routers to report their health status.
+  rpc ReportHealth(HealthReport) returns (HealthAck);
+}
+
+// SubscribeRequest is sent by a Router when connecting to the Coordinator.
+message SubscribeRequest {
+  // router_id is the unique identifier of the connecting router.
+  string router_id = 1;
+
+  // router_address is the router's network address for peer discovery.
+  string router_address = 2;
+
+  // metadata contains arbitrary key-value pairs (e.g. version, region).
+  map<string, string> metadata = 3;
+}
+
+// ConfigUpdate is a streamed message from Coordinator to Router.
+// It uses a oneof to carry different types of updates.
+message ConfigUpdate {
+  // version is a monotonically increasing config version for ordering.
+  uint64 version = 1;
+
+  oneof update {
+    // Full route configuration snapshot.
+    RouteSnapshot route_snapshot = 2;
+
+    // Quota assignment for this specific router.
+    QuotaAssignment quota_assignment = 4;
+
+    // Token invalidation event — instructs the router to clear
+    // stale-cached tokens after a rotation (audit §1.2).
+    TokenInvalidation token_invalidation = 5;
+  }
+
+  // Field 3 was SecretDistribution (removed — plaintext token distribution).
+  // Routers must use AuthService.GetEncryptedToken to obtain tokens.
+  reserved 3;
+  reserved "secret_distribution";
+}
+
+// TokenInvalidation tells routers to clear stale-cached tokens.
+// Pushed by the Coordinator when tokens are rotated in etcd (audit §1.2).
+message TokenInvalidation {
+  // token_refs lists the token reference names to invalidate.
+  // If empty, all tokens should be invalidated.
+  repeated string token_refs = 1;
+}
+
+// RouteSnapshot contains the full set of routes.
+message RouteSnapshot {
+  repeated RouteConfig routes = 1;
+}
+
+// RouteConfig describes a single route pushed to the router.
+message RouteConfig {
+  string route_id = 1;
+  string path = 2;
+  string method = 3;
+  string target_url = 4;
+
+  // Security settings (optional).
+  SecurityConfig security = 5;
+
+  // Traffic settings (optional).
+  TrafficConfig traffic = 6;
+
+  // Resilience profile name (optional).
+  string resilience_profile = 7;
+}
+
+// SecurityConfig pushed to routers — contains the header injection config.
+// Routers obtain decrypted tokens via AuthService.GetEncryptedToken + KMS decryption.
+message SecurityConfig {
+  string token_ref = 1;
+  string inject_header = 2;
+  string inject_format = 3;
+}
+
+// TrafficConfig describes rate limiting parameters.
+message TrafficConfig {
+  double rps = 1;
+  int32 burst = 2;
+  google.protobuf.Duration max_wait = 3;
+}
+
+// QuotaAssignment tells a router its allocated share of the global rate limits.
+message QuotaAssignment {
+  // Map of route_id -> assigned quota for this router.
+  map<string, RouteQuota> quotas = 1;
+}
+
+// RouteQuota is the per-router rate limit allocation for a single route.
+message RouteQuota {
+  double rps = 1;
+  int32 burst = 2;
+}
+
+// HealthReport is sent by a router to the coordinator.
+message HealthReport {
+  string router_id = 1;
+  bool healthy = 2;
+
+  // Current queue depths per route.
+  map<string, int64> queue_depths = 3;
+
+  // Metadata (uptime, version, etc.).
+  map<string, string> metadata = 4;
+}
+
+// HealthAck is the coordinator's response to a health report.
+message HealthAck {
+  bool acknowledged = 1;
+}

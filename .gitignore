@@ -1,0 +1,43 @@
+# Binaries
+/bin/
+/csar
+/csar-coordinator
+/mockapi
+
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+
+# Go workspace file
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config with secrets
+config.yaml
+config.yml
+*.pem
+*.key
+
+# Vendor (optional)
+# vendor/
+
+docs/
+
+audit*

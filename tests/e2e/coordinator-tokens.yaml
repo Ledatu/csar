@@ -1,0 +1,6 @@
+e2e_api_token:
+  encrypted_token: "BLa77PT8RPdp2lZB8hHeD+Nq71pu99GsaE1JudcvQhQVHA3VaFSJ0URm5uPobBIi1DSMEJbmGMaZipo="
+  kms_key_id: "e2e-key-1"
+e2e_extra_token:
+  encrypted_token: "COUY9sJX94hPqF65GgSZxBX2uWVF06Rn1oDeTxqgr4qHjgBizFg7FXQZ45tzmZqdC5FSaw=="
+  kms_key_id: "e2e-key-1"

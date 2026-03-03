@@ -1,0 +1,114 @@
+# .golangci.yml — strict linter configuration for CSAR
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    # Security
+    - gosec          # Security-oriented static analysis
+
+    # Error handling
+    - errcheck       # Check that errors are handled
+    - bodyclose      # Check HTTP response body is closed
+
+    # Code quality
+    - gocritic       # Highly extensible Go source code linter
+    - govet          # Examines Go source code (go vet)
+    - staticcheck    # Comprehensive Go static analysis
+    - ineffassign    # Detects ineffectual assignments
+    - unused         # Checks for unused constants, variables, functions, types
+
+    # Style consistency
+    - gofmt          # Checks whether code is gofmt-ed
+    - goimports      # Checks import ordering and formatting
+    - misspell       # Finds commonly misspelled words
+
+    # Bugs
+    - copyloopvar    # Detects places where loop variables are copied
+    - durationcheck  # Check for two durations multiplied together
+    - nilerr         # Finds code that returns nil even if err is not nil
+    - sqlclosecheck  # Checks that sql.Rows, sql.Stmt, sqlx.NamedStmt are closed
+    - exportloopref  # Checks for pointers to enclosing loop variables
+
+linters-settings:
+  gosec:
+    excludes:
+      # G114: net/http server missing timeouts — we set them explicitly in main.go
+      - G114
+    severity: medium
+    confidence: medium
+
+  gocritic:
+    enabled-checks:
+      - appendCombine
+      - argOrder
+      - badCond
+      - boolExprSimplify
+      - builtinShadow
+      - captLocal
+      - caseOrder
+      - defaultCaseOrder
+      - dupArg
+      - dupBranchBody
+      - dupCase
+      - dupSubExpr
+      - elseif
+      - exitAfterDefer
+      - flagDeref
+      - flagName
+      - ifElseChain
+      - nilValReturn
+      - rangeExprCopy
+      - rangeValCopy
+      - regexpMust
+      - sloppyLen
+      - switchTrue
+      - typeSwitchVar
+      - underef
+      - unlambda
+      - unslice
+      - valSwap
+
+  errcheck:
+    # Check deferred Close() calls too.
+    check-type-assertions: true
+    check-blank: false
+    exclude-functions:
+      # These are fire-and-forget writes (logging, metrics, HTTP error responses).
+      - fmt.Fprintf
+      - fmt.Fprintln
+      - (net/http.ResponseWriter).Write
+
+  bodyclose:
+    # Default settings are fine.
+
+issues:
+  # Don't skip any directories.
+  exclude-dirs: []
+
+  # Show all issues, not just unique per line.
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  exclude-rules:
+    # Test files are allowed more leniency.
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+        - bodyclose
+
+    # Generated protobuf code should not be linted.
+    - path: \.pb\.go$
+      linters:
+        - gocritic
+        - gosec
+        - govet
+        - errcheck
+        - staticcheck
+
+    # Allow deferred body.Close() without error check — standard Go pattern.
+    - text: "Error return value of .((os\\.)?std(out|err)\\..*|.*Close)"
+      linters:
+        - errcheck

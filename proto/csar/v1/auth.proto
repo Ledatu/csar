@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package csar.v1;
+
+option go_package = "github.com/ledatu/csar/proto/csar/v1;csarv1";
+
+// AuthService is the external-facing contract for token retrieval.
+// Any external system (Vault adapter, DB wrapper, file store) can implement this.
+// The Coordinator is the only consumer — Routers never talk to AuthService directly.
+service AuthService {
+  // GetEncryptedToken retrieves an encrypted token blob by its reference.
+  rpc GetEncryptedToken(TokenRequest) returns (TokenResponse);
+
+  // ListTokenRefs returns all available token references.
+  rpc ListTokenRefs(ListTokenRefsRequest) returns (ListTokenRefsResponse);
+}
+
+// TokenRequest identifies which encrypted token to fetch.
+message TokenRequest {
+  // token_ref is the logical reference name (e.g. "my_api_token", "orders_token").
+  string token_ref = 1;
+}
+
+// TokenResponse contains the encrypted token blob and metadata.
+message TokenResponse {
+  // token_ref echoes back the requested reference.
+  string token_ref = 1;
+
+  // encrypted_token is the encrypted blob (envelope-encrypted via KMS).
+  bytes encrypted_token = 2;
+
+  // kms_key_id is the KMS key that was used to encrypt this token.
+  string kms_key_id = 3;
+
+  // version is an opaque version string for cache invalidation.
+  string version = 4;
+}
+
+// ListTokenRefsRequest requests available token references.
+message ListTokenRefsRequest {}
+
+// ListTokenRefsResponse contains all available token references.
+message ListTokenRefsResponse {
+  repeated TokenRefInfo refs = 1;
+}
+
+// TokenRefInfo describes a single token reference.
+message TokenRefInfo {
+  // token_ref is the logical reference name.
+  string token_ref = 1;
+
+  // kms_key_id is the KMS key associated with this token.
+  string kms_key_id = 2;
+
+  // description is a human-readable description.
+  string description = 3;
+}

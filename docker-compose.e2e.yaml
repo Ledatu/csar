@@ -1,0 +1,107 @@
+# Docker Compose for CSAR E2E testing
+# Usage: docker compose -f docker-compose.e2e.yaml up --build --abort-on-container-exit
+name: csar-e2e
+
+services:
+  # etcd — persistent state store for coordinator
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.17
+    command:
+      - etcd
+      - --name=node1
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --initial-advertise-peer-urls=http://etcd:2380
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-cluster=node1=http://etcd:2380
+    expose:
+      - "2379"
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 3s
+
+  # Mock upstream API
+  mockapi:
+    build:
+      context: .
+      dockerfile: Dockerfile.mockapi
+    environment:
+      PORT: "9999"
+    expose:
+      - "9999"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9999/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
+
+  # CSAR Coordinator — serves encrypted tokens via gRPC AuthService
+  coordinator:
+    build:
+      context: .
+      dockerfile: Dockerfile.coordinator
+    volumes:
+      - ./tests/e2e/coordinator-tokens.yaml:/etc/csar/coordinator-tokens.yaml:ro
+    command: [
+      "-listen", ":9090",
+      "-allow-insecure-dev",
+      "-token-file", "/etc/csar/coordinator-tokens.yaml",
+      "-store", "etcd",
+      "-etcd-endpoints", "etcd:2379"
+    ]
+    expose:
+      - "9090"
+    depends_on:
+      etcd:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "true"]     # coordinator has no HTTP health endpoint; basic liveness
+      interval: 2s
+      timeout: 2s
+      retries: 5
+      start_period: 3s
+
+  # CSAR Router
+  csar:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./tests/e2e/csar-e2e.yaml:/etc/csar/config.yaml:ro
+    command: [
+      "-config", "/etc/csar/config.yaml",
+      "-metrics-addr", "",
+      "-kms-provider", "local",
+      "-kms-local-keys", "e2e-key-1=e2e-test-passphrase"
+    ]
+    expose:
+      - "8080"
+    depends_on:
+      mockapi:
+        condition: service_healthy
+      coordinator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
+
+  # E2E test runner
+  e2e:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+    environment:
+      CSAR_URL: "http://csar:8080"
+      MOCKAPI_URL: "http://mockapi:9999"
+    depends_on:
+      csar:
+        condition: service_healthy
+      mockapi:
+        condition: service_healthy

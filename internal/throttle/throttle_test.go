@@ -1,0 +1,226 @@
+package throttle
+
+import (
+	"context"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestThrottler_AllowsBurst(t *testing.T) {
+	// 1 RPS with burst of 5 should allow 5 immediate requests
+	th := New(1, 5, 10*time.Second)
+
+	for i := 0; i < 5; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		err := th.Wait(ctx)
+		cancel()
+		if err != nil {
+			t.Fatalf("request %d should be allowed within burst: %v", i, err)
+		}
+	}
+}
+
+func TestThrottler_SmoothsInsteadOfRejecting(t *testing.T) {
+	// 10 RPS, burst 1, max_wait 2s
+	// After burst is consumed, next request should wait ~100ms, not fail
+	th := New(10, 1, 2*time.Second)
+
+	// Consume the burst
+	ctx := context.Background()
+	if err := th.Wait(ctx); err != nil {
+		t.Fatalf("burst request failed: %v", err)
+	}
+
+	// Next request should wait but succeed (smoothing)
+	start := time.Now()
+	if err := th.Wait(ctx); err != nil {
+		t.Fatalf("smoothed request should succeed: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	// Should have waited roughly 100ms (1/10 RPS)
+	if elapsed < 50*time.Millisecond {
+		t.Errorf("expected wait ~100ms, got %v (too fast)", elapsed)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("expected wait ~100ms, got %v (too slow)", elapsed)
+	}
+}
+
+func TestThrottler_TimeoutExceeded(t *testing.T) {
+	// 1 RPS, burst 1, max_wait 50ms
+	th := New(1, 1, 50*time.Millisecond)
+
+	ctx := context.Background()
+	// Consume the burst
+	if err := th.Wait(ctx); err != nil {
+		t.Fatalf("burst request failed: %v", err)
+	}
+
+	// Next request: 1 RPS means ~1s wait, but max_wait is 50ms -> should fail
+	err := th.Wait(ctx)
+	if err == nil {
+		t.Fatal("should fail when max_wait exceeded")
+	}
+}
+
+func TestThrottler_ClientCancellation(t *testing.T) {
+	// 1 RPS, burst 1, max_wait 10s
+	th := New(1, 1, 10*time.Second)
+
+	ctx := context.Background()
+	if err := th.Wait(ctx); err != nil {
+		t.Fatalf("burst failed: %v", err)
+	}
+
+	// Cancel the client context immediately
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := th.Wait(ctx)
+	if err == nil {
+		t.Fatal("should fail when client context is cancelled")
+	}
+}
+
+func TestThrottler_WaitingCounter(t *testing.T) {
+	// Test that the Waiting() counter reflects queued requests.
+	// We test this indirectly: fire many concurrent requests at a slow limiter,
+	// and verify at least some of them are waiting simultaneously.
+	th := New(1, 1, 5*time.Second) // 1 RPS, burst 1
+
+	// Consume burst
+	if err := th.Wait(context.Background()); err != nil {
+		t.Fatalf("burst failed: %v", err)
+	}
+
+	const n = 10
+	var wg sync.WaitGroup
+	var maxWaiting atomic.Int64
+
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Sample the counter while we're about to wait
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			th.Wait(ctx) //nolint: errcheck
+		}()
+	}
+
+	// Poll the waiting counter — with 1 RPS and 10 goroutines, several should queue up
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			goto checkResult
+		case <-ticker.C:
+			w := th.Waiting()
+			for {
+				old := maxWaiting.Load()
+				if w <= old || maxWaiting.CompareAndSwap(old, w) {
+					break
+				}
+			}
+		}
+	}
+
+checkResult:
+	if maxWaiting.Load() < 2 {
+		t.Errorf("max concurrent Waiting() = %d, want >= 2", maxWaiting.Load())
+	}
+
+	if th.Waiting() != 0 {
+		t.Errorf("Waiting() = %d after completion, want 0", th.Waiting())
+	}
+}
+
+func TestThrottler_UpdateLimit(t *testing.T) {
+	// Start with very slow rate
+	th := New(0.1, 1, 2*time.Second)
+	// Consume burst
+	if err := th.Wait(context.Background()); err != nil {
+		t.Fatalf("burst failed: %v", err)
+	}
+
+	// Update to fast rate
+	th.UpdateLimit(1000, 10)
+
+	// Should now be fast
+	start := time.Now()
+	if err := th.Wait(context.Background()); err != nil {
+		t.Fatalf("should succeed after update: %v", err)
+	}
+	if time.Since(start) > 100*time.Millisecond {
+		t.Errorf("should be fast after limit update, took %v", time.Since(start))
+	}
+}
+
+func TestThrottler_ConcurrentAccess(t *testing.T) {
+	// 100 RPS, burst 10, max_wait 5s
+	th := New(100, 10, 5*time.Second)
+
+	var wg sync.WaitGroup
+	var succeeded atomic.Int64
+	var failed atomic.Int64
+
+	for i := 0; i < 50; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := th.Wait(ctx); err != nil {
+				failed.Add(1)
+			} else {
+				succeeded.Add(1)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// With 100 RPS and 2s timeout, all 50 should succeed
+	if succeeded.Load() != 50 {
+		t.Errorf("succeeded = %d, failed = %d, want all 50 to succeed", succeeded.Load(), failed.Load())
+	}
+}
+
+func TestThrottleManager_RegisterAndGet(t *testing.T) {
+	m := NewManager()
+
+	m.Register("GET:/api", 10, 5, time.Second)
+	m.Register("POST:/api", 20, 10, 2*time.Second)
+
+	th := m.Get("GET:/api")
+	if th == nil {
+		t.Fatal("Get(GET:/api) returned nil")
+	}
+
+	th = m.Get("POST:/api")
+	if th == nil {
+		t.Fatal("Get(POST:/api) returned nil")
+	}
+
+	th = m.Get("DELETE:/api")
+	if th != nil {
+		t.Fatal("Get(DELETE:/api) should return nil for unregistered key")
+	}
+}
+
+func TestRouteKey(t *testing.T) {
+	key := RouteKey("GET", "/api/v1")
+	if key != "GET:/api/v1" {
+		t.Errorf("RouteKey = %q, want %q", key, "GET:/api/v1")
+	}
+}

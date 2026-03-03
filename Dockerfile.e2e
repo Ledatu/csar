@@ -1,0 +1,11 @@
+# syntax=docker/dockerfile:1
+FROM golang:1.25-alpine
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# The test binary will be run with env vars pointing at the services
+ENTRYPOINT ["go", "test", "-v", "-count=1", "./tests/e2e/"]
