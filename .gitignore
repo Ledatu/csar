@@ -3,6 +3,7 @@
 /csar
 /csar-coordinator
 /mockapi
+/csar-helper
 
 *.exe
 *.exe~
