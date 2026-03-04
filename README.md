@@ -70,6 +70,8 @@ Each request passes through these stages in order:
 | **Coordinator** | Central gRPC control plane that pushes config updates, distributes encrypted secrets, allocates per-router quotas, and broadcasts token invalidation events. |
 | **Live Reload** | SIGHUP-based hot config reload without dropping active connections. |
 | **KMS** | Pluggable provider interface. Ships with a local (passphrase-based) provider for dev and Yandex Cloud KMS for production. Decrypt results are cached with configurable TTL. |
+| **Deployment Profiles** | Three built-in profiles (`dev-local`, `prod-single`, `prod-distributed`) enforce security constraints at startup — rejecting insecure coordinator, dev environment, local KMS, and missing TLS in production. Runtime-resolved KMS provider is also validated against the active profile. |
+| **csar-helper CLI** | Companion tool for day-2 operations: `db init` (schema creation), `db migrate` (import tokens from SQL/YAML/env/Vault/HTTP sources), `token encrypt` (KMS encryption), `init` (config scaffolding), and `validate` (profile rule checking). |
 | **Hardened Defaults** | Non-root Docker image, server timeouts, `MaxHeaderBytes`, TLS 1.3 for coordinator, fail-closed auth, ReDoS-safe route patterns. |
 
 ## Quick Start
@@ -78,13 +80,14 @@ Each request passes through these stages in order:
 
 - Go 1.25+
 - (Optional) Redis for distributed rate limiting
+- (Optional) PostgreSQL, MySQL, or SQLite for `csar-helper db` commands
 - (Optional) Docker & Docker Compose for E2E tests
 - (Optional) `protoc` + Go gRPC plugins for proto regeneration
 
 ### Build
 
 ```bash
-make build-all          # builds csar, csar-coordinator, and mockapi
+make build-all          # builds csar, csar-coordinator, csar-helper, and mockapi
 ```
 
 ### Run (Development)
@@ -130,6 +133,35 @@ orders_api_token:
   --client-ca /etc/csar/tls/client-ca.pem \
   --allowed-routers "router-1.csar.internal,router-2.csar.internal" \
   --token-file /etc/csar/tokens.yaml
+```
+
+### Token Management with `csar-helper`
+
+```bash
+# 1. Generate config scaffolding for your deployment profile
+csar-helper init --profile prod-single --output /etc/csar
+
+# 2. Create the token database schema
+csar-helper db init --dsn "postgres://user:pass@localhost/csar"
+
+# 3. Migrate tokens from a YAML file into the database
+csar-helper db migrate \
+  --source yaml \
+  --source-file tokens.yaml \
+  --target-dsn "postgres://user:pass@localhost/csar" \
+  --encrypt \
+  --kms-provider local \
+  --kms-key-id key-1 \
+  --kms-local-keys "key-1=my-passphrase"
+
+# 4. Encrypt a single token
+echo "my-secret-token" | csar-helper token encrypt \
+  --kms-provider local \
+  --kms-key-id key-1 \
+  --kms-local-keys "key-1=my-passphrase"
+
+# 5. Validate config against its declared profile
+csar-helper validate --config /etc/csar/config.yaml
 ```
 
 ## Configuration
@@ -275,6 +307,99 @@ When the coordinator is enabled, the router automatically subscribes to its gRPC
 | `--allow-insecure-dev` | `false` | Allow running without TLS |
 | `--token-file` | *(empty)* | YAML file with pre-encrypted token entries |
 
+### `csar-helper`
+
+#### `csar-helper db init`
+
+| Flag | Default | Description |
+|---|---|---|
+| `--dsn` | *(required)* | Target database DSN (e.g. `postgres://user:pass@host/db`) |
+| `--table` | `csar_tokens` | Table name for tokens |
+| `--if-not-exists` | `true` | Use `IF NOT EXISTS` in `CREATE TABLE` |
+| `--state-store` | `false` | Also create state store tables (`csar_routers`, `csar_quotas`) |
+
+#### `csar-helper db migrate`
+
+| Flag | Default | Description |
+|---|---|---|
+| `--source` | *(required)* | Source type: `sql`, `yaml`, `json`, `env`, `vault`, `http` |
+| `--target-dsn` | *(required)* | Target database DSN |
+| `--table` | `csar_tokens` | Target table name |
+| `--encrypt` | `false` | Encrypt plaintext tokens before inserting |
+| `--kms-provider` | `local` | KMS provider: `local` or `yandexapi` |
+| `--kms-key-id` | *(empty)* | KMS key ID for encryption |
+| `--kms-local-keys` | *(empty)* | Local KMS keys (`keyID=passphrase,...`) |
+| `--yandex-kms-endpoint` | *(empty)* | Yandex Cloud KMS API endpoint |
+| `--yandex-auth-mode` | `metadata` | Yandex auth mode: `iam_token`, `oauth_token`, `metadata` |
+| `--dry-run` | `false` | Show what would be migrated without writing |
+| `--upsert` | `true` | Update existing tokens (false = skip/error) |
+| `--source-dsn` | *(empty)* | SQL source DSN (for `--source=sql`) |
+| `--source-query` | *(empty)* | Custom SQL query for source |
+| `--source-file` | *(empty)* | Path to YAML/JSON file (for `--source=yaml`/`json`) |
+| `--env-prefix` | *(empty)* | Environment variable prefix (for `--source=env`) |
+| `--vault-addr` | *(empty)* | Vault address (for `--source=vault`) |
+| `--vault-token` | *(empty)* | Vault authentication token |
+| `--vault-path` | *(empty)* | Vault secret path |
+| `--http-url` | *(empty)* | HTTP API URL (for `--source=http`) |
+| `--http-header` | *(empty)* | Repeatable HTTP header in `"Key: Value"` format |
+| `--jq` | *(empty)* | Dot-separated path to extract tokens from JSON response |
+
+#### `csar-helper token encrypt`
+
+| Flag | Default | Description |
+|---|---|---|
+| `--plaintext` | *(stdin)* | Plaintext token to encrypt (reads from stdin if omitted) |
+| `--kms-provider` | `local` | KMS provider: `local` or `yandexapi` |
+| `--kms-key-id` | *(required)* | KMS key ID |
+| `--kms-local-keys` | *(empty)* | Local KMS keys (`keyID=passphrase,...`) |
+| `--yandex-kms-endpoint` | *(empty)* | Yandex Cloud KMS API endpoint |
+| `--yandex-auth-mode` | `metadata` | Yandex auth mode |
+
+Outputs the encrypted ciphertext as a base64-encoded string.
+
+#### `csar-helper init`
+
+| Flag | Default | Description |
+|---|---|---|
+| `--profile` | *(required)* | Deployment profile: `dev-local`, `prod-single`, `prod-distributed` |
+| `--output` | `.` | Output directory for generated files |
+| `--force` | `false` | Overwrite existing files (default: fail if file exists) |
+
+#### `csar-helper validate`
+
+| Flag | Default | Description |
+|---|---|---|
+| `--config` | `config.yaml` | Path to config file to validate |
+
+## Deployment Profiles
+
+CSAR supports three deployment profiles that enforce security and operational constraints at startup:
+
+| Profile | Use Case | Key Constraints |
+|---|---|---|
+| `dev-local` | Local development | No restrictions; allows `allow_insecure`, local KMS, dev environment. |
+| `prod-single` | Single-node production | Rejects `allow_insecure` coordinator, `dev` environment, local KMS with secure routes; requires TLS. |
+| `prod-distributed` | Multi-node production | All `prod-single` rules plus: requires coordinator enabled with valid address and CA file. |
+
+### Profile Enforcement
+
+Profile rules are enforced at two points:
+
+1. **Config validation** (`Config.Validate()`) — checks the YAML-declared settings against the profile constraints at startup.
+2. **Runtime KMS validation** (`ValidateResolvedKMSProvider()`) — checks the *actually resolved* KMS provider (CLI flag → config fallback) against profile rules. This prevents bypassing prod security by passing `--kms-provider=local` on the command line while the config declares a prod profile.
+
+### Scaffolding
+
+Generate profile-specific config templates with:
+
+```bash
+# Generate dev-local scaffolding
+csar-helper init --profile dev-local --output ./my-config
+
+# Generate prod-single scaffolding (fails if files exist; use --force to overwrite)
+csar-helper init --profile prod-single --output /etc/csar --force
+```
+
 ## Testing
 
 ```bash
@@ -289,15 +414,16 @@ make test-e2e          # Docker-based end-to-end tests
 
 | Package | What's Tested |
 |---|---|
-| `internal/config` | YAML parsing, validation (TLS, security, coordinator, access control, health check, CORS, cache, traffic backend) |
+| `internal/config` | YAML parsing, validation (TLS, security, coordinator, access control, health check, CORS, cache, traffic backend), profile enforcement, runtime KMS provider validation |
 | `internal/router` | Route matching, prefix boundary, IP allowlisting, `trust_proxy` isolation, fail-closed auth, streaming bypass, load balancing, CORS integration |
 | `internal/coordinator` | AuthService (token CRUD, gRPC errors), coordinator subscribe/health |
-| `internal/kms` | Encrypt/decrypt, cache (SHA-256 keys), local provider |
+| `internal/kms` | Encrypt/decrypt, cache (SHA-256 keys), local provider, Yandex Cloud KMS |
 | `internal/throttle` | Token bucket, burst, max wait timeout, quota updates |
 | `internal/resilience` | Circuit breaker state transitions |
 | `internal/proxy` | Reverse proxy forwarding, header handling, SSRF protection |
 | `pkg/middleware` | Auth injection, file fetcher, coordinator fetcher |
 | `tests/integration` | Full pipeline: proxy, throttle, circuit breaker, auth injection, coordinator gRPC E2E |
+| `internal/helper` | Token sources (YAML, SQL, env, Vault, HTTP), dialect detection, migration, encryption, profile validation |
 | `tests/e2e` | Docker Compose: mockapi → CSAR → test runner |
 
 ## Docker
@@ -318,6 +444,7 @@ make test-e2e
 cmd/
   csar/                   Router entry point
   csar-coordinator/       Coordinator entry point
+  csar-helper/            Helper CLI (db init, migrate, token encrypt, init, validate)
   mockapi/                Test upstream server
 internal/
   authn/                  JWT/JWKS validation
@@ -327,6 +454,7 @@ internal/
   coordinator/            gRPC coordinator + AuthService
   cors/                   CORS middleware
   dlp/                    Data Loss Prevention (response redaction)
+  helper/                 csar-helper logic (migration, encryption, profiles, token sources)
   kms/                    KMS provider interface + implementations
   loadbalancer/           Upstream pool load balancing + health checking
   logging/                Structured logging + secret redaction
@@ -356,6 +484,7 @@ tests/
 - **SSRF protection**: custom `DialContext` resolves DNS, validates each IP against blocked ranges, then connects directly to the validated address — preventing DNS rebinding attacks.
 - **ReDoS mitigation**: route regex patterns are length-limited and checked for catastrophic backtracking patterns at startup.
 - **DLP safeguards**: `max_response_size` prevents unbounded buffer growth; streaming connections bypass buffering entirely.
+- **Profile enforcement**: deployment profiles (`dev-local`, `prod-single`, `prod-distributed`) enforce security constraints at config validation time. The runtime-resolved KMS provider is also validated against the active profile, preventing local KMS bypass via CLI flags in production.
 - **TLS by default**: coordinator requires TLS unless explicitly overridden with `--allow-insecure-dev`. Router↔coordinator transport validates CA, cert/key pairs, and rejects contradictory configs at startup.
 - **mTLS + allowlist**: coordinator supports client certificate verification and CN/SAN-based router identity allowlisting.
 - **IP access control**: global and per-route CIDR allowlists with route-scoped `trust_proxy` (no cross-route bleed).
