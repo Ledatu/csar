@@ -41,3 +41,5 @@ config.yml
 docs/
 
 audit*
+
+.gocache/

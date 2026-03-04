@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"database/sql"
 	"encoding/base64"
 	"flag"
 	"fmt"
@@ -13,6 +14,10 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
+
+	// PostgreSQL driver — imported for side-effect registration with database/sql.
+	_ "github.com/lib/pq"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -37,7 +42,15 @@ func main() {
 	clientCA := flag.String("client-ca", "", "path to client CA certificate for mTLS (PEM)")
 	allowedRouters := flag.String("allowed-routers", "", "comma-separated list of allowed router CN/SAN identities (empty = allow all authenticated)")
 	allowInsecureDev := flag.Bool("allow-insecure-dev", false, "allow running without TLS (development only — NEVER use in production)")
+
+	// Token source flags — choose one: --token-file (dev) or --token-source=postgres (production).
 	tokenFile := flag.String("token-file", "", "path to YAML file with pre-encrypted token entries for AuthService")
+	tokenSourceFlag := flag.String("token-source", "", "token backend: \"file\" (default, uses --token-file), \"postgres\"")
+
+	// PostgreSQL flags (used when --token-source=postgres)
+	postgresDSN := flag.String("postgres-dsn", "", "PostgreSQL connection string (e.g. \"postgres://user:pass@host:5432/db?sslmode=require\")")
+	postgresMaxConns := flag.Int("postgres-max-conns", 10, "max open database connections")
+	postgresRefreshInterval := flag.Duration("postgres-refresh-interval", 30*time.Second, "how often to poll PostgreSQL for token changes (e.g. \"30s\")")
 
 	// State store flags
 	storeType := flag.String("store", "memory", "state store backend: memory, etcd")
@@ -92,25 +105,100 @@ func main() {
 	// Create AuthService for token delivery to routers
 	authSvc := coordinator.NewAuthService(logger)
 
-	if *tokenFile != "" {
-		entries, err := loadCoordinatorTokenFile(*tokenFile)
+	// Resolve token source: explicit flag > auto-detect from other flags.
+	resolvedTokenSource := *tokenSourceFlag
+	if resolvedTokenSource == "" {
+		switch {
+		case *postgresDSN != "":
+			resolvedTokenSource = "postgres"
+		case *tokenFile != "":
+			resolvedTokenSource = "file"
+		}
+	}
+
+	// tokenStore + refresher are kept in scope so we can start the refresh
+	// loop after the gRPC server is set up (it needs the coordinator
+	// reference for invalidation broadcasts).
+	var tokenStore coordinator.TokenStore
+	var refresher *coordinator.TokenRefresher
+
+	switch resolvedTokenSource {
+	case "postgres":
+		if *postgresDSN == "" {
+			logger.Error("--token-source=postgres requires --postgres-dsn")
+			os.Exit(1)
+		}
+		db, err := sql.Open("postgres", *postgresDSN)
 		if err != nil {
-			logger.Error("failed to load coordinator token file", "error", err)
+			logger.Error("failed to open postgres connection", "error", err)
+			os.Exit(1)
+		}
+		db.SetMaxOpenConns(*postgresMaxConns)
+		db.SetMaxIdleConns(*postgresMaxConns / 2)
+		db.SetConnMaxLifetime(5 * time.Minute)
+
+		// Verify connectivity.
+		pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := db.PingContext(pingCtx); err != nil {
+			pingCancel()
+			db.Close()
+			logger.Error("postgres ping failed", "error", err)
+			os.Exit(1)
+		}
+		pingCancel()
+
+		pgStore := coordinator.NewPostgresTokenStore(db, logger)
+		tokenStore = pgStore
+
+		// Initial load.
+		entries, err := pgStore.LoadAll(context.Background())
+		if err != nil {
+			logger.Error("failed to load tokens from token store", "error", err)
 			os.Exit(1)
 		}
 		loaded := authSvc.LoadTokensFromMap(entries)
-		logger.Info("loaded tokens into AuthService", "file", *tokenFile, "count", loaded)
+		logger.Info("loaded tokens from token store into AuthService",
+			"backend", "postgres",
+			"count", loaded,
+			"refresh_interval", *postgresRefreshInterval,
+		)
 
-		if err := authSvc.Validate(); err != nil {
-			logger.Error("AuthService token store is empty after loading token file — "+
-				"check file format and contents", "file", *tokenFile, "error", err)
-			os.Exit(1)
+		// Enable read-through: on cache miss the AuthService queries the
+		// store directly instead of returning NotFound. Critical when the
+		// polling interval is long (e.g. 4h) and new tokens appear between
+		// polls.
+		authSvc.SetBackend(tokenStore)
+
+		// Set up the backend-agnostic refresher.
+		refresher = coordinator.NewTokenRefresher(tokenStore, logger.With("component", "token_refresher"))
+		refresher.SeedVersions(entries)
+
+	case "file", "":
+		if *tokenFile != "" {
+			entries, err := loadCoordinatorTokenFile(*tokenFile)
+			if err != nil {
+				logger.Error("failed to load coordinator token file", "error", err)
+				os.Exit(1)
+			}
+			loaded := authSvc.LoadTokensFromMap(entries)
+			logger.Info("loaded tokens into AuthService", "file", *tokenFile, "count", loaded)
+
+			if err := authSvc.Validate(); err != nil {
+				logger.Error("AuthService token store is empty after loading token file — "+
+					"check file format and contents", "file", *tokenFile, "error", err)
+				os.Exit(1)
+			}
+		} else {
+			logger.Warn("WARNING: no token source configured — AuthService has no tokens loaded. " +
+				"All GetEncryptedToken RPCs will return NotFound. " +
+				"Use --token-source=postgres with --postgres-dsn, or --token-file to load pre-encrypted tokens.")
 		}
-	} else {
-		// No token file provided. Behavior depends on security mode.
-		logger.Warn("WARNING: no --token-file provided — AuthService has no tokens loaded. " +
-			"All GetEncryptedToken RPCs will return NotFound. " +
-			"Provide --token-file to load pre-encrypted tokens for routers.")
+
+	default:
+		logger.Error("unknown --token-source value; supported: \"file\", \"postgres\"",
+			"token_source", resolvedTokenSource,
+		)
+		os.Exit(1)
 	}
 
 	// Build gRPC server options
@@ -175,6 +263,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Start periodic token store refresh (if a backing store is configured).
+	// This polls the store for version changes and broadcasts invalidation
+	// events to all connected routers when tokens are rotated or removed.
+	ctx, ctxCancel := context.WithCancel(context.Background())
+	defer ctxCancel()
+
+	if refresher != nil {
+		go refresher.RunPeriodicRefresh(ctx, *postgresRefreshInterval, authSvc, coord)
+		logger.Info("token store refresh loop started", "interval", *postgresRefreshInterval)
+	}
+
 	// Graceful shutdown
 	go func() {
 		sigCh := make(chan os.Signal, 1)
@@ -182,6 +281,10 @@ func main() {
 		sig := <-sigCh
 
 		logger.Info("received signal, shutting down", "signal", sig)
+		ctxCancel() // stop refresh loop
+		if tokenStore != nil {
+			tokenStore.Close()
+		}
 		srv.GracefulStop()
 	}()
 

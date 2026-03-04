@@ -69,6 +69,7 @@ type Router struct {
 	responseCache    *cache.ResponseCache    // nil if no route uses response caching
 	ssrfProtection   *proxy.SSRFProtection   // nil if SSRF protection is disabled
 	throttleManager  *throttle.ThrottleManager // manages all per-route throttlers
+	pools            []*loadbalancer.Pool     // tracked for Close() cleanup on reload
 	globalCIDRs      []*net.IPNet            // parsed global access_control.allow_cidrs
 	hasGlobalACL     bool                    // true if global access_control is configured
 	globalTrustProxy bool                    // global default for trust_proxy (from access_control)
@@ -97,17 +98,29 @@ func WithSSRFProtection(p *proxy.SSRFProtection) Option {
 	return func(r *Router) { r.ssrfProtection = p }
 }
 
+// WithThrottleManager sets an externally-managed ThrottleManager.
+// Use this to share a single manager across router rebuilds (e.g. on SIGHUP)
+// so the coordinator client's quota updates continue to apply after reload.
+// If not provided, the router creates its own manager internally.
+func WithThrottleManager(tm *throttle.ThrottleManager) Option {
+	return func(r *Router) { r.throttleManager = tm }
+}
+
 // New creates a new Router from the given configuration.
 func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, error) {
 	r := &Router{
-		routes:          make(map[string]*route),
-		cfg:             cfg,
-		logger:          logger,
-		throttleManager: throttle.NewManager(),
+		routes: make(map[string]*route),
+		cfg:    cfg,
+		logger: logger,
 	}
 
 	for _, opt := range opts {
 		opt(r)
+	}
+
+	// Create a ThrottleManager if one was not injected via WithThrottleManager.
+	if r.throttleManager == nil {
+		r.throttleManager = throttle.NewManager()
 	}
 
 	// Parse global access control CIDRs
@@ -199,6 +212,7 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 			}
 
 			rt.loadBalancer = lb
+			r.pools = append(r.pools, lb)
 			logger.Info("load balancer enabled",
 				"route", key,
 				"strategy", string(strategy),
@@ -798,6 +812,32 @@ func (r *Router) ThrottleManager() *throttle.ThrottleManager {
 // (e.g. the coordinator client) can invalidate stale tokens on rotation events.
 func (r *Router) AuthInjector() *middleware.AuthInjector {
 	return r.authInjector
+}
+
+// RegisteredKeys returns the route keys that were registered with throttlers
+// during this router's construction. Use this to prune stale keys from a
+// shared ThrottleManager after a SIGHUP reload.
+func (r *Router) RegisteredKeys() []string {
+	keys := make([]string, 0, len(r.routes)+len(r.regexRoutes))
+	for k := range r.routes {
+		keys = append(keys, k)
+	}
+	for _, rt := range r.regexRoutes {
+		keys = append(keys, rt.routeKey)
+	}
+	return keys
+}
+
+// Close stops all background goroutines owned by this router (health checks, etc.).
+// Call this before discarding a router instance (e.g. on SIGHUP reload) to prevent
+// goroutine leaks. Safe to call multiple times.
+func (r *Router) Close() {
+	for _, p := range r.pools {
+		p.Stop()
+	}
+	r.logger.Debug("router closed, health check goroutines stopped",
+		"pools", len(r.pools),
+	)
 }
 
 // checkIPAccess returns true if the request is allowed by IP access control.

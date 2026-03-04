@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ledatu/csar/internal/kms"
 )
@@ -50,6 +51,18 @@ type AuthInjectorConfig struct {
 	TokenVersion string
 }
 
+// Default bounds for the stale-token cache (audit §3: prevent DoS via memory).
+const (
+	defaultMaxStaleEntries = 10_000
+	defaultStaleTTL        = 5 * time.Minute
+)
+
+// staleEntry is a timestamped cache entry for the stale-token fallback.
+type staleEntry struct {
+	value   string
+	addedAt time.Time
+}
+
 // AuthInjector is middleware that fetches, decrypts, and injects tokens
 // into upstream request headers.
 type AuthInjector struct {
@@ -59,18 +72,42 @@ type AuthInjector struct {
 
 	// staleCache holds the last successfully decrypted header value per token_ref.
 	// Used when on_kms_error = "serve_stale".
-	staleMu    sync.RWMutex
-	staleCache map[string]string // tokenRef -> last good header value
+	// Bounded by maxStaleEntries and staleTTL to prevent memory growth (audit §3).
+	staleMu         sync.RWMutex
+	staleCache      map[string]staleEntry
+	maxStaleEntries int
+	staleTTL        time.Duration
+}
+
+// AuthInjectorOption configures optional AuthInjector parameters.
+type AuthInjectorOption func(*AuthInjector)
+
+// WithMaxStaleEntries sets the maximum number of entries in the stale cache.
+// Default: 10,000.
+func WithMaxStaleEntries(n int) AuthInjectorOption {
+	return func(a *AuthInjector) { a.maxStaleEntries = n }
+}
+
+// WithStaleTTL sets the TTL for stale cache entries. Entries older than
+// this are considered expired and will not be served. Default: 5 minutes.
+func WithStaleTTL(d time.Duration) AuthInjectorOption {
+	return func(a *AuthInjector) { a.staleTTL = d }
 }
 
 // NewAuthInjector creates an AuthInjector middleware.
-func NewAuthInjector(fetcher TokenFetcher, provider kms.Provider, logger *slog.Logger) *AuthInjector {
-	return &AuthInjector{
-		fetcher:    fetcher,
-		provider:   provider,
-		logger:     logger,
-		staleCache: make(map[string]string),
+func NewAuthInjector(fetcher TokenFetcher, provider kms.Provider, logger *slog.Logger, opts ...AuthInjectorOption) *AuthInjector {
+	a := &AuthInjector{
+		fetcher:         fetcher,
+		provider:        provider,
+		logger:          logger,
+		staleCache:      make(map[string]staleEntry),
+		maxStaleEntries: defaultMaxStaleEntries,
+		staleTTL:        defaultStaleTTL,
 	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
 
 // Wrap returns an http.Handler that injects the decrypted token into
@@ -227,18 +264,55 @@ func resolveTokenRef(tokenRef string, r *http.Request) (string, error) {
 }
 
 // getStale returns the last successfully decrypted header value for a token ref,
-// or "" if none is cached.
+// or "" if none is cached or the entry has expired.
 func (a *AuthInjector) getStale(tokenRef string) string {
 	a.staleMu.RLock()
-	defer a.staleMu.RUnlock()
-	return a.staleCache[tokenRef]
+	entry, ok := a.staleCache[tokenRef]
+	a.staleMu.RUnlock()
+	if !ok {
+		return ""
+	}
+	// TTL check: discard expired entries.
+	if a.staleTTL > 0 && time.Since(entry.addedAt) > a.staleTTL {
+		// Lazy eviction: remove expired entry.
+		a.staleMu.Lock()
+		if e, exists := a.staleCache[tokenRef]; exists && e.addedAt == entry.addedAt {
+			delete(a.staleCache, tokenRef)
+		}
+		a.staleMu.Unlock()
+		return ""
+	}
+	return entry.value
 }
 
 // setStale stores the last successfully decrypted header value for a token ref.
+// Enforces a maximum cache size: if the limit is exceeded, expired entries are
+// swept first; if still over capacity, the entire cache is cleared.
 func (a *AuthInjector) setStale(tokenRef, headerValue string) {
 	a.staleMu.Lock()
-	a.staleCache[tokenRef] = headerValue
-	a.staleMu.Unlock()
+	defer a.staleMu.Unlock()
+
+	a.staleCache[tokenRef] = staleEntry{value: headerValue, addedAt: time.Now()}
+
+	// Bound check: if over capacity, evict expired entries then clear if needed.
+	if a.maxStaleEntries > 0 && len(a.staleCache) > a.maxStaleEntries {
+		now := time.Now()
+		for k, e := range a.staleCache {
+			if a.staleTTL > 0 && now.Sub(e.addedAt) > a.staleTTL {
+				delete(a.staleCache, k)
+			}
+		}
+		// If still over after TTL sweep, clear all — safety valve.
+		if len(a.staleCache) > a.maxStaleEntries {
+			a.logger.Warn("stale cache exceeded max entries after TTL sweep, clearing",
+				"size", len(a.staleCache),
+				"max", a.maxStaleEntries,
+			)
+			clear(a.staleCache)
+			// Re-insert the current entry (it's the freshest).
+			a.staleCache[tokenRef] = staleEntry{value: headerValue, addedAt: now}
+		}
+	}
 }
 
 // InvalidateToken clears the stale cache for a specific token_ref.

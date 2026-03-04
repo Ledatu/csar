@@ -224,3 +224,74 @@ func TestRouteKey(t *testing.T) {
 		t.Errorf("RouteKey = %q, want %q", key, "GET:/api/v1")
 	}
 }
+
+func TestThrottleManager_SyncKeys(t *testing.T) {
+	m := NewManager()
+
+	// Register several keys
+	m.Register("GET:/api/v1", 10, 5, time.Second)
+	m.Register("POST:/api/v1", 20, 10, time.Second)
+	m.Register("GET:/api/v2", 30, 15, time.Second)
+	m.Register("DELETE:/old-endpoint", 5, 2, time.Second)
+
+	// Verify all exist
+	if len(m.Keys()) != 4 {
+		t.Fatalf("expected 4 keys, got %d", len(m.Keys()))
+	}
+
+	// Sync with only a subset of keys (simulate a config reload that removed some routes)
+	activeKeys := []string{"GET:/api/v1", "GET:/api/v2"}
+	pruned := m.SyncKeys(activeKeys)
+
+	if pruned != 2 {
+		t.Errorf("expected 2 pruned, got %d", pruned)
+	}
+
+	if len(m.Keys()) != 2 {
+		t.Errorf("expected 2 keys remaining, got %d", len(m.Keys()))
+	}
+
+	// Active keys should still exist
+	if m.Get("GET:/api/v1") == nil {
+		t.Error("GET:/api/v1 should still exist")
+	}
+	if m.Get("GET:/api/v2") == nil {
+		t.Error("GET:/api/v2 should still exist")
+	}
+
+	// Pruned keys should be gone
+	if m.Get("POST:/api/v1") != nil {
+		t.Error("POST:/api/v1 should have been pruned")
+	}
+	if m.Get("DELETE:/old-endpoint") != nil {
+		t.Error("DELETE:/old-endpoint should have been pruned")
+	}
+}
+
+func TestThrottleManager_SyncKeys_EmptyActive(t *testing.T) {
+	m := NewManager()
+	m.Register("GET:/api", 10, 5, time.Second)
+	m.Register("POST:/api", 20, 10, time.Second)
+
+	pruned := m.SyncKeys(nil)
+	if pruned != 2 {
+		t.Errorf("expected 2 pruned, got %d", pruned)
+	}
+	if len(m.Keys()) != 0 {
+		t.Errorf("expected 0 keys, got %d", len(m.Keys()))
+	}
+}
+
+func TestThrottleManager_SyncKeys_AllActive(t *testing.T) {
+	m := NewManager()
+	m.Register("GET:/api", 10, 5, time.Second)
+	m.Register("POST:/api", 20, 10, time.Second)
+
+	pruned := m.SyncKeys([]string{"GET:/api", "POST:/api"})
+	if pruned != 0 {
+		t.Errorf("expected 0 pruned, got %d", pruned)
+	}
+	if len(m.Keys()) != 2 {
+		t.Errorf("expected 2 keys, got %d", len(m.Keys()))
+	}
+}

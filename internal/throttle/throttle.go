@@ -122,6 +122,26 @@ func (m *ThrottleManager) Keys() []string {
 	return keys
 }
 
+// SyncKeys prunes throttlers whose keys are not in the active set.
+// Call this after a SIGHUP-triggered router rebuild to clean up stale entries.
+// Returns the number of pruned throttlers.
+func (m *ThrottleManager) SyncKeys(activeKeys []string) int {
+	active := make(map[string]struct{}, len(activeKeys))
+	for _, k := range activeKeys {
+		active[k] = struct{}{}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pruned := 0
+	for k := range m.throttlers {
+		if _, ok := active[k]; !ok {
+			delete(m.throttlers, k)
+			pruned++
+		}
+	}
+	return pruned
+}
+
 // RouteKey generates a consistent key for a route.
 func RouteKey(method, path string) string {
 	return method + ":" + path

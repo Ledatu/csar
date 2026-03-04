@@ -81,13 +81,16 @@ func (c *Coordinator) Subscribe(req *csarv1.SubscribeRequest, stream csarv1.Coor
 	c.subscribers[req.RouterId] = sub
 	c.mu.Unlock()
 
-	// Clean up on disconnect
+	// Clean up on disconnect. Use a bounded timeout for the store
+	// operation instead of context.Background() (audit §6).
 	defer func() {
 		c.mu.Lock()
 		delete(c.subscribers, req.RouterId)
 		c.mu.Unlock()
 
-		c.store.UnregisterRouter(context.Background(), req.RouterId) //nolint:errcheck
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		c.store.UnregisterRouter(cleanupCtx, req.RouterId) //nolint:errcheck
 		c.logger.Info("router disconnected", "router_id", req.RouterId)
 
 		// Redistribute quotas when a router leaves
@@ -137,7 +140,9 @@ func (c *Coordinator) Subscribe(req *csarv1.SubscribeRequest, stream csarv1.Coor
 }
 
 // ReportHealth handles health reports from routers.
-func (c *Coordinator) ReportHealth(_ context.Context, req *csarv1.HealthReport) (*csarv1.HealthAck, error) {
+// Uses the incoming RPC context so store operations respect caller
+// cancellation and deadlines (audit §6).
+func (c *Coordinator) ReportHealth(ctx context.Context, req *csarv1.HealthReport) (*csarv1.HealthAck, error) {
 	if req.RouterId == "" {
 		return nil, status.Error(codes.InvalidArgument, "router_id is required")
 	}
@@ -147,8 +152,8 @@ func (c *Coordinator) ReportHealth(_ context.Context, req *csarv1.HealthReport) 
 		"healthy", req.Healthy,
 	)
 
-	// Update router health in state store
-	err := c.store.RegisterRouter(context.Background(), statestore.RouterInfo{
+	// Update router health in state store using the request context.
+	err := c.store.RegisterRouter(ctx, statestore.RouterInfo{
 		ID:            req.RouterId,
 		LastHeartbeat: time.Now(),
 		Healthy:       req.Healthy,

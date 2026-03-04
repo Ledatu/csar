@@ -1,5 +1,5 @@
-.PHONY: build build-coordinator build-mockapi run run-coordinator test clean fmt lint proto \
-	test-e2e test-e2e-down docker-build
+.PHONY: build build-coordinator build-mockapi build-helper run run-coordinator test clean fmt lint proto \
+	test-e2e test-e2e-down docker-build run-dev-dropin run-secure-local
 
 APP_NAME := csar
 COORD_NAME := csar-coordinator
@@ -16,7 +16,10 @@ build-coordinator:
 build-mockapi:
 	go build -o $(BUILD_DIR)/mockapi ./cmd/mockapi
 
-build-all: build build-coordinator build-mockapi
+build-helper:
+	go build -o $(BUILD_DIR)/csar-helper ./cmd/csar-helper
+
+build-all: build build-coordinator build-mockapi build-helper
 
 run: build
 	./$(BUILD_DIR)/$(APP_NAME) -config config.example.yaml
@@ -70,6 +73,14 @@ lint-security:
 # Run golangci-lint with strict config (.golangci.yml).
 lint-strict:
 	golangci-lint run --config .golangci.yml ./...
+
+run-dev-dropin: build
+	./$(BUILD_DIR)/$(APP_NAME) -config config.dev-local.yaml
+
+run-secure-local: build
+	./$(BUILD_DIR)/$(APP_NAME) -config config.prod-single.yaml \
+		-kms-provider local -kms-local-keys "dev-key=dev-passphrase" \
+		-token-file tokens.yaml
 
 proto:
 	protoc --go_out=. --go_opt=paths=source_relative \

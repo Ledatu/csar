@@ -8,6 +8,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -105,13 +106,21 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // director rewrites the request to point to the upstream target.
+//
+// Path policy (audit §5): if the target URL has a base path (e.g. "/v2"),
+// it is prepended to the original request path. Otherwise the original
+// request path is preserved unchanged. This behavior is consistent with
+// the load balancer director.
 func (rp *ReverseProxy) director(req *http.Request) {
 	req.URL.Scheme = rp.target.Scheme
 	req.URL.Host = rp.target.Host
-	req.URL.Path = rp.target.Path
 	req.Host = rp.target.Host
 
-	// Preserve the original query string
+	// Join target base path + original request path.
+	req.URL.Path = joinPaths(rp.target.Path, req.URL.Path)
+	req.URL.RawPath = "" // reset encoded path after join
+
+	// Merge query parameters.
 	if rp.target.RawQuery == "" || req.URL.RawQuery == "" {
 		req.URL.RawQuery = rp.target.RawQuery + req.URL.RawQuery
 	} else {
@@ -122,6 +131,18 @@ func (rp *ReverseProxy) director(req *http.Request) {
 	if _, ok := req.Header["User-Agent"]; !ok {
 		req.Header.Set("User-Agent", "")
 	}
+}
+
+// joinPaths joins a base path and a request path with a single slash separator.
+// Ensures no double slashes and handles empty base gracefully.
+func joinPaths(base, reqPath string) string {
+	if base == "" || base == "/" {
+		return reqPath
+	}
+	if reqPath == "" || reqPath == "/" {
+		return base
+	}
+	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(reqPath, "/")
 }
 
 // modifyResponse is a hook for future logging/metrics on responses.
