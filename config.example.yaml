@@ -262,6 +262,29 @@ paths:
   #       target_url: "https://users-service.internal/api"
   #       path_rewrite: "/users/$1"    # /api/v1/users/42 → /users/42
 
+  # --- Path Mode ---
+  # Controls how the upstream URL path is constructed.
+  # "replace" (default): target_url path replaces the incoming request path.
+  #   Use when target_url is the full upstream API path.
+  #   Example: route /api/v1/balance + target https://upstream-api.example.com/adv/v1/balance
+  #            → upstream: https://upstream-api.example.com/adv/v1/balance  (incoming path discarded)
+  # "append": incoming request path is appended to target_url path.
+  #   Use when target_url is a base prefix.
+  #   Example: route /api/{rest:.*} + target https://internal-api.local/v2 + path_mode: append
+  #            /api/users/42 → https://internal-api.local/v2/api/users/42
+  #
+  # /api/v1/balance:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://advert-api.example.com/adv/v1/balance"
+  #       # path_mode: "replace"    # default — target_url IS the upstream path
+  #
+  # /api/proxy/{rest:.*}:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://internal-api.local/v2"
+  #       path_mode: "append"       # incoming path appended to /v2
+
   # --- Inbound JWT/JWKS Validation ---
   # Validates bearer tokens against a JWKS endpoint before proxying.
   # /api/v1/protected:

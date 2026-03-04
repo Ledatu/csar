@@ -269,3 +269,153 @@ func TestBuildTLSTransport_InvalidCert(t *testing.T) {
 		t.Fatal("buildTLSTransport should fail for nonexistent cert files")
 	}
 }
+
+// ==========================================================================
+// Path Mode tests (Feature C)
+// ==========================================================================
+
+func TestDirector_ReplaceMode_Default(t *testing.T) {
+	// Default path_mode is "replace": target path replaces request path entirely.
+	var receivedPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	rp, err := New(upstream.URL + "/adv/v1/balance")
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/balance", nil)
+	rec := httptest.NewRecorder()
+	rp.ServeHTTP(rec, req)
+
+	// In replace mode, upstream should receive the target path, NOT the request path.
+	if receivedPath != "/adv/v1/balance" {
+		t.Errorf("upstream received path = %q, want %q (replace mode)", receivedPath, "/adv/v1/balance")
+	}
+}
+
+func TestDirector_ReplaceMode_Explicit(t *testing.T) {
+	// Explicitly setting path_mode="replace" should behave like the default.
+	var receivedPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	rp, err := New(upstream.URL+"/api/data", WithPathMode("replace"))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/gateway/api/data", nil)
+	rec := httptest.NewRecorder()
+	rp.ServeHTTP(rec, req)
+
+	if receivedPath != "/api/data" {
+		t.Errorf("upstream received path = %q, want %q", receivedPath, "/api/data")
+	}
+}
+
+func TestDirector_AppendMode(t *testing.T) {
+	// With path_mode="append", request path is appended to target base path.
+	var receivedPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	rp, err := New(upstream.URL+"/v2", WithPathMode("append"))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/users/42", nil)
+	rec := httptest.NewRecorder()
+	rp.ServeHTTP(rec, req)
+
+	// In append mode: /v2 + /api/users/42 = /v2/api/users/42
+	if receivedPath != "/v2/api/users/42" {
+		t.Errorf("upstream received path = %q, want %q (append mode)", receivedPath, "/v2/api/users/42")
+	}
+}
+
+func TestDirector_ReplaceMode_QueryPreserved(t *testing.T) {
+	// In replace mode, query parameters from the request should still be forwarded.
+	var receivedPath, receivedQuery string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		receivedQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	rp, err := New(upstream.URL + "/adv/v1/balance")
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/balance?seller_id=42&page=1", nil)
+	rec := httptest.NewRecorder()
+	rp.ServeHTTP(rec, req)
+
+	if receivedPath != "/adv/v1/balance" {
+		t.Errorf("path = %q, want %q", receivedPath, "/adv/v1/balance")
+	}
+	if receivedQuery != "seller_id=42&page=1" {
+		t.Errorf("query = %q, want %q", receivedQuery, "seller_id=42&page=1")
+	}
+}
+
+func TestDirector_AppendMode_EmptyBasePath(t *testing.T) {
+	// Append mode with no target base path should just use request path.
+	var receivedPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	rp, err := New(upstream.URL, WithPathMode("append"))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/foo/bar", nil)
+	rec := httptest.NewRecorder()
+	rp.ServeHTTP(rec, req)
+
+	if receivedPath != "/foo/bar" {
+		t.Errorf("path = %q, want %q", receivedPath, "/foo/bar")
+	}
+}
+
+func TestDirector_ReplaceMode_NoTargetPath(t *testing.T) {
+	// Replace mode with no target path — upstream gets empty path
+	// (which httputil normalizes to "/").
+	var receivedPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	rp, err := New(upstream.URL)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/some/path", nil)
+	rec := httptest.NewRecorder()
+	rp.ServeHTTP(rec, req)
+
+	// target has no path, so in replace mode we get "" which httputil normalizes to "/"
+	if receivedPath != "" && receivedPath != "/" {
+		t.Errorf("path = %q, want empty or /", receivedPath)
+	}
+}

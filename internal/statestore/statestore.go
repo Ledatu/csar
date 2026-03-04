@@ -48,7 +48,7 @@ type StateStore interface {
 
 // RouteEntry represents a route stored in the state store.
 type RouteEntry struct {
-	// ID is the unique route identifier (e.g. "GET:/wb/v1/products").
+	// ID is the unique route identifier (e.g. "GET:/api/v1/products").
 	ID string
 
 	// Path is the URL path pattern.

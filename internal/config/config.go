@@ -260,8 +260,18 @@ type BackendConfig struct {
 	// rewrites "/api/v1/users/42" → "/users/42".
 	PathRewrite string `yaml:"path_rewrite,omitempty" json:"path_rewrite,omitempty"`
 
+	// PathMode controls how the upstream URL path is constructed.
+	// "replace" (default): target_url path replaces the incoming request path entirely.
+	// "append": incoming request path is appended to target_url path.
+	PathMode string `yaml:"path_mode,omitempty" json:"path_mode,omitempty"`
+
 	// TLS configures the outbound TLS connection to this upstream.
 	TLS *BackendTLSConfig `yaml:"tls,omitempty" json:"tls,omitempty"`
+}
+
+// IsAppendPathMode returns true if path_mode is explicitly "append".
+func (bc *BackendConfig) IsAppendPathMode() bool {
+	return strings.EqualFold(bc.PathMode, "append")
 }
 
 // HealthCheckConfig configures active health checking for load-balanced targets.
@@ -1077,6 +1087,11 @@ func (c *Config) Validate() error {
 					return fmt.Errorf("path %s method %s: circuit_breaker profile %q not defined in circuit_breakers",
 						path, method, route.Resilience.CircuitBreaker)
 				}
+			}
+
+			// Validate path_mode
+			if pm := route.Backend.PathMode; pm != "" && pm != "replace" && pm != "append" {
+				return fmt.Errorf("path %s method %s: x-csar-backend.path_mode must be \"replace\" or \"append\", got %q", path, method, pm)
 			}
 
 			// Validate backend TLS config

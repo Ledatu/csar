@@ -1843,3 +1843,135 @@ func TestValidate_UnresolvedProfileRef_Error(t *testing.T) {
 		t.Errorf("error should mention ResolveSecurityProfiles(), got: %v", err)
 	}
 }
+
+// ==========================================================================
+// Path Mode tests (Feature C)
+// ==========================================================================
+
+func TestValidate_PathMode_Invalid(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{
+					TargetURL: "https://api.example.com",
+					PathMode:  "forward", // invalid
+				},
+			}},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should fail for unknown path_mode")
+	}
+	if !containsStr(err.Error(), "path_mode") {
+		t.Errorf("error should mention path_mode, got: %v", err)
+	}
+	if !containsStr(err.Error(), "forward") {
+		t.Errorf("error should mention the invalid value, got: %v", err)
+	}
+}
+
+func TestValidate_PathMode_Replace(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{
+					TargetURL: "https://api.example.com",
+					PathMode:  "replace",
+				},
+			}},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() should pass for path_mode=replace: %v", err)
+	}
+}
+
+func TestValidate_PathMode_Append(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{
+					TargetURL: "https://api.example.com",
+					PathMode:  "append",
+				},
+			}},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() should pass for path_mode=append: %v", err)
+	}
+}
+
+func TestValidate_PathMode_Empty_OK(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{
+					TargetURL: "https://api.example.com",
+					// PathMode: "" — default, should be fine
+				},
+			}},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() should pass with empty path_mode: %v", err)
+	}
+}
+
+func TestBackendConfig_IsAppendPathMode(t *testing.T) {
+	tests := []struct {
+		mode string
+		want bool
+	}{
+		{"append", true},
+		{"APPEND", true},
+		{"Append", true},
+		{"replace", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.mode, func(t *testing.T) {
+			bc := BackendConfig{PathMode: tt.mode}
+			if got := bc.IsAppendPathMode(); got != tt.want {
+				t.Errorf("IsAppendPathMode(%q) = %v, want %v", tt.mode, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoad_PathMode_FromYAML(t *testing.T) {
+	yamlStr := `
+listen_addr: ":8080"
+paths:
+  /api/v1/products:
+    get:
+      x-csar-backend:
+        target_url: "https://api.example.com/v1/products"
+        path_mode: "replace"
+  /api/proxy:
+    get:
+      x-csar-backend:
+        target_url: "https://internal-api.local/v2"
+        path_mode: "append"
+`
+	path := writeTemp(t, yamlStr)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	replaceRoute := cfg.Paths["/api/v1/products"]["get"]
+	if replaceRoute.Backend.PathMode != "replace" {
+		t.Errorf("PathMode = %q, want %q", replaceRoute.Backend.PathMode, "replace")
+	}
+
+	appendRoute := cfg.Paths["/api/proxy"]["get"]
+	if appendRoute.Backend.PathMode != "append" {
+		t.Errorf("PathMode = %q, want %q", appendRoute.Backend.PathMode, "append")
+	}
+}

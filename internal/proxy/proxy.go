@@ -27,8 +27,9 @@ type TLSConfig struct {
 
 // ReverseProxy handles forwarding requests to a single upstream service.
 type ReverseProxy struct {
-	target *url.URL
-	proxy  *httputil.ReverseProxy
+	target   *url.URL
+	proxy    *httputil.ReverseProxy
+	pathMode string // "replace" (default) or "append"
 }
 
 // Option configures the ReverseProxy.
@@ -38,6 +39,7 @@ type options struct {
 	tls            *TLSConfig
 	transport      http.RoundTripper
 	ssrfProtection *SSRFProtection
+	pathMode       string
 }
 
 // WithTLS configures outbound TLS for this proxy.
@@ -55,6 +57,13 @@ func WithSSRFProtection(p *SSRFProtection) Option {
 	return func(o *options) { o.ssrfProtection = p }
 }
 
+// WithPathMode sets the path handling mode for the proxy director.
+// "replace" (default): target_url path replaces the incoming request path entirely.
+// "append": incoming request path is appended to target_url path.
+func WithPathMode(mode string) Option {
+	return func(o *options) { o.pathMode = mode }
+}
+
 // New creates a new ReverseProxy for the given target URL.
 func New(targetURL string, opts ...Option) (*ReverseProxy, error) {
 	target, err := url.Parse(targetURL)
@@ -68,7 +77,8 @@ func New(targetURL string, opts ...Option) (*ReverseProxy, error) {
 	}
 
 	rp := &ReverseProxy{
-		target: target,
+		target:   target,
+		pathMode: o.pathMode,
 	}
 
 	proxy := &httputil.ReverseProxy{
@@ -107,18 +117,24 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // director rewrites the request to point to the upstream target.
 //
-// Path policy (audit §5): if the target URL has a base path (e.g. "/v2"),
-// it is prepended to the original request path. Otherwise the original
-// request path is preserved unchanged. This behavior is consistent with
-// the load balancer director.
+// Path modes:
+//   - "replace" (default): target_url path replaces the incoming request path
+//     entirely. Use when target_url contains the full upstream API path.
+//   - "append": incoming request path is appended to the target base path.
+//     Use when target_url is a base prefix (e.g. "https://api.example.com/v2").
 func (rp *ReverseProxy) director(req *http.Request) {
 	req.URL.Scheme = rp.target.Scheme
 	req.URL.Host = rp.target.Host
 	req.Host = rp.target.Host
 
-	// Join target base path + original request path.
-	req.URL.Path = joinPaths(rp.target.Path, req.URL.Path)
-	req.URL.RawPath = "" // reset encoded path after join
+	if rp.pathMode == "append" {
+		// Append mode: join target base path + incoming request path.
+		req.URL.Path = joinPaths(rp.target.Path, req.URL.Path)
+	} else {
+		// Replace mode (default): target path IS the upstream path.
+		req.URL.Path = rp.target.Path
+	}
+	req.URL.RawPath = "" // reset encoded path
 
 	// Merge query parameters.
 	if rp.target.RawQuery == "" || req.URL.RawQuery == "" {

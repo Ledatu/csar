@@ -91,6 +91,7 @@ type Pool struct {
 	counter  atomic.Uint64
 	logger   *slog.Logger
 	mu       sync.RWMutex
+	pathMode string // "replace" (default) or "append"
 
 	// Health checking state (parallel arrays to targets/proxies).
 	healthy  []atomic.Bool  // true = target is healthy (default: all true)
@@ -100,8 +101,18 @@ type Pool struct {
 	cancel   context.CancelFunc // cancels the health check goroutines
 }
 
+// PoolOption configures the load balancer Pool.
+type PoolOption func(*Pool)
+
+// WithPathMode sets the path handling mode for all directors in the pool.
+// "replace" (default): target_url path replaces the incoming request path.
+// "append": incoming request path is appended to target_url path.
+func WithPathMode(mode string) PoolOption {
+	return func(p *Pool) { p.pathMode = mode }
+}
+
 // New creates a new load balancer Pool from the given target URLs.
-func New(targetURLs []string, strategy Strategy, logger *slog.Logger) (*Pool, error) {
+func New(targetURLs []string, strategy Strategy, logger *slog.Logger, opts ...PoolOption) (*Pool, error) {
 	if len(targetURLs) == 0 {
 		return nil, fmt.Errorf("loadbalancer: at least one target URL is required")
 	}
@@ -113,6 +124,15 @@ func New(targetURLs []string, strategy Strategy, logger *slog.Logger) (*Pool, er
 	targets := make([]*url.URL, 0, len(targetURLs))
 	proxies := make([]*httputil.ReverseProxy, 0, len(targetURLs))
 
+	// Create a temporary pool to apply options (we need pathMode before building directors).
+	p := &Pool{
+		strategy: strategy,
+		logger:   logger,
+	}
+	for _, opt := range opts {
+		opt(p)
+	}
+
 	for _, rawURL := range targetURLs {
 		target, err := url.Parse(rawURL)
 		if err != nil {
@@ -121,7 +141,7 @@ func New(targetURLs []string, strategy Strategy, logger *slog.Logger) (*Pool, er
 		targets = append(targets, target)
 
 		rp := &httputil.ReverseProxy{
-			Director: newDirector(target),
+			Director: newDirector(target, p.pathMode),
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadGateway)
@@ -148,6 +168,7 @@ func New(targetURLs []string, strategy Strategy, logger *slog.Logger) (*Pool, er
 		healthy:   healthy,
 		failures:  failures,
 		successes: successes,
+		pathMode:  p.pathMode,
 	}, nil
 }
 
@@ -413,19 +434,25 @@ func (p *Pool) IsHealthy(idx int) bool {
 
 // newDirector creates a director function for a given target URL.
 //
-// Path policy (audit §5): if the target URL has a base path (e.g. "/v2"),
-// it is prepended to the original request path. Otherwise the original
-// request path is preserved unchanged. This is consistent with the proxy
-// director in internal/proxy.
-func newDirector(target *url.URL) func(*http.Request) {
+// Path modes:
+//   - "replace" (default): target_url path replaces the incoming request path
+//     entirely. Use when target_url contains the full upstream API path.
+//   - "append": incoming request path is appended to the target base path.
+//     Use when target_url is a base prefix (e.g. "https://api.example.com/v2").
+func newDirector(target *url.URL, pathMode string) func(*http.Request) {
 	return func(req *http.Request) {
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
 		req.Host = target.Host
 
-		// Join target base path + original request path.
-		req.URL.Path = joinPaths(target.Path, req.URL.Path)
-		req.URL.RawPath = "" // reset encoded path after join
+		if pathMode == "append" {
+			// Append mode: join target base path + incoming request path.
+			req.URL.Path = joinPaths(target.Path, req.URL.Path)
+		} else {
+			// Replace mode (default): target path IS the upstream path.
+			req.URL.Path = target.Path
+		}
+		req.URL.RawPath = "" // reset encoded path
 
 		// Merge query parameters.
 		if target.RawQuery == "" || req.URL.RawQuery == "" {

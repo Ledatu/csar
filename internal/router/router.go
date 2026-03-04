@@ -165,6 +165,11 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 		if r.ssrfProtection != nil {
 			proxyOpts = append(proxyOpts, proxy.WithSSRFProtection(r.ssrfProtection))
 		}
+		// Apply path_mode: "append" preserves old join behaviour; "replace" (default)
+		// makes the target_url path the exact upstream path.
+		if fr.Route.Backend.IsAppendPathMode() {
+			proxyOpts = append(proxyOpts, proxy.WithPathMode("append"))
+		}
 
 		rp, err := proxy.New(fr.Route.Backend.TargetURL, proxyOpts...)
 		if err != nil {
@@ -188,7 +193,11 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 			if fr.Route.Backend.LoadBalancer == "random" {
 				strategy = loadbalancer.Random
 			}
-			lb, err := loadbalancer.New(allTargets, strategy, logger)
+			var lbOpts []loadbalancer.PoolOption
+			if fr.Route.Backend.IsAppendPathMode() {
+				lbOpts = append(lbOpts, loadbalancer.WithPathMode("append"))
+			}
+			lb, err := loadbalancer.New(allTargets, strategy, logger, lbOpts...)
 			if err != nil {
 				return nil, fmt.Errorf("creating load balancer for %s %s: %w", fr.Method, fr.Path, err)
 			}
