@@ -102,6 +102,26 @@ circuit_breakers:
     timeout: "60s"
     failure_threshold: 2
 
+# --- Named Security Profiles ---
+# Define reusable security configurations here, then reference by name in routes.
+# Routes can use x-csar-security: "profile_name" (string) instead of repeating
+# the full security block. Inline fields override profile values (shallow merge).
+security_profiles:
+  upstream_bearer:
+    kms_key_id: "aj**************"
+    token_ref: "api_token_{query.account_id}"
+    inject_header: "Authorization"
+    inject_format: "Bearer {token}"
+    strip_token_params: true        # remove {query.*} params before proxying (default: true)
+    on_kms_error: "fail_closed"
+
+  upstream_content:
+    kms_key_id: "aj**************"
+    token_ref: "content_token_{query.account_id}"
+    inject_header: "Authorization"
+    inject_format: "Bearer {token}"
+    strip_token_params: true
+
 paths:
   # --- Multi-Credential + Dynamic Token Resolution ---
   # Demonstrates injecting a static client secret, a fixed User-Agent,
@@ -194,6 +214,45 @@ paths:
         max_wait: "15s"
       x-csar-resilience:
         circuit_breaker: "strict"
+
+  # --- Named Security Profile Reference ---
+  # Instead of repeating the full x-csar-security block, reference a named
+  # profile from security_profiles above. All routes sharing "upstream_bearer"
+  # get the same auth config. strip_token_params (default: true) automatically
+  # removes {query.*} params (e.g. account_id) before proxying to upstream.
+  /api/v1/catalog:
+    get:
+      x-csar-backend:
+        target_url: "https://catalog-api.example.com/v1/catalog"
+      x-csar-security: "upstream_bearer"            # ← string ref to profile
+      x-csar-traffic:
+        rps: 10.0
+        burst: 20
+        max_wait: "10s"
+
+  # --- Mixed: Profile Reference + Inline Override ---
+  # You can mix profile references with inline objects in an array.
+  # Inline fields override the profile's defaults (shallow merge).
+  # /api/v1/reports:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://reports-api.example.com/v1/reports"
+  #     x-csar-security:
+  #       - "upstream_bearer"                           # profile ref
+  #       - kms_key_id: "key-2"                         # inline extra credential
+  #         token_ref: "reports_api_secret"
+  #         inject_header: "X-Client-Secret"
+  #         inject_format: "{token}"
+  #
+  # Or override specific fields from a profile:
+  # /api/v1/analytics:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://analytics-api.example.com"
+  #     x-csar-security:
+  #       - profile: "upstream_bearer"
+  #         on_kms_error: "serve_stale"                 # override just this field
+  #         strip_token_params: false                   # keep query params for this route
 
   # --- Path Rewriting & Regex Routes ---
   # Use {name:pattern} for regex path variables. Back-references ($1, $2) in path_rewrite.

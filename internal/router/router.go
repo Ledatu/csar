@@ -559,7 +559,24 @@ func (r *Router) serveAfterAuth(w http.ResponseWriter, req *http.Request, rt *ro
 		// Build a handler chain: pipeline <- security[n-1] <- ... <- security[0].
 		// Each Wrap call creates a handler that resolves + injects one credential,
 		// then calls the next handler in the chain.
+		//
+		// Query param stripping: To avoid the multi-credential ordering bug where
+		// entry A strips a {query.*} param that entry B still needs, we collect
+		// ALL referenced query keys first, inject all credentials, then strip once
+		// before proxying (at the innermost handler, after all Wraps have run).
+
+		// Collect query params to strip from all security entries that have strip enabled.
+		var stripRefs []string
+		for _, sec := range rt.config.Security {
+			if sec.ShouldStripTokenParams() {
+				stripRefs = append(stripRefs, sec.TokenRef)
+			}
+		}
+		stripKeys := middleware.CollectQueryPlaceholders(stripRefs...)
+
 		var handler http.Handler = http.HandlerFunc(func(iw http.ResponseWriter, ir *http.Request) {
+			// Strip consumed query params ONCE, after all credentials have been resolved.
+			middleware.StripQueryKeys(ir, stripKeys)
 			r.servePipeline(iw, ir, rt)
 		})
 		for i := len(rt.config.Security) - 1; i >= 0; i-- {

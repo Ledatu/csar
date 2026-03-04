@@ -34,18 +34,42 @@ import (
 //	    inject_header: "X-Client-Secret"
 type SecurityConfigs []SecurityConfig
 
-// UnmarshalYAML handles both a single SecurityConfig object and an array.
+// UnmarshalYAML handles a bare string (profile reference), a single SecurityConfig
+// object, or an array of mixed strings and objects.
+//
+// Supported syntaxes:
+//
+//	x-csar-security: "my_profile"                  # bare string → profile ref
+//	x-csar-security: { kms_key_id: ..., ... }      # inline object (old syntax)
+//	x-csar-security:
+//	  - "my_profile"                                # profile ref in array
+//	  - { kms_key_id: ..., ... }                    # inline object in array
 func (sc *SecurityConfigs) UnmarshalYAML(value *yaml.Node) error {
-	// YAML sequence → decode as []SecurityConfig
+	// Scalar string → single profile reference.
+	if value.Kind == yaml.ScalarNode {
+		*sc = SecurityConfigs{{Profile: value.Value}}
+		return nil
+	}
+
+	// Sequence → mixed array of strings (profile refs) and mapping objects.
 	if value.Kind == yaml.SequenceNode {
 		var items []SecurityConfig
-		if err := value.Decode(&items); err != nil {
-			return err
+		for _, item := range value.Content {
+			if item.Kind == yaml.ScalarNode {
+				items = append(items, SecurityConfig{Profile: item.Value})
+			} else {
+				var cfg SecurityConfig
+				if err := item.Decode(&cfg); err != nil {
+					return err
+				}
+				items = append(items, cfg)
+			}
 		}
 		*sc = items
 		return nil
 	}
-	// YAML mapping → single object, wrap in a slice
+
+	// Mapping → single inline object, wrap in a slice.
 	var single SecurityConfig
 	if err := value.Decode(&single); err != nil {
 		return err
@@ -88,6 +112,10 @@ type Config struct {
 	// When set, routes with traffic.backend = "redis" use this connection
 	// for globally coordinated rate limiting across all CSAR pods.
 	Redis *RedisConfig `yaml:"redis,omitempty" json:"redis,omitempty"`
+
+	// SecurityProfiles defines named, reusable security configurations.
+	// Routes reference them via x-csar-security: "profile_name".
+	SecurityProfiles map[string]SecurityConfig `yaml:"security_profiles,omitempty" json:"security_profiles,omitempty"`
 
 	// CircuitBreakers defines named circuit breaker profiles.
 	CircuitBreakers map[string]CircuitBreakerProfile `yaml:"circuit_breakers,omitempty" json:"circuit_breakers,omitempty"`
@@ -289,6 +317,11 @@ type BackendTLSConfig struct {
 
 // SecurityConfig configures token injection via KMS.
 type SecurityConfig struct {
+	// Profile is an optional reference to a named security_profiles entry.
+	// When set, all other fields are inherited from the profile; any
+	// inline fields override the profile's values (merge, not replace).
+	Profile string `yaml:"profile,omitempty" json:"profile,omitempty"`
+
 	// KMSKeyID is the KMS key identifier for decryption.
 	KMSKeyID string `yaml:"kms_key_id" json:"kms_key_id"`
 
@@ -310,6 +343,20 @@ type SecurityConfig struct {
 	// "fail_closed" (default) — reject the request with 502.
 	// "serve_stale" — use the last successfully decrypted value from cache.
 	OnKMSError string `yaml:"on_kms_error,omitempty" json:"on_kms_error,omitempty"`
+
+	// StripTokenParams controls whether query parameters used in token_ref
+	// placeholders (e.g. {query.seller_id}) are removed from the request URL
+	// before forwarding to the upstream. Default: true (strip).
+	StripTokenParams *bool `yaml:"strip_token_params,omitempty" json:"strip_token_params,omitempty"`
+}
+
+// ShouldStripTokenParams returns whether query parameters referenced in
+// token_ref should be stripped before proxying. Default: true.
+func (s *SecurityConfig) ShouldStripTokenParams() bool {
+	if s.StripTokenParams == nil {
+		return true // default: strip
+	}
+	return *s.StripTokenParams
 }
 
 // SecurityPolicyConfig defines environment-level security constraints.
@@ -705,6 +752,12 @@ func Load(path string) (*Config, error) {
 	// configuration structure regardless of their content.
 	expandEnvInStruct(reflect.ValueOf(cfg).Elem())
 
+	// Resolve security profile references before validation so that
+	// Validate() sees the fully-resolved SecurityConfig for each route.
+	if err := cfg.ResolveSecurityProfiles(); err != nil {
+		return nil, fmt.Errorf("resolving security profiles: %w", err)
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validating config: %w", err)
 	}
@@ -814,6 +867,68 @@ var (
 	_ encoding.TextMarshaler   = logging.Secret{}
 	_ encoding.TextUnmarshaler = &logging.Secret{}
 )
+
+// ResolveSecurityProfiles replaces profile references with the full
+// SecurityConfig from security_profiles. Inline fields override profile
+// values (shallow merge). Must be called after Load / before Validate.
+func (c *Config) ResolveSecurityProfiles() error {
+	if len(c.SecurityProfiles) == 0 {
+		// Fast path: no profiles defined. Verify no route references one.
+		for path, methods := range c.Paths {
+			for method, route := range methods {
+				for _, sec := range route.Security {
+					if sec.Profile != "" {
+						return fmt.Errorf("path %s method %s: security profile %q referenced but no security_profiles defined",
+							path, method, sec.Profile)
+					}
+				}
+			}
+		}
+		return nil
+	}
+
+	for path, methods := range c.Paths {
+		for method, route := range methods {
+			for i, sec := range route.Security {
+				if sec.Profile == "" {
+					continue
+				}
+				base, ok := c.SecurityProfiles[sec.Profile]
+				if !ok {
+					return fmt.Errorf("path %s method %s: security profile %q not found in security_profiles",
+						path, method, sec.Profile)
+				}
+				// Merge: inline fields override profile defaults.
+				merged := base
+				if sec.KMSKeyID != "" {
+					merged.KMSKeyID = sec.KMSKeyID
+				}
+				if sec.TokenRef != "" {
+					merged.TokenRef = sec.TokenRef
+				}
+				if sec.InjectHeader != "" {
+					merged.InjectHeader = sec.InjectHeader
+				}
+				if sec.InjectFormat != "" {
+					merged.InjectFormat = sec.InjectFormat
+				}
+				if sec.OnKMSError != "" {
+					merged.OnKMSError = sec.OnKMSError
+				}
+				if sec.TokenVersion != "" {
+					merged.TokenVersion = sec.TokenVersion
+				}
+				if sec.StripTokenParams != nil {
+					merged.StripTokenParams = sec.StripTokenParams
+				}
+				merged.Profile = "" // clear ref after resolution
+				route.Security[i] = merged
+			}
+			methods[method] = route
+		}
+	}
+	return nil
+}
 
 // Validate checks the configuration for required fields and consistency.
 func (c *Config) Validate() error {
@@ -980,6 +1095,14 @@ func (c *Config) Validate() error {
 			idx := fmt.Sprintf("[%d]", i)
 			if len(route.Security) == 1 {
 				idx = "" // cleaner error messages for the common single-entry case
+			}
+			// Belt-and-suspenders: catch unresolved profile references.
+			// ResolveSecurityProfiles() should have been called before Validate(),
+			// but if a caller built a Config programmatically and forgot to
+			// resolve, produce a clear diagnostic instead of a confusing field error.
+			if sec.Profile != "" {
+				return fmt.Errorf("path %s method %s: x-csar-security%s has unresolved profile reference %q — "+
+					"call ResolveSecurityProfiles() before Validate()", path, method, idx, sec.Profile)
 			}
 			if sec.TokenRef == "" {
 				return fmt.Errorf("path %s method %s: x-csar-security%s.token_ref is required when security config is present", path, method, idx)

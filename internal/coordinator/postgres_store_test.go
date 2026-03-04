@@ -27,12 +27,12 @@ func TestPostgresTokenStore_RefreshAndDiff_DetectsChanges(t *testing.T) {
 
 	// Simulate initial token load (as if from PG).
 	initial := map[string]TokenEntry{
-		"wb_token_shop1": {
+		"api_token_shop1": {
 			EncryptedToken: []byte("enc-blob-1"),
 			KMSKeyID:       "key-aaa",
 			Version:        "1",
 		},
-		"wb_token_shop2": {
+		"api_token_shop2": {
 			EncryptedToken: []byte("enc-blob-2"),
 			KMSKeyID:       "key-bbb",
 			Version:        "1",
@@ -44,7 +44,7 @@ func TestPostgresTokenStore_RefreshAndDiff_DetectsChanges(t *testing.T) {
 	}
 
 	// Verify tokens are served correctly.
-	resp, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("wb_token_shop1"))
+	resp, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("api_token_shop1"))
 	if err != nil {
 		t.Fatalf("GetEncryptedToken: %v", err)
 	}
@@ -57,12 +57,12 @@ func TestPostgresTokenStore_RefreshAndDiff_DetectsChanges(t *testing.T) {
 
 	// Simulate a token rotation: version bump on shop1, shop2 unchanged.
 	updated := map[string]TokenEntry{
-		"wb_token_shop1": {
+		"api_token_shop1": {
 			EncryptedToken: []byte("enc-blob-1-rotated"),
 			KMSKeyID:       "key-aaa",
 			Version:        "2", // bumped
 		},
-		"wb_token_shop2": {
+		"api_token_shop2": {
 			EncryptedToken: []byte("enc-blob-2"),
 			KMSKeyID:       "key-bbb",
 			Version:        "1", // unchanged
@@ -74,7 +74,7 @@ func TestPostgresTokenStore_RefreshAndDiff_DetectsChanges(t *testing.T) {
 	}
 
 	// Verify rotated token is served.
-	resp2, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("wb_token_shop1"))
+	resp2, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("api_token_shop1"))
 	if err != nil {
 		t.Fatalf("GetEncryptedToken after rotation: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestAuthService_ReadThrough_CacheMiss(t *testing.T) {
 	// Backend has a token that the in-memory store doesn't.
 	backend := &mockTokenStore{
 		tokens: map[string]TokenEntry{
-			"wb_token_new_seller": {
+			"api_token_new_seller": {
 				EncryptedToken: []byte("enc-new"),
 				KMSKeyID:       "key-xyz",
 				Version:        "1",
@@ -280,7 +280,7 @@ func TestAuthService_ReadThrough_CacheMiss(t *testing.T) {
 	authSvc.SetBackend(backend)
 
 	// First request — should read-through to backend.
-	resp, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("wb_token_new_seller"))
+	resp, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("api_token_new_seller"))
 	if err != nil {
 		t.Fatalf("expected read-through to succeed, got: %v", err)
 	}
@@ -293,9 +293,9 @@ func TestAuthService_ReadThrough_CacheMiss(t *testing.T) {
 
 	// Second request — should be served from cache (no backend hit).
 	// Remove from backend to prove it comes from cache.
-	delete(backend.tokens, "wb_token_new_seller")
+	delete(backend.tokens, "api_token_new_seller")
 
-	resp2, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("wb_token_new_seller"))
+	resp2, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("api_token_new_seller"))
 	if err != nil {
 		t.Fatalf("expected cached response, got: %v", err)
 	}
@@ -313,7 +313,7 @@ func TestAuthService_ReadThrough_BackendMiss_ReturnsNotFound(t *testing.T) {
 	authSvc.SetBackend(backend)
 
 	// Should return gRPC NotFound when neither cache nor backend has it.
-	_, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("wb_token_nonexistent"))
+	_, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("api_token_nonexistent"))
 	if err == nil {
 		t.Fatal("expected NotFound error, got nil")
 	}
@@ -330,7 +330,7 @@ func TestAuthService_ReadThrough_TransientError_ReturnsUnavailable(t *testing.T)
 	backend := &failingTokenStore{err: fmt.Errorf("connection refused")}
 	authSvc.SetBackend(backend)
 
-	_, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("wb_token_x"))
+	_, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("api_token_x"))
 	if err == nil {
 		t.Fatal("expected Unavailable error, got nil")
 	}
@@ -357,7 +357,7 @@ func TestAuthService_ReadThrough_NoBackend(t *testing.T) {
 	authSvc := NewAuthService(logger)
 
 	// No backend configured — should return NotFound on cache miss.
-	_, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("wb_token_missing"))
+	_, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("api_token_missing"))
 	if err == nil {
 		t.Fatal("expected NotFound error, got nil")
 	}
@@ -367,7 +367,7 @@ func TestAuthService_RemoveToken(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	authSvc := NewAuthService(logger)
 
-	authSvc.LoadToken("wb_token_to_remove", TokenEntry{
+	authSvc.LoadToken("api_token_to_remove", TokenEntry{
 		EncryptedToken: []byte("enc-blob"),
 		KMSKeyID:       "key-1",
 		Version:        "1",
@@ -379,13 +379,13 @@ func TestAuthService_RemoveToken(t *testing.T) {
 	}
 
 	// Remove it.
-	authSvc.RemoveToken("wb_token_to_remove")
+	authSvc.RemoveToken("api_token_to_remove")
 	if authSvc.TokenCount() != 0 {
 		t.Fatalf("expected 0 tokens after removal, got %d", authSvc.TokenCount())
 	}
 
 	// GetEncryptedToken should return NotFound.
-	_, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("wb_token_to_remove"))
+	_, err := authSvc.GetEncryptedToken(context.Background(), tokenReq("api_token_to_remove"))
 	if err == nil {
 		t.Fatal("expected NotFound error after removal")
 	}

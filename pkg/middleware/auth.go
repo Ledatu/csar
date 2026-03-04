@@ -263,6 +263,64 @@ func resolveTokenRef(tokenRef string, r *http.Request) (string, error) {
 	return resolved, nil
 }
 
+// stripReferencedQueryParams removes query parameters referenced by {query.*}
+// placeholders in tokenRef from the request URL. {header.*} placeholders are
+// NOT stripped (the header is already replaced by inject_header).
+func stripReferencedQueryParams(tokenRef string, r *http.Request) {
+	matches := placeholderRe.FindAllStringSubmatch(tokenRef, -1)
+	if len(matches) == 0 {
+		return
+	}
+	q := r.URL.Query()
+	changed := false
+	for _, m := range matches {
+		if m[1] == "query" {
+			q.Del(m[2])
+			changed = true
+		}
+	}
+	if changed {
+		r.URL.RawQuery = q.Encode()
+	}
+}
+
+// CollectQueryPlaceholders returns the set of query parameter names referenced
+// by {query.*} placeholders across multiple token_ref strings. The caller can
+// then strip them all at once after every credential has been resolved.
+//
+// This avoids the multi-credential ordering bug where entry A strips a query
+// param that entry B still needs for its own token_ref resolution.
+func CollectQueryPlaceholders(tokenRefs ...string) map[string]struct{} {
+	keys := make(map[string]struct{})
+	for _, ref := range tokenRefs {
+		matches := placeholderRe.FindAllStringSubmatch(ref, -1)
+		for _, m := range matches {
+			if m[1] == "query" {
+				keys[m[2]] = struct{}{}
+			}
+		}
+	}
+	return keys
+}
+
+// StripQueryKeys removes the given query parameter keys from the request URL.
+func StripQueryKeys(r *http.Request, keys map[string]struct{}) {
+	if len(keys) == 0 {
+		return
+	}
+	q := r.URL.Query()
+	changed := false
+	for k := range keys {
+		if q.Has(k) {
+			q.Del(k)
+			changed = true
+		}
+	}
+	if changed {
+		r.URL.RawQuery = q.Encode()
+	}
+}
+
 // getStale returns the last successfully decrypted header value for a token ref,
 // or "" if none is cached or the entry has expired.
 func (a *AuthInjector) getStale(tokenRef string) string {
