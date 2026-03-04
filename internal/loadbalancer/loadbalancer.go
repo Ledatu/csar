@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -411,18 +412,22 @@ func (p *Pool) IsHealthy(idx int) bool {
 }
 
 // newDirector creates a director function for a given target URL.
+//
+// Path policy (audit §5): if the target URL has a base path (e.g. "/v2"),
+// it is prepended to the original request path. Otherwise the original
+// request path is preserved unchanged. This is consistent with the proxy
+// director in internal/proxy.
 func newDirector(target *url.URL) func(*http.Request) {
 	return func(req *http.Request) {
 		req.URL.Scheme = target.Scheme
 		req.URL.Host = target.Host
 		req.Host = target.Host
 
-		// Preserve the original request path (don't override with target path).
-		if target.Path != "" && target.Path != "/" {
-			req.URL.Path = target.Path
-		}
+		// Join target base path + original request path.
+		req.URL.Path = joinPaths(target.Path, req.URL.Path)
+		req.URL.RawPath = "" // reset encoded path after join
 
-		// Preserve the original query string.
+		// Merge query parameters.
 		if target.RawQuery == "" || req.URL.RawQuery == "" {
 			req.URL.RawQuery = target.RawQuery + req.URL.RawQuery
 		} else {
@@ -433,4 +438,16 @@ func newDirector(target *url.URL) func(*http.Request) {
 			req.Header.Set("User-Agent", "")
 		}
 	}
+}
+
+// joinPaths joins a base path and a request path with a single slash separator.
+// Ensures no double slashes and handles empty base gracefully.
+func joinPaths(base, reqPath string) string {
+	if base == "" || base == "/" {
+		return reqPath
+	}
+	if reqPath == "" || reqPath == "/" {
+		return base
+	}
+	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(reqPath, "/")
 }
