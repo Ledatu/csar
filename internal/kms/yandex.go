@@ -15,14 +15,12 @@ import (
 	"github.com/ledatu/csar/internal/logging"
 )
 
-// Default Yandex Cloud KMS endpoint for SymmetricCrypto REST API.
-// The SymmetricCrypto service (encrypt/decrypt) uses the same base as SymmetricKey CRUD.
-//
-// Encrypt:  POST {endpoint}/{keyId}:encrypt
-// Decrypt:  POST {endpoint}/{keyId}:decrypt
+// Default Yandex Cloud KMS base endpoint for the SymmetricCrypto REST API.
+// Encrypt and Decrypt append "/{keyId}:encrypt" / "/{keyId}:decrypt" at call time.
 //
 // Reference: https://yandex.cloud/en/docs/kms/api-ref/SymmetricCrypto/
-const defaultYandexKMSEndpoint = "https://kms.api.cloud.yandex.net/kms/v1/keys"
+const defaultYandexKMSEndpoint = "https://kms.yandex/kms/v1/keys"
+
 
 // YandexAPIProvider implements Provider by calling the Yandex Cloud KMS
 // symmetric crypto REST API directly over HTTPS — no go-sdk dependency.
