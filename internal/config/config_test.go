@@ -3,9 +3,11 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/ledatu/csar/internal/logging"
 	yamlPkg "gopkg.in/yaml.v3"
 )
 
@@ -826,6 +828,386 @@ func TestValidate_Coordinator_Disabled_TLSFieldsWarning(t *testing.T) {
 	}
 }
 
+// ==========================================================================
+// Profile enforcement tests (audit follow-up §1, §2)
+// ==========================================================================
+
+func TestValidate_Profile_UnknownProfile(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "production-mega", // invalid
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{Backend: BackendConfig{TargetURL: "http://localhost"}}},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should fail for unknown profile")
+	}
+	if !containsStr(err.Error(), "unknown profile") {
+		t.Errorf("error should mention unknown profile, got: %v", err)
+	}
+}
+
+func TestValidate_Profile_DevLocal_AllowsEverything(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "dev-local",
+		Coordinator: CoordinatorConfig{
+			AllowInsecure: true, // should be allowed
+		},
+		SecurityPolicy: &SecurityPolicyConfig{
+			Environment: "dev",
+		},
+		KMS: &KMSConfig{
+			Provider: "local",
+		},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{TargetURL: "http://localhost"},
+				Security: SecurityConfigs{
+					{TokenRef: "tok", KMSKeyID: "key-1", InjectHeader: "Authorization"},
+				},
+			}},
+		},
+	}
+	err := cfg.Validate()
+	if err != nil {
+		t.Fatalf("Validate() should pass for dev-local with relaxed settings: %v", err)
+	}
+}
+
+func TestValidate_Profile_ProdSingle_RejectsInsecureCoordinator(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "prod-single",
+		Coordinator: CoordinatorConfig{
+			AllowInsecure: true,
+		},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{Backend: BackendConfig{TargetURL: "http://localhost"}}},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should fail for prod-single with allow_insecure")
+	}
+	if !containsStr(err.Error(), "allow_insecure") {
+		t.Errorf("error should mention allow_insecure, got: %v", err)
+	}
+}
+
+func TestValidate_Profile_ProdSingle_RejectsDevEnvironment(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "prod-single",
+		SecurityPolicy: &SecurityPolicyConfig{
+			Environment: "dev",
+		},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{Backend: BackendConfig{TargetURL: "http://localhost"}}},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should fail for prod-single with dev environment")
+	}
+	if !containsStr(err.Error(), "dev") {
+		t.Errorf("error should mention dev, got: %v", err)
+	}
+}
+
+func TestValidate_Profile_ProdSingle_RequiresTLSForSecureRoutes(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "prod-single",
+		// No TLS configured
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{TargetURL: "https://api.example.com"},
+				Security: SecurityConfigs{
+					{TokenRef: "tok", KMSKeyID: "key-1", InjectHeader: "Authorization"},
+				},
+			}},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should fail for prod-single with secure routes but no TLS")
+	}
+	if !containsStr(err.Error(), "TLS") {
+		t.Errorf("error should mention TLS, got: %v", err)
+	}
+}
+
+func TestValidate_Profile_ProdSingle_RejectsLocalKMS(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "prod-single",
+		TLS:        &TLSConfig{CertFile: "cert.pem", KeyFile: "key.pem"},
+		KMS: &KMSConfig{
+			Provider: "local",
+		},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{TargetURL: "https://api.example.com"},
+				Security: SecurityConfigs{
+					{TokenRef: "tok", KMSKeyID: "key-1", InjectHeader: "Authorization"},
+				},
+			}},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should fail for prod-single with local KMS and secure routes")
+	}
+	if !containsStr(err.Error(), "local") {
+		t.Errorf("error should mention local, got: %v", err)
+	}
+}
+
+func TestValidate_Profile_ProdSingle_PassesWithValidConfig(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "prod-single",
+		TLS:        &TLSConfig{CertFile: "cert.pem", KeyFile: "key.pem"},
+		KMS: &KMSConfig{
+			Provider: "yandexapi",
+			Yandex:   &YandexKMSConfig{AuthMode: "metadata"},
+		},
+		SecurityPolicy: &SecurityPolicyConfig{
+			Environment: "prod",
+		},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{TargetURL: "https://api.example.com"},
+				Security: SecurityConfigs{
+					{TokenRef: "tok", KMSKeyID: "key-1", InjectHeader: "Authorization"},
+				},
+			}},
+		},
+	}
+	err := cfg.Validate()
+	if err != nil {
+		t.Fatalf("Validate() should pass for valid prod-single config: %v", err)
+	}
+}
+
+func TestValidate_Profile_ProdDistributed_RequiresCoordinatorEnabled(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "prod-distributed",
+		TLS:        &TLSConfig{CertFile: "cert.pem", KeyFile: "key.pem"},
+		Coordinator: CoordinatorConfig{
+			Enabled: false, // must be true
+		},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{Backend: BackendConfig{TargetURL: "http://localhost"}}},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should fail for prod-distributed without coordinator enabled")
+	}
+	if !containsStr(err.Error(), "coordinator") {
+		t.Errorf("error should mention coordinator, got: %v", err)
+	}
+}
+
+func TestValidate_Profile_ProdDistributed_RequiresCoordinatorAddress(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "prod-distributed",
+		TLS:        &TLSConfig{CertFile: "cert.pem", KeyFile: "key.pem"},
+		Coordinator: CoordinatorConfig{
+			Enabled: true,
+			Address: "", // must be non-empty
+			CAFile:  "/path/to/ca.pem",
+		},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{Backend: BackendConfig{TargetURL: "http://localhost"}}},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should fail for prod-distributed without coordinator address")
+	}
+}
+
+func TestValidate_Profile_ProdDistributed_RequiresCoordinatorCA(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "prod-distributed",
+		TLS:        &TLSConfig{CertFile: "cert.pem", KeyFile: "key.pem"},
+		Coordinator: CoordinatorConfig{
+			Enabled: true,
+			Address: "coord:9090",
+			CAFile:  "", // must be non-empty
+		},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{Backend: BackendConfig{TargetURL: "http://localhost"}}},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should fail for prod-distributed without coordinator CA")
+	}
+	if !containsStr(err.Error(), "ca_file") {
+		t.Errorf("error should mention ca_file, got: %v", err)
+	}
+}
+
+func TestValidate_Profile_ProdDistributed_PassesWithValidConfig(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "prod-distributed",
+		TLS:        &TLSConfig{CertFile: "cert.pem", KeyFile: "key.pem"},
+		KMS: &KMSConfig{
+			Provider: "yandexapi",
+			Yandex:   &YandexKMSConfig{AuthMode: "metadata"},
+		},
+		Coordinator: CoordinatorConfig{
+			Enabled: true,
+			Address: "coord:9090",
+			CAFile:  "/path/to/ca.pem",
+		},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{TargetURL: "https://api.example.com"},
+				Security: SecurityConfigs{
+					{TokenRef: "tok", KMSKeyID: "key-1", InjectHeader: "Authorization"},
+				},
+			}},
+		},
+	}
+	err := cfg.Validate()
+	if err != nil {
+		t.Fatalf("Validate() should pass for valid prod-distributed config: %v", err)
+	}
+}
+
+// ==========================================================================
+// ValidateResolvedKMSProvider tests (audit follow-up §1)
+// ==========================================================================
+
+func TestValidateResolvedKMSProvider_NoProfile(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{TargetURL: "https://api.example.com"},
+				Security: SecurityConfigs{
+					{TokenRef: "tok", KMSKeyID: "key-1", InjectHeader: "Authorization"},
+				},
+			}},
+		},
+	}
+	// No profile — local should be fine
+	if err := cfg.ValidateResolvedKMSProvider("local"); err != nil {
+		t.Fatalf("should pass with no profile: %v", err)
+	}
+}
+
+func TestValidateResolvedKMSProvider_DevLocal_AllowsLocal(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "dev-local",
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{TargetURL: "https://api.example.com"},
+				Security: SecurityConfigs{
+					{TokenRef: "tok", KMSKeyID: "key-1", InjectHeader: "Authorization"},
+				},
+			}},
+		},
+	}
+	if err := cfg.ValidateResolvedKMSProvider("local"); err != nil {
+		t.Fatalf("should pass for dev-local with local KMS: %v", err)
+	}
+}
+
+func TestValidateResolvedKMSProvider_ProdSingle_RejectsLocal(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "prod-single",
+		TLS:        &TLSConfig{CertFile: "cert.pem", KeyFile: "key.pem"},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{TargetURL: "https://api.example.com"},
+				Security: SecurityConfigs{
+					{TokenRef: "tok", KMSKeyID: "key-1", InjectHeader: "Authorization"},
+				},
+			}},
+		},
+	}
+	err := cfg.ValidateResolvedKMSProvider("local")
+	if err == nil {
+		t.Fatal("should fail for prod-single with resolved local KMS and secure routes")
+	}
+	if !containsStr(err.Error(), "local") {
+		t.Errorf("error should mention local, got: %v", err)
+	}
+}
+
+func TestValidateResolvedKMSProvider_ProdSingle_AllowsYandex(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "prod-single",
+		TLS:        &TLSConfig{CertFile: "cert.pem", KeyFile: "key.pem"},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{TargetURL: "https://api.example.com"},
+				Security: SecurityConfigs{
+					{TokenRef: "tok", KMSKeyID: "key-1", InjectHeader: "Authorization"},
+				},
+			}},
+		},
+	}
+	if err := cfg.ValidateResolvedKMSProvider("yandexapi"); err != nil {
+		t.Fatalf("should pass for prod-single with yandexapi: %v", err)
+	}
+}
+
+func TestValidateResolvedKMSProvider_ProdSingle_LocalOK_NoSecureRoutes(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "prod-single",
+		TLS:        &TLSConfig{CertFile: "cert.pem", KeyFile: "key.pem"},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{Backend: BackendConfig{TargetURL: "http://localhost"}}},
+		},
+	}
+	// local KMS is only rejected when there are secure routes
+	if err := cfg.ValidateResolvedKMSProvider("local"); err != nil {
+		t.Fatalf("should pass when no secure routes exist: %v", err)
+	}
+}
+
+func TestValidateResolvedKMSProvider_ProdDistributed_RejectsLocal(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Profile:    "prod-distributed",
+		TLS:        &TLSConfig{CertFile: "cert.pem", KeyFile: "key.pem"},
+		Coordinator: CoordinatorConfig{
+			Enabled: true,
+			Address: "coord:9090",
+			CAFile:  "/path/to/ca.pem",
+		},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{TargetURL: "https://api.example.com"},
+				Security: SecurityConfigs{
+					{TokenRef: "tok", KMSKeyID: "key-1", InjectHeader: "Authorization"},
+				},
+			}},
+		},
+	}
+	err := cfg.ValidateResolvedKMSProvider("local")
+	if err == nil {
+		t.Fatal("should fail for prod-distributed with resolved local KMS and secure routes")
+	}
+}
+
 func containsStr(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
@@ -910,4 +1292,231 @@ func TestValidate_InsecureSkipVerify_NonProd_Warning(t *testing.T) {
 	if len(cfg.Warnings) == 0 {
 		t.Error("expected warning for insecure_skip_verify on HTTPS upstream")
 	}
+}
+
+// ==========================================================================
+// safeExpandEnv tests (audit §1 — os.ExpandEnv bug)
+// ==========================================================================
+
+func TestSafeExpandEnv_PreservesBackReferences(t *testing.T) {
+	// $1, $2 are regex back-references in path_rewrite — they must survive.
+	input := `path_rewrite: "/users/$1/orders/$2"`
+	result := safeExpandEnv(input)
+	if result != input {
+		t.Errorf("safeExpandEnv mangled back-references:\n  got:  %s\n  want: %s", result, input)
+	}
+}
+
+func TestSafeExpandEnv_ExpandsRealEnvVars(t *testing.T) {
+	t.Setenv("CSAR_TEST_DSN", "postgres://u:p@h:5432/db")
+	input := `dsn: "${CSAR_TEST_DSN}"`
+	want := `dsn: "postgres://u:p@h:5432/db"`
+	result := safeExpandEnv(input)
+	if result != want {
+		t.Errorf("safeExpandEnv didn't expand env var:\n  got:  %s\n  want: %s", result, want)
+	}
+}
+
+func TestSafeExpandEnv_MixedBackRefsAndEnvVars(t *testing.T) {
+	t.Setenv("CSAR_TEST_HOST", "api.example.com")
+	input := `target_url: "https://${CSAR_TEST_HOST}/users/$1"`
+	want := `target_url: "https://api.example.com/users/$1"`
+	result := safeExpandEnv(input)
+	if result != want {
+		t.Errorf("safeExpandEnv:\n  got:  %s\n  want: %s", result, want)
+	}
+}
+
+func TestSafeExpandEnv_UndefinedEnvVar(t *testing.T) {
+	// Undefined env vars expand to empty string (same as os.ExpandEnv).
+	input := `value: "${CSAR_UNDEFINED_VAR_12345}"`
+	want := `value: ""`
+	result := safeExpandEnv(input)
+	if result != want {
+		t.Errorf("safeExpandEnv:\n  got:  %s\n  want: %s", result, want)
+	}
+}
+
+func TestSafeExpandEnv_BracedDigitPreserved(t *testing.T) {
+	// ${1} is parsed by os.Expand as variable "1" — our mapping returns "$1",
+	// so the back-reference value is preserved even though braces are consumed.
+	input := `path_rewrite: "/items/${1}/detail"`
+	want := `path_rewrite: "/items/$1/detail"`
+	result := safeExpandEnv(input)
+	if result != want {
+		t.Errorf("safeExpandEnv:\n  got:  %s\n  want: %s", result, want)
+	}
+}
+
+func TestLoad_EnvVarExpansion_PostUnmarshal(t *testing.T) {
+	t.Setenv("CSAR_TEST_TARGET_URL", "https://api.example.com/v2")
+	t.Setenv("CSAR_TEST_LISTEN", ":9090")
+	yamlStr := `
+listen_addr: "${CSAR_TEST_LISTEN}"
+paths:
+  /api:
+    get:
+      x-csar-backend:
+        target_url: "${CSAR_TEST_TARGET_URL}"
+      x-csar-headers:
+        X-Custom: "prefix-${CSAR_TEST_LISTEN}-suffix"
+`
+	path := writeTemp(t, yamlStr)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.ListenAddr != ":9090" {
+		t.Errorf("ListenAddr = %q, want env-expanded %q", cfg.ListenAddr, ":9090")
+	}
+
+	route := cfg.Paths["/api"]["get"]
+	if route.Backend.TargetURL != "https://api.example.com/v2" {
+		t.Errorf("TargetURL = %q, want env-expanded value", route.Backend.TargetURL)
+	}
+	wantHeader := "prefix-:9090-suffix"
+	if route.Headers["X-Custom"] != wantHeader {
+		t.Errorf("Header X-Custom = %q, want %q", route.Headers["X-Custom"], wantHeader)
+	}
+}
+
+func TestLoad_YAMLInjection_Safe(t *testing.T) {
+	// Set an env var containing YAML control characters.
+	// With pre-unmarshal expansion, this would corrupt the YAML structure.
+	// With post-unmarshal expansion, it is safely contained in the string field.
+	t.Setenv("CSAR_TEST_EVIL", "value\"\nmalicious_field: true")
+	yamlStr := `
+listen_addr: ":8080"
+paths:
+  /api:
+    get:
+      x-csar-backend:
+        target_url: "https://api.example.com"
+      x-csar-headers:
+        X-Custom: "${CSAR_TEST_EVIL}"
+`
+	path := writeTemp(t, yamlStr)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	route := cfg.Paths["/api"]["get"]
+	got := route.Headers["X-Custom"]
+	want := "value\"\nmalicious_field: true"
+	if got != want {
+		t.Errorf("Header value = %q, want %q (env var should be safely injected post-unmarshal)", got, want)
+	}
+
+	// Verify the malicious field did NOT create a new config key.
+	if cfg.ListenAddr != ":8080" {
+		t.Errorf("ListenAddr = %q, want %q (should not be altered by injection)", cfg.ListenAddr, ":8080")
+	}
+}
+
+func TestExpandEnvInStruct_StringFields(t *testing.T) {
+	t.Setenv("CSAR_TEST_ADDR", "localhost:9090")
+	t.Setenv("CSAR_TEST_URL", "https://backend.local")
+
+	cfg := &Config{
+		ListenAddr: "${CSAR_TEST_ADDR}",
+		Paths: map[string]PathConfig{
+			"/test": {
+				"get": RouteConfig{
+					Backend: BackendConfig{
+						TargetURL:   "${CSAR_TEST_URL}",
+						PathRewrite: "/users/$1", // back-reference must survive
+					},
+				},
+			},
+		},
+	}
+
+	expandEnvInStruct(reflect.ValueOf(cfg).Elem())
+
+	if cfg.ListenAddr != "localhost:9090" {
+		t.Errorf("ListenAddr = %q, want %q", cfg.ListenAddr, "localhost:9090")
+	}
+
+	route := cfg.Paths["/test"]["get"]
+	if route.Backend.TargetURL != "https://backend.local" {
+		t.Errorf("TargetURL = %q, want %q", route.Backend.TargetURL, "https://backend.local")
+	}
+	if route.Backend.PathRewrite != "/users/$1" {
+		t.Errorf("PathRewrite = %q, want %q (back-reference mangled)", route.Backend.PathRewrite, "/users/$1")
+	}
+}
+
+func TestExpandEnvInStruct_SecretFields(t *testing.T) {
+	t.Setenv("CSAR_TEST_SECRET", "s3cret-password")
+
+	cfg := &Config{
+		Redis: &RedisConfig{
+			Address:  "localhost:6379",
+			Password: logging.NewSecret("${CSAR_TEST_SECRET}"),
+		},
+	}
+
+	expandEnvInStruct(reflect.ValueOf(cfg).Elem())
+
+	if cfg.Redis.Password.Plaintext() != "s3cret-password" {
+		t.Errorf("Redis.Password = %q, want env-expanded value", cfg.Redis.Password.Plaintext())
+	}
+}
+
+func TestExpandEnvInStruct_SliceFields(t *testing.T) {
+	t.Setenv("CSAR_TEST_HOST1", "host1.example.com")
+	t.Setenv("CSAR_TEST_HOST2", "host2.example.com")
+
+	cfg := &Config{
+		Paths: map[string]PathConfig{
+			"/test": {
+				"get": RouteConfig{
+					Backend: BackendConfig{
+						TargetURL: "https://primary.example.com",
+						Targets:   []string{"https://${CSAR_TEST_HOST1}", "https://${CSAR_TEST_HOST2}"},
+					},
+				},
+			},
+		},
+	}
+
+	expandEnvInStruct(reflect.ValueOf(cfg).Elem())
+
+	route := cfg.Paths["/test"]["get"]
+	if route.Backend.Targets[0] != "https://host1.example.com" {
+		t.Errorf("Targets[0] = %q, want expanded", route.Backend.Targets[0])
+	}
+	if route.Backend.Targets[1] != "https://host2.example.com" {
+		t.Errorf("Targets[1] = %q, want expanded", route.Backend.Targets[1])
+	}
+}
+
+func TestLoad_PathRewrite_BackReferencesPreserved(t *testing.T) {
+	yamlStr := `
+listen_addr: ":8080"
+paths:
+  /api/v1/users/{id:[0-9]+}:
+    get:
+      x-csar-backend:
+        target_url: "https://users.internal"
+        path_rewrite: "/users/$1"
+`
+	path := writeTemp(t, yamlStr)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	for _, methods := range cfg.Paths {
+		for _, route := range methods {
+			if route.Backend.PathRewrite != "/users/$1" {
+				t.Errorf("path_rewrite = %q, want %q (back-reference mangled by env expansion)",
+					route.Backend.PathRewrite, "/users/$1")
+			}
+			return
+		}
+	}
+	t.Fatal("no route found in config")
 }

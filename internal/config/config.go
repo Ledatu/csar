@@ -1,9 +1,11 @@
 package config
 
 import (
+	"encoding"
 	"fmt"
 	"net"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
@@ -54,6 +56,10 @@ func (sc *SecurityConfigs) UnmarshalYAML(value *yaml.Node) error {
 
 // Config holds the top-level CSAR configuration.
 type Config struct {
+	// Profile declares the deployment profile: "dev-local", "prod-single", "prod-distributed", or "".
+	// Used by csar-helper validate to enforce profile-specific constraints.
+	Profile string `yaml:"profile,omitempty" json:"profile,omitempty"`
+
 	// Listen address for the API gateway.
 	ListenAddr string `yaml:"listen_addr" json:"listen_addr"`
 
@@ -674,6 +680,15 @@ func (d Duration) MarshalYAML() (interface{}, error) {
 }
 
 // Load reads and parses a CSAR config file from the given path.
+// Environment variables referenced as ${VAR} or $VAR in string fields are
+// expanded after YAML parsing, so secrets can be injected without hardcoding.
+//
+// Expansion happens post-unmarshal to prevent YAML injection: even if an
+// environment variable contains YAML control characters (quotes, newlines,
+// colons), they cannot corrupt the parsed configuration structure.
+//
+// Bare numeric references like $1, $2 are NOT expanded — these are regex
+// back-references used in path_rewrite rules and must be preserved.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -685,12 +700,120 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config file %s: %w", path, err)
 	}
 
+	// Expand environment variables in all string fields AFTER unmarshaling.
+	// This is YAML-injection-safe: env var values cannot alter the parsed
+	// configuration structure regardless of their content.
+	expandEnvInStruct(reflect.ValueOf(cfg).Elem())
+
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validating config: %w", err)
 	}
 
 	return cfg, nil
 }
+
+// safeExpandEnv expands ${VAR} and $VAR references to environment variables,
+// but preserves bare numeric references ($1, $2, ${1}, etc.) which are regex
+// back-references in path_rewrite rules.
+//
+// POSIX environment variable names never start with a digit, so any variable
+// reference whose name begins with 0-9 is a back-reference, not an env var.
+func safeExpandEnv(s string) string {
+	return os.Expand(s, func(key string) string {
+		if len(key) == 0 {
+			return ""
+		}
+		// Skip keys that start with a digit — these are regex
+		// back-references ($1, $2, …), not environment variables.
+		if key[0] >= '0' && key[0] <= '9' {
+			return "$" + key
+		}
+		return os.Getenv(key)
+	})
+}
+
+// expandEnvInStruct recursively walks a struct value and expands environment
+// variable references (${VAR}, $VAR) in all string fields.
+//
+// This is YAML-injection-safe: expansion happens after YAML unmarshaling, so
+// an env var value containing YAML control characters (quotes, newlines,
+// colons) cannot alter the parsed configuration structure.
+//
+// Supported types:
+//   - string fields: expanded directly via safeExpandEnv.
+//   - Types implementing encoding.TextMarshaler + encoding.TextUnmarshaler
+//     (e.g. logging.Secret): expanded through those interfaces.
+//   - map[K]V: values are recursively expanded (keys are left as-is).
+//   - []T: elements are recursively expanded.
+//   - Nested structs and pointers: recursed into.
+//   - Non-string primitives (bool, int, float, etc.): skipped.
+func expandEnvInStruct(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.Ptr:
+		if !v.IsNil() {
+			expandEnvInStruct(v.Elem())
+		}
+
+	case reflect.Struct:
+		// Types implementing TextMarshaler + TextUnmarshaler (e.g. logging.Secret)
+		// are expanded through those interfaces instead of recursing into fields.
+		if v.CanAddr() {
+			ptr := v.Addr().Interface()
+			tm, isTM := ptr.(encoding.TextMarshaler)
+			tu, isTU := ptr.(encoding.TextUnmarshaler)
+			if isTM && isTU {
+				text, err := tm.MarshalText()
+				if err == nil && len(text) > 0 {
+					expanded := safeExpandEnv(string(text))
+					if expanded != string(text) {
+						_ = tu.UnmarshalText([]byte(expanded))
+					}
+				}
+				return
+			}
+		}
+		for i := 0; i < v.NumField(); i++ {
+			f := v.Field(i)
+			if f.CanSet() {
+				expandEnvInStruct(f)
+			}
+		}
+
+	case reflect.String:
+		if v.CanSet() {
+			expanded := safeExpandEnv(v.String())
+			if expanded != v.String() {
+				v.SetString(expanded)
+			}
+		}
+
+	case reflect.Map:
+		if v.IsNil() {
+			return
+		}
+		keys := v.MapKeys()
+		for _, key := range keys {
+			origVal := v.MapIndex(key)
+			// Map values are not addressable — copy to a settable location,
+			// expand, and write back.
+			cp := reflect.New(origVal.Type()).Elem()
+			cp.Set(origVal)
+			expandEnvInStruct(cp)
+			v.SetMapIndex(key, cp)
+		}
+
+	case reflect.Slice:
+		for i := 0; i < v.Len(); i++ {
+			expandEnvInStruct(v.Index(i))
+		}
+	}
+}
+
+// Compile-time check: ensure logging.Secret is handled via text interfaces.
+var (
+	_ encoding.TextMarshaler   = logging.Secret{}
+	_ encoding.TextUnmarshaler = &logging.Secret{}
+)
 
 // Validate checks the configuration for required fields and consistency.
 func (c *Config) Validate() error {
@@ -699,6 +822,27 @@ func (c *Config) Validate() error {
 	}
 	if len(c.Paths) == 0 {
 		return fmt.Errorf("at least one path must be defined")
+	}
+
+	// --- Profile enforcement ---
+	// If a deployment profile is declared, enforce its rules at startup so that
+	// running `cmd/csar` directly cannot bypass profile guardrails (audit §3).
+	if c.Profile != "" {
+		validProfiles := []string{"dev-local", "prod-single", "prod-distributed"}
+		profileValid := false
+		for _, p := range validProfiles {
+			if c.Profile == p {
+				profileValid = true
+				break
+			}
+		}
+		if !profileValid {
+			return fmt.Errorf("unknown profile %q; valid profiles: %v", c.Profile, validProfiles)
+		}
+
+		if err := c.enforceProfileRules(); err != nil {
+			return err
+		}
 	}
 
 	var warnings []string
@@ -994,6 +1138,72 @@ func (c *Config) Validate() error {
 	}
 
 	c.Warnings = warnings
+	return nil
+}
+
+// enforceProfileRules applies deployment-profile constraints at config load time.
+// These mirror the rules in internal/helper/profiles.go so that running
+// cmd/csar directly enforces the same policy as csar-helper validate.
+//
+// Note: the KMS provider check here uses the config-declared value (c.KMS.Provider).
+// The *resolved* runtime provider (CLI flag → config fallback) is validated
+// separately via ValidateResolvedKMSProvider, which cmd/csar must call after
+// resolving the effective provider name.
+func (c *Config) enforceProfileRules() error {
+	switch c.Profile {
+	case "prod-single", "prod-distributed":
+		// Reject insecure coordinator transport
+		if c.Coordinator.AllowInsecure {
+			return fmt.Errorf("profile %q rejects coordinator.allow_insecure: true", c.Profile)
+		}
+		// Reject dev environment
+		if c.SecurityPolicy != nil && c.SecurityPolicy.Environment == "dev" {
+			return fmt.Errorf("profile %q rejects security_policy.environment: \"dev\"", c.Profile)
+		}
+		// Require TLS when secure routes exist
+		if c.HasSecureRoutes() && c.TLS == nil {
+			return fmt.Errorf("profile %q requires TLS when secure routes are configured", c.Profile)
+		}
+		// Reject local KMS in prod when secure routes exist (config-declared value)
+		if c.HasSecureRoutes() && c.KMS != nil && c.KMS.Provider == "local" {
+			return fmt.Errorf("profile %q rejects kms.provider: \"local\" when secure routes exist; use a cloud KMS", c.Profile)
+		}
+	}
+
+	if c.Profile == "prod-distributed" {
+		// Require coordinator enabled with address
+		if !c.Coordinator.Enabled || c.Coordinator.Address == "" {
+			return fmt.Errorf("profile %q requires coordinator.enabled: true with a non-empty address", c.Profile)
+		}
+		// Require coordinator CA file for TLS
+		if c.Coordinator.Enabled && c.Coordinator.CAFile == "" {
+			return fmt.Errorf("profile %q requires coordinator.ca_file for TLS", c.Profile)
+		}
+	}
+
+	return nil
+}
+
+// ValidateResolvedKMSProvider checks whether the runtime-resolved KMS provider
+// (after CLI flag + config fallback resolution) is permitted by the declared profile.
+//
+// This must be called by cmd/csar after resolving the effective provider name,
+// because the CLI flag --kms-provider can override the config-declared value.
+// Without this check, a prod profile could pass config validation while still
+// running with --kms-provider=local if kms.provider is unset in YAML.
+func (c *Config) ValidateResolvedKMSProvider(resolvedProvider string) error {
+	if c.Profile == "" {
+		return nil // no profile — nothing to enforce
+	}
+
+	switch c.Profile {
+	case "prod-single", "prod-distributed":
+		if c.HasSecureRoutes() && resolvedProvider == "local" {
+			return fmt.Errorf("profile %q rejects KMS provider \"local\" when secure routes exist; "+
+				"use --kms-provider=yandexapi or set kms.provider in config", c.Profile)
+		}
+	}
+
 	return nil
 }
 

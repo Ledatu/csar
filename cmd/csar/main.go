@@ -28,6 +28,7 @@ import (
 	"github.com/ledatu/csar/internal/proxy"
 	"github.com/ledatu/csar/internal/router"
 	"github.com/ledatu/csar/internal/telemetry"
+	"github.com/ledatu/csar/internal/throttle"
 	"github.com/ledatu/csar/pkg/health"
 	"github.com/ledatu/csar/pkg/middleware"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
@@ -130,9 +131,15 @@ func run() error {
 		"allowed_hosts", len(ssrfP.AllowedHosts),
 	)
 
+	// --- Shared ThrottleManager (audit: survives SIGHUP reload) ---
+	// Create a single ThrottleManager that lives across router rebuilds.
+	// The coordinator client holds a reference to this manager, so quota
+	// updates continue to apply after SIGHUP-triggered router replacements.
+	sharedTM := throttle.NewManager()
+
 	// --- Auth Injection (KMS + Token Fetcher) ---
 	var routerOpts []router.Option
-	routerOpts = append(routerOpts, router.WithMetrics(m), router.WithTelemetry(tp), router.WithSSRFProtection(ssrfP))
+	routerOpts = append(routerOpts, router.WithMetrics(m), router.WithTelemetry(tp), router.WithSSRFProtection(ssrfP), router.WithThrottleManager(sharedTM))
 
 	if cfg.HasSecureRoutes() {
 		// Resolve KMS provider: CLI flag takes precedence, then config.
@@ -143,6 +150,13 @@ func run() error {
 		if providerName == "" {
 			return fmt.Errorf("configuration contains x-csar-security routes but no --kms-provider is set; " +
 				"use --kms-provider=local for development or --kms-provider=yandexapi for production")
+		}
+
+		// Enforce profile KMS rules against the *resolved* provider, not just the
+		// config-declared value. This prevents bypassing prod profile guardrails
+		// via --kms-provider=local when kms.provider is unset in YAML.
+		if err := cfg.ValidateResolvedKMSProvider(providerName); err != nil {
+			return err
 		}
 
 		kmsP, err := initKMSProvider(providerName, *kmsLocalKeys, cfg,
@@ -183,6 +197,8 @@ func run() error {
 
 		case cfg.Coordinator.Enabled && cfg.Coordinator.Address != "":
 			// Production: use coordinator gRPC AuthService with TLS.
+			// The coordinator manages the token store (PostgreSQL, file, etc.)
+			// and pushes invalidation events to all routers.
 			conn, err := dialCoordinator(cfg.Coordinator, logger)
 			if err != nil {
 				return fmt.Errorf("connecting to coordinator: %w", err)
@@ -306,14 +322,14 @@ func run() error {
 			if r.AuthInjector() != nil {
 				ccOpts = append(ccOpts, coordclient.WithAuthInjector(r.AuthInjector()))
 			}
-			cc := coordclient.New(
-				coordSvcClient,
-				hostname,
-				cfg.ListenAddr,
-				r.ThrottleManager(),
-				logger.With("component", "coordclient"),
-				ccOpts...,
-			)
+		cc := coordclient.New(
+			coordSvcClient,
+			hostname,
+			cfg.ListenAddr,
+			sharedTM,
+			logger.With("component", "coordclient"),
+			ccOpts...,
+		)
 			go cc.Run(ctx)
 			logger.Info("coordinator subscription client started",
 				"router_id", hostname,
@@ -322,11 +338,19 @@ func run() error {
 		}
 	}
 
+	// Snapshot restart-required fields for reload-awareness.
+	restartSnapshot := snapshotRestartRequiredFields(cfg)
+
+	// Log startup summary.
+	logStartupSummary(logger, cfg, r)
+
 	// SIGHUP listener for config hot-reload (audit §3.1).
 	// Reloads paths, access control, circuit breakers, and retry policies
 	// without dropping active HTTP connections.
 	sighupCh := make(chan os.Signal, 1)
 	signal.Notify(sighupCh, syscall.SIGHUP)
+	// currentRouter tracks the active router so we can close it on reload.
+	currentRouter := r
 	go func() {
 		for range sighupCh {
 			logger.Info("SIGHUP received — reloading configuration", "path", *configPath)
@@ -339,6 +363,10 @@ func run() error {
 			for _, w := range newCfg.Warnings {
 				logger.Warn("(reload) " + w)
 			}
+
+			// Check for restart-required field changes.
+			checkRestartRequiredChanges(logger, restartSnapshot, newCfg)
+
 			// Rebuild the router with the same options (metrics, telemetry, auth injector).
 			newRouter, err := router.New(newCfg, logger, routerOpts...)
 			if err != nil {
@@ -347,6 +375,20 @@ func run() error {
 			}
 			// Atomically swap the handler — in-flight requests finish on the old router.
 			rh.swap(tp.HTTPMiddleware("csar", newRouter))
+
+			// Stop health-check goroutines on the old router to prevent leaks.
+			// The new router starts its own health checks during construction.
+			currentRouter.Close()
+			currentRouter = newRouter
+
+			// Prune stale throttle keys from the shared manager.
+			pruned := sharedTM.SyncKeys(newRouter.RegisteredKeys())
+			if pruned > 0 {
+				logger.Info("pruned stale throttle keys after reload",
+					"pruned", pruned,
+				)
+			}
+
 			logger.Info("configuration reloaded successfully",
 				"routes", len(newCfg.Paths),
 			)
@@ -548,4 +590,135 @@ func parseLocalKeys(raw string) (map[string]string, error) {
 		return nil, fmt.Errorf("no valid key=passphrase pairs found in %q", raw)
 	}
 	return result, nil
+}
+
+// ---------------------------------------------------------------------------
+// Restart-required field detection (reload-awareness)
+// ---------------------------------------------------------------------------
+
+// restartRequiredSnapshot captures config field values that cannot be changed
+// at runtime and require a full process restart.
+type restartRequiredSnapshot struct {
+	ListenAddr   string
+	KMSProvider  string
+	TLSCertFile  string
+	TLSKeyFile   string
+	Profile      string
+}
+
+// snapshotRestartRequiredFields takes a snapshot of fields that need a restart
+// to take effect. Compare with the new config on SIGHUP.
+func snapshotRestartRequiredFields(cfg *config.Config) restartRequiredSnapshot {
+	snap := restartRequiredSnapshot{
+		ListenAddr: cfg.ListenAddr,
+		Profile:    cfg.Profile,
+	}
+	if cfg.KMS != nil {
+		snap.KMSProvider = cfg.KMS.Provider
+	}
+	if cfg.TLS != nil {
+		snap.TLSCertFile = cfg.TLS.CertFile
+		snap.TLSKeyFile = cfg.TLS.KeyFile
+	}
+	return snap
+}
+
+// checkRestartRequiredChanges compares the snapshot with the new config and
+// logs warnings for fields that changed but require a restart to take effect.
+func checkRestartRequiredChanges(logger *slog.Logger, snap restartRequiredSnapshot, newCfg *config.Config) {
+	if newCfg.ListenAddr != snap.ListenAddr {
+		logger.Warn("field 'listen_addr' changed but requires restart to take effect",
+			"old", snap.ListenAddr, "new", newCfg.ListenAddr)
+	}
+	if newCfg.Profile != snap.Profile {
+		logger.Warn("field 'profile' changed but requires restart to take effect",
+			"old", snap.Profile, "new", newCfg.Profile)
+	}
+
+	newKMS := ""
+	if newCfg.KMS != nil {
+		newKMS = newCfg.KMS.Provider
+	}
+	if newKMS != snap.KMSProvider {
+		logger.Warn("field 'kms.provider' changed but requires restart to take effect",
+			"old", snap.KMSProvider, "new", newKMS)
+	}
+
+	newCert, newKey := "", ""
+	if newCfg.TLS != nil {
+		newCert = newCfg.TLS.CertFile
+		newKey = newCfg.TLS.KeyFile
+	}
+	if newCert != snap.TLSCertFile || newKey != snap.TLSKeyFile {
+		logger.Warn("TLS certificate paths changed but require restart to take effect",
+			"old_cert", snap.TLSCertFile, "new_cert", newCert)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Startup summary log
+// ---------------------------------------------------------------------------
+
+// logStartupSummary prints a structured summary of the CSAR configuration at startup.
+func logStartupSummary(logger *slog.Logger, cfg *config.Config, r *router.Router) {
+	profile := cfg.Profile
+	if profile == "" {
+		profile = "(none)"
+	}
+
+	tlsStatus := "disabled"
+	if cfg.TLS != nil {
+		minVer := "TLS 1.2"
+		if cfg.TLS.MinVersion == "1.3" {
+			minVer = "TLS 1.3"
+		}
+		tlsStatus = fmt.Sprintf("enabled (%s)", minVer)
+	}
+
+	kmsProvider := "(none)"
+	if cfg.KMS != nil && cfg.KMS.Provider != "" {
+		kmsProvider = cfg.KMS.Provider
+	}
+
+	tokenSource := "file"
+	if cfg.Coordinator.Enabled && cfg.Coordinator.Address != "" {
+		tokenSource = "coordinator"
+	}
+
+	coordStatus := "disabled"
+	if cfg.Coordinator.Enabled {
+		transport := "plaintext"
+		if cfg.Coordinator.CAFile != "" {
+			transport = "mTLS"
+		}
+		coordStatus = fmt.Sprintf("enabled (grpc://%s, %s)", cfg.Coordinator.Address, transport)
+	}
+
+	// Count routes with security and throttle
+	totalRoutes := 0
+	secureRoutes := 0
+	throttledRoutes := 0
+	for _, pathCfg := range cfg.Paths {
+		for _, routeCfg := range pathCfg {
+			totalRoutes++
+			if len(routeCfg.Security) > 0 {
+				secureRoutes++
+			}
+			if routeCfg.Traffic != nil {
+				throttledRoutes++
+			}
+		}
+	}
+
+	_ = r // router reference for future use
+
+	logger.Info("csar startup summary",
+		"profile", profile,
+		"listen", cfg.ListenAddr,
+		"tls", tlsStatus,
+		"kms_provider", kmsProvider,
+		"token_source", tokenSource,
+		"coordinator", coordStatus,
+		"routes", fmt.Sprintf("%d (%d with security, %d with throttle)", totalRoutes, secureRoutes, throttledRoutes),
+	)
 }
