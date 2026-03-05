@@ -10,6 +10,23 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// Waiter is the interface satisfied by all throttler implementations.
+// The router stores a Waiter for each route, allowing local token-bucket,
+// Redis GCRA, and dynamic-key throttlers to be used interchangeably.
+type Waiter interface {
+	// Wait blocks until the request is allowed or the timeout is exceeded.
+	Wait(ctx context.Context) error
+
+	// Waiting returns the number of requests currently in the queue.
+	Waiting() int64
+
+	// UpdateLimit changes the rate limit dynamically (coordinator quota redistribution).
+	UpdateLimit(rps float64, burst int)
+}
+
+// Compile-time checks: all throttler types must satisfy Waiter.
+var _ Waiter = (*Throttler)(nil)
+
 // Throttler manages per-route rate limiting with wait-based smoothing.
 // Instead of rejecting requests with 429, it queues them up to max_wait.
 type Throttler struct {
@@ -72,25 +89,46 @@ func (t *Throttler) UpdateLimit(rps float64, burst int) {
 // ThrottleManager manages throttlers for multiple routes.
 type ThrottleManager struct {
 	mu         sync.RWMutex
-	throttlers map[string]*Throttler // keyed by "METHOD:PATH"
+	throttlers map[string]Waiter // keyed by "METHOD:PATH"
+
+	// globalThrottle is the global rate limiter checked before per-route throttles.
+	globalThrottle *Throttler
 }
 
 // NewManager creates a new ThrottleManager.
 func NewManager() *ThrottleManager {
 	return &ThrottleManager{
-		throttlers: make(map[string]*Throttler),
+		throttlers: make(map[string]Waiter),
 	}
 }
 
-// Register adds or updates a throttler for the given route key.
+// SetGlobal sets the global throttle (fallback applied to all routes).
+func (m *ThrottleManager) SetGlobal(rps float64, burst int, maxWait time.Duration) {
+	m.globalThrottle = New(rps, burst, maxWait)
+}
+
+// GetGlobal returns the global throttle, or nil if not configured.
+func (m *ThrottleManager) GetGlobal() *Throttler {
+	return m.globalThrottle
+}
+
+// Register adds or updates a local throttler for the given route key.
 func (m *ThrottleManager) Register(key string, rps float64, burst int, maxWait time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.throttlers[key] = New(rps, burst, maxWait)
 }
 
-// Get returns the throttler for the given route key, or nil if not found.
-func (m *ThrottleManager) Get(key string) *Throttler {
+// RegisterWaiter adds or updates a custom Waiter for the given route key.
+// Used for Redis GCRA and dynamic-key throttlers.
+func (m *ThrottleManager) RegisterWaiter(key string, w Waiter) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.throttlers[key] = w
+}
+
+// Get returns the Waiter for the given route key, or nil if not found.
+func (m *ThrottleManager) Get(key string) Waiter {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.throttlers[key]

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/ledatu/csar/internal/tenant"
 	"github.com/ledatu/csar/internal/throttle"
 	"github.com/ledatu/csar/pkg/middleware"
+	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -33,7 +35,7 @@ type route struct {
 	config         config.RouteConfig
 	proxy          *proxy.ReverseProxy
 	loadBalancer   http.Handler              // nil if no load balancing; otherwise a load-balancing handler
-	throttler      *throttle.Throttler       // nil if no traffic shaping configured
+	throttler      throttle.Waiter           // nil if no traffic shaping configured
 	circuitBreaker *resilience.CircuitBreaker // nil if no resilience configured
 	retryHandler   http.Handler              // proxy wrapped with retry middleware (nil = use proxy directly)
 	routeKey       string                    // "METHOD:PATH"
@@ -50,6 +52,14 @@ type route struct {
 	tenantConfig   *tenant.Config            // nil if no multi-tenant routing
 	corsConfig     *config.CORSConfig        // nil if no CORS configuration
 	cacheConfig    *cache.Config             // nil if no response caching
+	excludeIPs     []*net.IPNet              // IPs/CIDRs that bypass this route's throttle
+	vipOverrides   []vipOverride             // header-based throttle policy swaps
+}
+
+// vipOverride associates a header with a map of values → alternate Waiters.
+type vipOverride struct {
+	header string
+	values map[string]throttle.Waiter
 }
 
 // Router is the core stateless API router.
@@ -69,6 +79,7 @@ type Router struct {
 	responseCache    *cache.ResponseCache    // nil if no route uses response caching
 	ssrfProtection   *proxy.SSRFProtection   // nil if SSRF protection is disabled
 	throttleManager  *throttle.ThrottleManager // manages all per-route throttlers
+	redisClient      *redis.Client           // shared Redis client for distributed throttling (nil if not configured)
 	pools            []*loadbalancer.Pool     // tracked for Close() cleanup on reload
 	globalCIDRs      []*net.IPNet            // parsed global access_control.allow_cidrs
 	hasGlobalACL     bool                    // true if global access_control is configured
@@ -106,6 +117,12 @@ func WithThrottleManager(tm *throttle.ThrottleManager) Option {
 	return func(r *Router) { r.throttleManager = tm }
 }
 
+// WithRedisClient sets a shared Redis client for distributed throttling.
+// Routes with backend: "redis" will use this client for GCRA rate limiting.
+func WithRedisClient(client *redis.Client) Option {
+	return func(r *Router) { r.redisClient = client }
+}
+
 // New creates a new Router from the given configuration.
 func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, error) {
 	r := &Router{
@@ -121,6 +138,20 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 	// Create a ThrottleManager if one was not injected via WithThrottleManager.
 	if r.throttleManager == nil {
 		r.throttleManager = throttle.NewManager()
+	}
+
+	// Set up global throttle if configured.
+	if cfg.GlobalThrottle != nil {
+		r.throttleManager.SetGlobal(
+			cfg.GlobalThrottle.RPS,
+			cfg.GlobalThrottle.Burst,
+			cfg.GlobalThrottle.MaxWait.Duration,
+		)
+		logger.Info("global throttle configured",
+			"rps", cfg.GlobalThrottle.RPS,
+			"burst", cfg.GlobalThrottle.Burst,
+			"max_wait", cfg.GlobalThrottle.MaxWait.Duration,
+		)
 	}
 
 	// Parse global access control CIDRs
@@ -285,15 +316,115 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 		// Set up throttler if traffic config is present
 		if fr.Route.Traffic != nil {
 			t := fr.Route.Traffic
-			r.throttleManager.Register(key, t.RPS, t.Burst, t.MaxWait.Duration)
+			backend := t.Backend
+			if backend == "" {
+				backend = "local"
+			}
+
+			switch {
+			case t.Key != "" && backend == "redis":
+				// Dynamic key → per-entity Redis GCRA
+				if r.redisClient == nil {
+					return nil, fmt.Errorf("route %s has dynamic key but no Redis client configured", key)
+				}
+				keyPrefix := "csar:rl:"
+				if cfg.Redis != nil && cfg.Redis.KeyPrefix != "" {
+					keyPrefix = cfg.Redis.KeyPrefix
+				}
+				dt := throttle.NewDynamicThrottler(r.redisClient, keyPrefix, t.Key, t.RPS, t.Burst, t.MaxWait.Duration)
+				r.throttleManager.RegisterWaiter(key, dt)
+				logger.Info("registered dynamic-key throttle",
+					"route", key,
+					"key_template", t.Key,
+					"rps", t.RPS,
+					"burst", t.Burst,
+				)
+
+			case backend == "redis":
+				// Static Redis GCRA
+				if r.redisClient == nil {
+					return nil, fmt.Errorf("route %s has redis backend but no Redis client configured", key)
+				}
+				keyPrefix := "csar:rl:"
+				if cfg.Redis != nil && cfg.Redis.KeyPrefix != "" {
+					keyPrefix = cfg.Redis.KeyPrefix
+				}
+				rth := throttle.NewRedisThrottler(r.redisClient, keyPrefix, key, t.RPS, t.Burst, t.MaxWait.Duration)
+				r.throttleManager.RegisterWaiter(key, rth)
+				logger.Info("registered redis GCRA throttle",
+					"route", key,
+					"rps", t.RPS,
+					"burst", t.Burst,
+				)
+
+			default:
+				// Local token bucket (or coordinator-managed local)
+				r.throttleManager.Register(key, t.RPS, t.Burst, t.MaxWait.Duration)
+				logger.Info("registered local throttle",
+					"route", key,
+					"backend", backend,
+					"rps", t.RPS,
+					"burst", t.Burst,
+					"max_wait", t.MaxWait.Duration,
+				)
+			}
+
 			rt.throttler = r.throttleManager.Get(key)
-			logger.Info("registered throttled route",
-				"method", strings.ToUpper(fr.Method),
-				"path", fr.Path,
-				"rps", t.RPS,
-				"burst", t.Burst,
-				"max_wait", t.MaxWait.Duration,
-			)
+
+			// Parse exclude_ips for this route's throttle.
+			if len(t.ExcludeIPs) > 0 {
+				nets, err := parseCIDRList(t.ExcludeIPs)
+				if err != nil {
+					return nil, fmt.Errorf("route %s x-csar-traffic.exclude_ips: %w", key, err)
+				}
+				rt.excludeIPs = nets
+				logger.Info("throttle IP exclusions configured",
+					"route", key,
+					"exclude_ips", t.ExcludeIPs,
+				)
+			}
+
+			// Build VIP overrides for this route's throttle.
+			if len(t.VIPOverrides) > 0 {
+				for _, vip := range t.VIPOverrides {
+					vo := vipOverride{
+						header: vip.Header,
+						values: make(map[string]throttle.Waiter, len(vip.Values)),
+					}
+					for val, policyName := range vip.Values {
+						policy := cfg.ThrottlingPolicies[policyName]
+						vipKey := key + ":vip:" + val
+						pBackend := policy.Backend
+						if pBackend == "" {
+							pBackend = "local"
+						}
+						switch {
+						case policy.Key != "" && pBackend == "redis" && r.redisClient != nil:
+							keyPrefix := "csar:rl:"
+							if cfg.Redis != nil && cfg.Redis.KeyPrefix != "" {
+								keyPrefix = cfg.Redis.KeyPrefix
+							}
+							dt := throttle.NewDynamicThrottler(r.redisClient, keyPrefix, policy.Key, policy.RPS, policy.Burst, policy.MaxWait.Duration)
+							r.throttleManager.RegisterWaiter(vipKey, dt)
+						case pBackend == "redis" && r.redisClient != nil:
+							keyPrefix := "csar:rl:"
+							if cfg.Redis != nil && cfg.Redis.KeyPrefix != "" {
+								keyPrefix = cfg.Redis.KeyPrefix
+							}
+							rth := throttle.NewRedisThrottler(r.redisClient, keyPrefix, vipKey, policy.RPS, policy.Burst, policy.MaxWait.Duration)
+							r.throttleManager.RegisterWaiter(vipKey, rth)
+						default:
+							r.throttleManager.Register(vipKey, policy.RPS, policy.Burst, policy.MaxWait.Duration)
+						}
+						vo.values[val] = r.throttleManager.Get(vipKey)
+					}
+					rt.vipOverrides = append(rt.vipOverrides, vo)
+				}
+				logger.Info("VIP throttle overrides configured",
+					"route", key,
+					"overrides", len(t.VIPOverrides),
+				)
+			}
 		} else {
 			logger.Info("registered route (no throttle)",
 				"method", strings.ToUpper(fr.Method),
@@ -609,26 +740,13 @@ func (r *Router) serveAfterAuth(w http.ResponseWriter, req *http.Request, rt *ro
 
 // servePipeline runs the throttle -> circuit breaker -> proxy pipeline.
 func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *route) {
-	// Step 1: Throttle (smoothing — wait instead of reject)
-	if rt.throttler != nil {
-		// Update queue depth metric
-		if r.metrics != nil {
-			r.metrics.SetThrottleQueueDepth(rt.routeKey, rt.throttler.Waiting()+1)
-		}
+	var totalWait time.Duration
 
+	// Step 0: Global throttle (fast in-memory counter, checked first)
+	if globalT := r.throttleManager.GetGlobal(); globalT != nil {
 		waitStart := time.Now()
-		err := rt.throttler.Wait(req.Context())
-		waitDur := time.Since(waitStart)
-
-		if r.metrics != nil {
-			r.metrics.SetThrottleQueueDepth(rt.routeKey, rt.throttler.Waiting())
-		}
-
-		if err != nil {
-			if r.metrics != nil {
-				r.metrics.RecordThrottleWait(rt.routeKey, waitDur, true)
-			}
-			r.logger.Warn("request throttled",
+		if err := globalT.Wait(req.Context()); err != nil {
+			r.logger.Warn("request throttled by global limit",
 				"path", req.URL.Path,
 				"method", req.Method,
 				"error", err,
@@ -636,13 +754,84 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Retry-After", "5")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprintf(w, `{"error":"service temporarily unavailable","detail":%q}`, err.Error())
+			fmt.Fprintf(w, `{"error":"global rate limit exceeded","detail":%q}`, err.Error())
 			return
 		}
+		totalWait += time.Since(waitStart)
+	}
 
-		if r.metrics != nil {
-			r.metrics.RecordThrottleWait(rt.routeKey, waitDur, false)
+	// Step 1: Per-route throttle (smoothing — wait instead of reject)
+	if rt.throttler != nil {
+		// Check exclude-IPs: skip throttle if client IP is in the exclusion list.
+		skipThrottle := false
+		if len(rt.excludeIPs) > 0 {
+			clientIP := extractClientIP(req, rt.trustProxy)
+			ip := net.ParseIP(clientIP)
+			if ip != nil {
+				for _, cidr := range rt.excludeIPs {
+					if cidr.Contains(ip) {
+						skipThrottle = true
+						break
+					}
+				}
+			}
 		}
+
+		if !skipThrottle {
+			// Determine which throttler to use: check VIP overrides first.
+			activeThrottler := rt.throttler
+			for _, vo := range rt.vipOverrides {
+				headerVal := req.Header.Get(vo.header)
+				if headerVal != "" {
+					if altThrottler, ok := vo.values[headerVal]; ok {
+						activeThrottler = altThrottler
+						break
+					}
+				}
+			}
+
+			// Update queue depth metric
+			if r.metrics != nil {
+				r.metrics.SetThrottleQueueDepth(rt.routeKey, activeThrottler.Waiting()+1)
+			}
+
+			// Store request in context for dynamic key resolution.
+			ctx := throttle.WithRequest(req.Context(), req)
+
+			waitStart := time.Now()
+			err := activeThrottler.Wait(ctx)
+			waitDur := time.Since(waitStart)
+			totalWait += waitDur
+
+			if r.metrics != nil {
+				r.metrics.SetThrottleQueueDepth(rt.routeKey, activeThrottler.Waiting())
+			}
+
+			if err != nil {
+				if r.metrics != nil {
+					r.metrics.RecordThrottleWait(rt.routeKey, waitDur, true)
+				}
+				r.logger.Warn("request throttled",
+					"path", req.URL.Path,
+					"method", req.Method,
+					"error", err,
+				)
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Retry-After", "5")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				fmt.Fprintf(w, `{"error":"service temporarily unavailable","detail":%q}`, err.Error())
+				return
+			}
+
+			if r.metrics != nil {
+				r.metrics.RecordThrottleWait(rt.routeKey, waitDur, false)
+			}
+		}
+	}
+
+	// Set X-CSAR-Wait-MS response header with actual wait duration.
+	if totalWait > 0 {
+		w.Header().Set("X-CSAR-Wait-MS", strconv.FormatInt(totalWait.Milliseconds(), 10))
 	}
 
 	// Step 2: Circuit breaker
@@ -820,7 +1009,7 @@ func (r *Router) matchRoute(method, path string) (*route, []string) {
 }
 
 // GetThrottler returns the throttler for a given route key (for observability).
-func (r *Router) GetThrottler(method, path string) *throttle.Throttler {
+func (r *Router) GetThrottler(method, path string) throttle.Waiter {
 	key := throttle.RouteKey(strings.ToUpper(method), path)
 	if rt, ok := r.routes[key]; ok {
 		return rt.throttler

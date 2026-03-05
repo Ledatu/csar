@@ -9,25 +9,57 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// slidingWindowScript is an atomic Lua script that implements a sliding window
-// rate limiter in Redis. It increments a counter for the current window,
-// sets expiry on first use, and returns 1 if allowed, 0 if denied.
-const slidingWindowScript = `
-local key = KEYS[1]
-local limit = tonumber(ARGV[1])
-local window_ms = tonumber(ARGV[2])
+// Compile-time check: RedisThrottler satisfies Waiter.
+var _ Waiter = (*RedisThrottler)(nil)
 
-local count = redis.call('INCR', key)
-if count == 1 then
-    redis.call('PEXPIRE', key, window_ms)
+// gcraScript implements the Generic Cell Rate Algorithm (GCRA) in Redis.
+//
+// GCRA stores a single key per entity: the TAT (Theoretical Arrival Time).
+// Instead of maintaining a counter that needs periodic replenishment, GCRA
+// works with absolute timestamps, making it ideal for distributed systems.
+//
+// Algorithm:
+//   - emission_interval = 1/rate (seconds per request)
+//   - burst_offset = emission_interval * burst (the maximum "credit")
+//   - TAT_new = max(now, TAT_old) + emission_interval
+//   - If TAT_new - now > burst_offset → request is denied
+//   - The script returns the wait time in milliseconds (0 = allowed immediately,
+//     >0 = how long the caller should park, -1 = denied/exceeds max burst)
+//
+// Returns:
+//
+//	0   → allowed immediately
+//	>0  → wait this many ms, then retry (optimistic parking)
+//	-1  → denied (wait would exceed burst_offset)
+const gcraScript = `
+local key = KEYS[1]
+local emission_interval_ms = tonumber(ARGV[1])
+local burst_offset_ms = tonumber(ARGV[2])
+local now_ms = tonumber(ARGV[3])
+local max_wait_ms = tonumber(ARGV[4])
+
+local tat = tonumber(redis.call('GET', key) or now_ms)
+
+local new_tat = math.max(now_ms, tat) + emission_interval_ms
+local diff = new_tat - now_ms
+
+if diff > burst_offset_ms then
+    -- Would exceed burst capacity. Return how long the caller must wait,
+    -- or -1 if it exceeds max_wait.
+    local wait = tat + emission_interval_ms - now_ms - burst_offset_ms
+    if wait < 0 then wait = 0 end
+    if max_wait_ms > 0 and wait > max_wait_ms then
+        return -1
+    end
+    return wait
 end
-if count > limit then
-    return 0
-end
-return 1
+
+-- Allowed: update TAT with expiry = burst_offset + emission_interval + safety margin
+redis.call('SET', key, tostring(new_tat), 'PX', burst_offset_ms + emission_interval_ms + 1000)
+return 0
 `
 
-// RedisThrottler implements distributed rate limiting via a Redis sliding window.
+// RedisThrottler implements distributed rate limiting via Redis GCRA.
 // It provides the same Wait-based interface as the local Throttler.
 type RedisThrottler struct {
 	client    *redis.Client
@@ -67,7 +99,7 @@ func NewRedisThrottler(client *redis.Client, keyPrefix, routeKey string, rps flo
 	}
 	return &RedisThrottler{
 		client:    client,
-		script:    redis.NewScript(slidingWindowScript),
+		script:    redis.NewScript(gcraScript),
 		keyPrefix: keyPrefix,
 		routeKey:  routeKey,
 		rps:       rps,
@@ -77,66 +109,69 @@ func NewRedisThrottler(client *redis.Client, keyPrefix, routeKey string, rps flo
 }
 
 // Wait blocks until the request is allowed or the timeout is exceeded.
-// It polls Redis at short intervals to check if the sliding window has capacity.
+// Uses GCRA with optimistic parking: Redis returns the exact wait time,
+// and Go sleeps for that duration instead of polling.
 func (rt *RedisThrottler) Wait(ctx context.Context) error {
 	rt.waiting.Add(1)
 	defer rt.waiting.Add(-1)
 
-	// Calculate the window: 1 second window with limit = rps + burst
-	limit := int(rt.rps) + rt.burst
-	if limit < 1 {
-		limit = 1
-	}
-	windowMS := 1000 // 1 second window
-
 	key := rt.keyPrefix + rt.routeKey
 
-	waitCtx := ctx
-	if rt.maxWait > 0 {
-		var cancel context.CancelFunc
-		waitCtx, cancel = context.WithTimeout(ctx, rt.maxWait)
-		defer cancel()
+	// GCRA parameters in milliseconds
+	emissionIntervalMS := int64(1000.0 / rt.rps)
+	if emissionIntervalMS < 1 {
+		emissionIntervalMS = 1
 	}
+	burstOffsetMS := emissionIntervalMS * int64(rt.burst)
+	maxWaitMS := rt.maxWait.Milliseconds()
 
-	// First attempt
-	allowed, err := rt.tryAcquire(waitCtx, key, limit, windowMS)
-	if err != nil {
-		return fmt.Errorf("redis rate limit error: %w", err)
-	}
-	if allowed {
-		return nil
-	}
-
-	// Poll with backoff
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
+	deadline := time.Now().Add(rt.maxWait)
 
 	for {
-		select {
-		case <-waitCtx.Done():
-			if ctx.Err() != nil {
-				return fmt.Errorf("client cancelled: %w", ctx.Err())
-			}
+		// Check context before Redis call
+		if ctx.Err() != nil {
+			return fmt.Errorf("client cancelled: %w", ctx.Err())
+		}
+
+		nowMS := time.Now().UnixMilli()
+		result, err := rt.script.Run(ctx, rt.client, []string{key},
+			emissionIntervalMS, burstOffsetMS, nowMS, maxWaitMS,
+		).Int64()
+		if err != nil {
+			return fmt.Errorf("redis GCRA error: %w", err)
+		}
+
+		switch {
+		case result == 0:
+			// Allowed immediately
+			return nil
+
+		case result == -1:
+			// Denied: wait would exceed max_wait
 			return fmt.Errorf("queue timeout exceeded (%s): rate limit reached", rt.maxWait)
-		case <-ticker.C:
-			allowed, err := rt.tryAcquire(waitCtx, key, limit, windowMS)
-			if err != nil {
-				return fmt.Errorf("redis rate limit error: %w", err)
+
+		case result > 0:
+			// Optimistic parking: sleep for the suggested duration, then retry
+			parkDuration := time.Duration(result) * time.Millisecond
+
+			// Clamp to remaining deadline
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				return fmt.Errorf("queue timeout exceeded (%s): rate limit reached", rt.maxWait)
 			}
-			if allowed {
-				return nil
+			if parkDuration > remaining {
+				parkDuration = remaining
+			}
+
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("client cancelled: %w", ctx.Err())
+			case <-time.After(parkDuration):
+				// Retry after parking (optimistic: someone else may have taken the slot)
+				continue
 			}
 		}
 	}
-}
-
-// tryAcquire attempts to acquire a rate limit token from Redis.
-func (rt *RedisThrottler) tryAcquire(ctx context.Context, key string, limit, windowMS int) (bool, error) {
-	result, err := rt.script.Run(ctx, rt.client, []string{key}, limit, windowMS).Int()
-	if err != nil {
-		return false, err
-	}
-	return result == 1, nil
 }
 
 // Waiting returns the number of requests currently waiting.

@@ -120,6 +120,15 @@ type Config struct {
 	// CircuitBreakers defines named circuit breaker profiles.
 	CircuitBreakers map[string]CircuitBreakerProfile `yaml:"circuit_breakers,omitempty" json:"circuit_breakers,omitempty"`
 
+	// ThrottlingPolicies defines named, reusable throttling configurations.
+	// Routes reference them via x-csar-traffic: "policy_name" or x-csar-traffic.use: "policy_name".
+	// Inline fields on the route override policy defaults (shallow merge).
+	ThrottlingPolicies map[string]ThrottlingPolicy `yaml:"throttling_policies,omitempty" json:"throttling_policies,omitempty"`
+
+	// GlobalThrottle defines a global rate limit applied to ALL routes as a safety net.
+	// Checked before per-route throttle. Uses a fast in-memory atomic counter.
+	GlobalThrottle *GlobalThrottleConfig `yaml:"global_throttle,omitempty" json:"global_throttle,omitempty"`
+
 	// Paths holds the OpenAPI-style route definitions with x-csar-* extensions.
 	Paths map[string]PathConfig `yaml:"paths" json:"paths"`
 
@@ -448,21 +457,119 @@ type YandexKMSConfig struct {
 }
 
 // TrafficConfig configures rate limiting / traffic shaping.
+//
+// Supports three YAML syntaxes:
+//
+//	x-csar-traffic: "standard-api"                    # bare string → policy ref
+//	x-csar-traffic: { rps: 10, burst: 20, ... }       # inline object
+//	x-csar-traffic: { use: "heavy-task", max_wait: "60s" }  # policy ref + overrides
 type TrafficConfig struct {
+	// Use is an optional reference to a named throttling_policies entry.
+	// When set, all other fields are inherited from the policy; any
+	// inline fields override the policy's values (shallow merge).
+	Use string `yaml:"use,omitempty" json:"use,omitempty"`
+
 	// RPS is the allowed requests per second.
-	RPS float64 `yaml:"rps" json:"rps"`
+	RPS float64 `yaml:"rps,omitempty" json:"rps,omitempty"`
+
+	// Burst is the maximum burst size for the token bucket.
+	Burst int `yaml:"burst,omitempty" json:"burst,omitempty"`
+
+	// MaxWait is the maximum time a request can wait in the queue.
+	MaxWait Duration `yaml:"max_wait,omitempty" json:"max_wait,omitempty"`
+
+	// Backend selects the rate limiting implementation.
+	// "local" (default): in-memory token bucket per pod.
+	// "redis": distributed GCRA via Redis (requires top-level redis config).
+	// "coordinator": local token bucket with quotas dynamically assigned by the coordinator.
+	Backend string `yaml:"backend,omitempty" json:"backend,omitempty"`
+
+	// Key is a dynamic throttle key template for per-entity rate limiting.
+	// Uses placeholders like {query.seller_id} or {header.X-API-Key}.
+	// When set, each unique resolved key gets its own rate limiter (requires Redis backend).
+	Key string `yaml:"key,omitempty" json:"key,omitempty"`
+
+	// ExcludeIPs is a list of IPs/CIDRs that bypass this route's throttle entirely.
+	// Useful for internal monitoring services or health checkers.
+	ExcludeIPs []string `yaml:"exclude_ips,omitempty" json:"exclude_ips,omitempty"`
+
+	// VIPOverrides allows specific API keys (identified by a header value)
+	// to use an alternate throttling policy instead of the default one.
+	VIPOverrides []VIPOverride `yaml:"vip_overrides,omitempty" json:"vip_overrides,omitempty"`
+}
+
+// UnmarshalYAML handles bare string (policy reference) and inline object syntax.
+//
+// Supported:
+//
+//	x-csar-traffic: "standard-api"           → Use = "standard-api"
+//	x-csar-traffic: { rps: 10, burst: 20 }   → inline fields
+//	x-csar-traffic: { use: "heavy-task", max_wait: "60s" }  → policy ref + overrides
+func (tc *TrafficConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		tc.Use = value.Value
+		return nil
+	}
+
+	// Alias to avoid infinite recursion.
+	type trafficAlias TrafficConfig
+	var alias trafficAlias
+	if err := value.Decode(&alias); err != nil {
+		return err
+	}
+	*tc = TrafficConfig(alias)
+	return nil
+}
+
+// ThrottlingPolicy defines a named, reusable throttling configuration.
+// Defined at the top-level throttling_policies map, referenced by name in routes.
+type ThrottlingPolicy struct {
+	// RPS is the allowed requests per second.
+	RPS float64 `yaml:"rate" json:"rate"`
 
 	// Burst is the maximum burst size for the token bucket.
 	Burst int `yaml:"burst" json:"burst"`
 
 	// MaxWait is the maximum time a request can wait in the queue.
-	MaxWait Duration `yaml:"max_wait" json:"max_wait"`
+	MaxWait Duration `yaml:"max_wait,omitempty" json:"max_wait,omitempty"`
 
 	// Backend selects the rate limiting implementation.
-	// "local" (default): in-memory token bucket per pod.
-	// "redis": distributed sliding window via Redis (requires top-level redis config).
-	// "coordinator": local token bucket with quotas dynamically assigned by the coordinator.
+	// "local" (default), "redis", or "coordinator".
 	Backend string `yaml:"backend,omitempty" json:"backend,omitempty"`
+
+	// Key is a dynamic throttle key template for per-entity rate limiting.
+	// Uses placeholders: {query.seller_id}, {header.X-API-Key}.
+	Key string `yaml:"key,omitempty" json:"key,omitempty"`
+
+	// ExcludeIPs is a list of IPs/CIDRs that bypass this throttle entirely.
+	ExcludeIPs []string `yaml:"exclude_ips,omitempty" json:"exclude_ips,omitempty"`
+
+	// VIPOverrides allows header-based policy switching for VIP clients.
+	VIPOverrides []VIPOverride `yaml:"vip_overrides,omitempty" json:"vip_overrides,omitempty"`
+}
+
+// GlobalThrottleConfig defines a global rate limit applied to all routes as a fallback.
+// Uses a fast in-memory atomic counter (not Redis). Checked before per-route throttle.
+type GlobalThrottleConfig struct {
+	// RPS is the global requests per second limit across all routes.
+	RPS float64 `yaml:"rate" json:"rate"`
+
+	// Burst is the maximum burst size.
+	Burst int `yaml:"burst" json:"burst"`
+
+	// MaxWait is the maximum time a request can wait. Default: "0s" (reject immediately).
+	MaxWait Duration `yaml:"max_wait,omitempty" json:"max_wait,omitempty"`
+}
+
+// VIPOverride maps a header value to an alternate throttling policy.
+// When a request's header matches one of the Values, the alternate policy is used.
+type VIPOverride struct {
+	// Header is the HTTP header to check (e.g. "X-API-Key").
+	Header string `yaml:"header" json:"header"`
+
+	// Values maps header values to alternate throttling policy names.
+	// Example: {"vip-key-123": "vip-unlimited", "partner-key": "partner-tier"}
+	Values map[string]string `yaml:"values" json:"values"`
 }
 
 // ResilienceConfig configures circuit breaking.
@@ -768,6 +875,12 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("resolving security profiles: %w", err)
 	}
 
+	// Resolve throttle policy references before validation so that
+	// Validate() sees the fully-resolved TrafficConfig for each route.
+	if err := cfg.ResolveThrottlePolicies(); err != nil {
+		return nil, fmt.Errorf("resolving throttle policies: %w", err)
+	}
+
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("validating config: %w", err)
 	}
@@ -940,6 +1053,56 @@ func (c *Config) ResolveSecurityProfiles() error {
 	return nil
 }
 
+// ResolveThrottlePolicies replaces throttle policy references with the full
+// ThrottlingPolicy from throttling_policies. Inline fields override policy
+// values (shallow merge). Must be called after Load / before Validate.
+func (c *Config) ResolveThrottlePolicies() error {
+	for path, methods := range c.Paths {
+		for method, route := range methods {
+			if route.Traffic == nil || route.Traffic.Use == "" {
+				continue
+			}
+			policyName := route.Traffic.Use
+			if len(c.ThrottlingPolicies) == 0 {
+				return fmt.Errorf("path %s method %s: throttle policy %q referenced but no throttling_policies defined",
+					path, method, policyName)
+			}
+			policy, ok := c.ThrottlingPolicies[policyName]
+			if !ok {
+				return fmt.Errorf("path %s method %s: throttle policy %q not found in throttling_policies",
+					path, method, policyName)
+			}
+			// Merge: inline fields override policy defaults.
+			merged := route.Traffic
+			if merged.RPS == 0 {
+				merged.RPS = policy.RPS
+			}
+			if merged.Burst == 0 {
+				merged.Burst = policy.Burst
+			}
+			if merged.MaxWait.Duration == 0 {
+				merged.MaxWait = policy.MaxWait
+			}
+			if merged.Backend == "" {
+				merged.Backend = policy.Backend
+			}
+			if merged.Key == "" {
+				merged.Key = policy.Key
+			}
+			if len(merged.ExcludeIPs) == 0 {
+				merged.ExcludeIPs = policy.ExcludeIPs
+			}
+			if len(merged.VIPOverrides) == 0 {
+				merged.VIPOverrides = policy.VIPOverrides
+			}
+			merged.Use = "" // clear ref after resolution
+			route.Traffic = merged
+			methods[method] = route
+		}
+	}
+	return nil
+}
+
 // Validate checks the configuration for required fields and consistency.
 func (c *Config) Validate() error {
 	if c.ListenAddr == "" {
@@ -1074,6 +1237,16 @@ func (c *Config) Validate() error {
 			if err := validateCIDROrIP(cidr); err != nil {
 				return fmt.Errorf("access_control.allow_cidrs: %w", err)
 			}
+		}
+	}
+
+	// Validate global throttle config
+	if c.GlobalThrottle != nil {
+		if c.GlobalThrottle.RPS <= 0 {
+			return fmt.Errorf("global_throttle.rate must be > 0")
+		}
+		if c.GlobalThrottle.Burst <= 0 {
+			return fmt.Errorf("global_throttle.burst must be > 0")
 		}
 	}
 
@@ -1231,6 +1404,44 @@ func (c *Config) Validate() error {
 			if route.Traffic.Backend == "redis" && c.Redis != nil && c.Redis.Address == "" {
 				return fmt.Errorf("path %s method %s: x-csar-traffic.backend is \"redis\" but redis.address is empty",
 					path, method)
+			}
+		}
+
+		// Validate unresolved throttle policy references.
+		if route.Traffic != nil && route.Traffic.Use != "" {
+			return fmt.Errorf("path %s method %s: x-csar-traffic has unresolved policy reference %q — "+
+				"call ResolveThrottlePolicies() before Validate()", path, method, route.Traffic.Use)
+		}
+
+		// Validate dynamic key requires redis backend.
+		if route.Traffic != nil && route.Traffic.Key != "" {
+			if route.Traffic.Backend != "redis" {
+				return fmt.Errorf("path %s method %s: x-csar-traffic.key requires backend \"redis\" (dynamic keys are distributed by nature)",
+					path, method)
+			}
+		}
+
+		// Validate exclude_ips entries.
+		if route.Traffic != nil {
+			for _, cidr := range route.Traffic.ExcludeIPs {
+				if err := validateCIDROrIP(cidr); err != nil {
+					return fmt.Errorf("path %s method %s: x-csar-traffic.exclude_ips: %w", path, method, err)
+				}
+			}
+		}
+
+		// Validate VIP overrides reference existing policies.
+		if route.Traffic != nil {
+			for _, vip := range route.Traffic.VIPOverrides {
+				if vip.Header == "" {
+					return fmt.Errorf("path %s method %s: x-csar-traffic.vip_overrides[].header is required", path, method)
+				}
+				for val, policyName := range vip.Values {
+					if _, ok := c.ThrottlingPolicies[policyName]; !ok {
+						return fmt.Errorf("path %s method %s: vip_override header %q value %q references unknown policy %q",
+							path, method, vip.Header, val, policyName)
+					}
+				}
 			}
 		}
 

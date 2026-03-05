@@ -141,6 +141,22 @@ func run() error {
 	var routerOpts []router.Option
 	routerOpts = append(routerOpts, router.WithMetrics(m), router.WithTelemetry(tp), router.WithSSRFProtection(ssrfP), router.WithThrottleManager(sharedTM))
 
+	// --- Redis client for distributed throttling ---
+	if cfg.Redis != nil && cfg.Redis.Address != "" {
+		redisClient := throttle.NewRedisClient(throttle.RedisConfig{
+			Address:   cfg.Redis.Address,
+			Password:  cfg.Redis.Password.Plaintext(),
+			DB:        cfg.Redis.DB,
+			KeyPrefix: cfg.Redis.KeyPrefix,
+		})
+		defer redisClient.Close()
+		routerOpts = append(routerOpts, router.WithRedisClient(redisClient))
+		logger.Info("Redis client for distributed throttling configured",
+			"address", cfg.Redis.Address,
+			"db", cfg.Redis.DB,
+		)
+	}
+
 	if cfg.HasSecureRoutes() {
 		// Resolve KMS provider: CLI flag takes precedence, then config.
 		providerName := *kmsProvider

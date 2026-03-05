@@ -102,6 +102,39 @@ circuit_breakers:
     timeout: "60s"
     failure_threshold: 2
 
+# --- Named Throttling Policies ---
+# Define reusable throttling configurations. Routes reference them via:
+#   x-csar-traffic: "standard-api"                    # bare string shorthand
+#   x-csar-traffic: { use: "heavy-task", max_wait: "60s" }  # with inline overrides
+throttling_policies:
+  standard-api:
+    rate: 10              # requests per second
+    burst: 20             # token bucket burst size
+    max_wait: "500ms"     # max queue wait time
+    # backend: "local"    # "local" (default), "redis", or "coordinator"
+  heavy-task:
+    rate: 0.5
+    burst: 1
+    max_wait: "30s"
+    backend: "redis"      # distributed GCRA via Redis
+    key: "seller:{query.seller_id}"   # per-entity dynamic key
+  vip-unlimited:
+    rate: 100
+    burst: 200
+    max_wait: "1s"
+    # exclude_ips:        # IPs/CIDRs that bypass this throttle entirely
+    #   - "10.0.0.0/8"
+    #   - "192.168.1.100"
+
+# --- Global Throttle ---
+# Safety-net rate limit applied to ALL routes before per-route throttle.
+# Uses fast in-memory atomic counter (not Redis). Prevents runaway traffic
+# from overwhelming the system even if per-route limits are misconfigured.
+# global_throttle:
+#   rate: 1000            # global requests per second limit
+#   burst: 2000           # maximum burst size
+#   max_wait: "0s"        # "0s" = reject immediately when exceeded
+
 # --- Named Security Profiles ---
 # Define reusable security configurations here, then reference by name in routes.
 # Routes can use x-csar-security: "profile_name" (string) instead of repeating
@@ -380,7 +413,25 @@ paths:
   #       max_body_size: 1048576            # max response size to cache (1MB)
   #       methods: ["GET", "HEAD"]          # HTTP methods to cache
 
-  # --- Distributed Rate Limiting ---
+  # --- Policy Reference Syntax (string shorthand) ---
+  # Reference a named throttling policy by name instead of inline config:
+  # /api/v1/standard-route:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://my-api.internal"
+  #     x-csar-traffic: "standard-api"     # ← bare string references throttling_policies.standard-api
+  #
+  # --- Policy Reference with Inline Overrides ---
+  # Reference a policy and override specific fields:
+  # /api/v1/reports/generate:
+  #   post:
+  #     x-csar-backend:
+  #       target_url: "https://reports.internal"
+  #     x-csar-traffic:
+  #       use: "heavy-task"                # ← reference the "heavy-task" policy
+  #       max_wait: "60s"                  # ← override max_wait from policy
+  #
+  # --- Distributed Rate Limiting (Redis GCRA) ---
   # Use Redis for globally coordinated rate limiting across all CSAR pods.
   # /api/v1/shared-limit:
   #   get:
@@ -390,7 +441,26 @@ paths:
   #       rps: 100.0
   #       burst: 20
   #       max_wait: "5s"
-  #       backend: "redis"            # use Redis sliding window instead of local token bucket
+  #       backend: "redis"            # use Redis GCRA instead of local token bucket
+  #
+  # --- Dynamic Per-Entity Throttling ---
+  # Rate-limit each entity independently using a dynamic key template:
+  # /api/v1/seller/orders:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://seller-api.internal"
+  #     x-csar-traffic:
+  #       rps: 5.0
+  #       burst: 10
+  #       max_wait: "10s"
+  #       backend: "redis"
+  #       key: "seller:{query.seller_id}"    # each seller_id gets its own limit
+  #       exclude_ips:                        # IPs that bypass this throttle
+  #         - "10.0.0.0/8"
+  #       vip_overrides:                      # header-based policy switching
+  #         - header: "X-API-Key"
+  #           values:
+  #             "vip-key-123": "vip-unlimited"   # VIP clients get a different policy
   #
   # Use coordinator-assigned quotas (dynamic per-pod allocation):
   # /api/v1/coordinated-limit:

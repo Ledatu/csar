@@ -295,3 +295,93 @@ func TestThrottleManager_SyncKeys_AllActive(t *testing.T) {
 		t.Errorf("expected 2 keys, got %d", len(m.Keys()))
 	}
 }
+
+func TestWaiterInterface_ThrottlerSatisfies(t *testing.T) {
+	var w Waiter = New(10, 5, time.Second)
+	if w == nil {
+		t.Fatal("Throttler should satisfy Waiter interface")
+	}
+	if w.Waiting() != 0 {
+		t.Errorf("Waiting() = %d, want 0", w.Waiting())
+	}
+}
+
+func TestThrottleManager_RegisterWaiter(t *testing.T) {
+	m := NewManager()
+	th := New(10, 5, time.Second)
+	m.RegisterWaiter("custom:key", th)
+
+	got := m.Get("custom:key")
+	if got == nil {
+		t.Fatal("RegisterWaiter should store the waiter")
+	}
+	if got != th {
+		t.Error("Get should return the same waiter instance")
+	}
+}
+
+func TestThrottleManager_GlobalThrottle(t *testing.T) {
+	m := NewManager()
+
+	// Before setting
+	if m.GetGlobal() != nil {
+		t.Error("GetGlobal should return nil before setting")
+	}
+
+	// After setting
+	m.SetGlobal(1000, 2000, 0)
+	g := m.GetGlobal()
+	if g == nil {
+		t.Fatal("GetGlobal should return non-nil after setting")
+	}
+
+	// Should be usable
+	ctx := context.Background()
+	if err := g.Wait(ctx); err != nil {
+		t.Fatalf("global throttle Wait failed: %v", err)
+	}
+}
+
+func TestThrottleManager_UpdateQuota_Waiter(t *testing.T) {
+	m := NewManager()
+	th := New(1, 1, time.Second)
+	m.RegisterWaiter("key", th)
+
+	// UpdateQuota should work with Waiter
+	ok := m.UpdateQuota("key", 100, 50)
+	if !ok {
+		t.Error("UpdateQuota should return true for existing key")
+	}
+
+	// Verify the update took effect by testing we can make many fast requests
+	for i := 0; i < 10; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		err := th.Wait(ctx)
+		cancel()
+		if err != nil {
+			t.Fatalf("request %d should succeed after quota update: %v", i, err)
+		}
+	}
+}
+
+func TestThrottleManager_SyncKeys_WithWaiters(t *testing.T) {
+	m := NewManager()
+	m.Register("key1", 10, 5, time.Second)
+	m.RegisterWaiter("key2", New(20, 10, time.Second))
+
+	if len(m.Keys()) != 2 {
+		t.Fatalf("expected 2 keys, got %d", len(m.Keys()))
+	}
+
+	pruned := m.SyncKeys([]string{"key1"})
+	if pruned != 1 {
+		t.Errorf("expected 1 pruned, got %d", pruned)
+	}
+
+	if m.Get("key1") == nil {
+		t.Error("key1 should still exist")
+	}
+	if m.Get("key2") != nil {
+		t.Error("key2 should have been pruned")
+	}
+}
