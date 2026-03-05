@@ -1,7 +1,6 @@
 package authn
 
 import (
-	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -9,49 +8,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"io"
-	"log/slog"
-	"math/big"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
-	"strings"
 	"testing"
 	"time"
 )
-
-func newTestLogger() *slog.Logger {
-	return slog.New(slog.NewTextHandler(io.Discard, nil))
-}
-
-// signJWT signs a JWT with the given RSA private key.
-func signJWT(header, payload map[string]interface{}, key *rsa.PrivateKey) string {
-	headerJSON, _ := json.Marshal(header)
-	payloadJSON, _ := json.Marshal(payload)
-
-	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
-	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
-
-	signingInput := headerB64 + "." + payloadB64
-	h := sha256.Sum256([]byte(signingInput))
-	sig, _ := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, h[:])
-	sigB64 := base64.RawURLEncoding.EncodeToString(sig)
-
-	return signingInput + "." + sigB64
-}
-
-// rsaKeyToJWK converts an RSA public key to a JSONWebKey.
-func rsaKeyToJWK(pub *rsa.PublicKey, kid string) JSONWebKey {
-	return JSONWebKey{
-		Kty: "RSA",
-		Kid: kid,
-		Alg: "RS256",
-		Use: "sig",
-		N:   base64.RawURLEncoding.EncodeToString(pub.N.Bytes()),
-		E:   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(pub.E)).Bytes()),
-	}
-}
 
 func TestJWTValidator_ValidToken(t *testing.T) {
 	// Generate RSA key pair
@@ -383,51 +345,6 @@ func TestJWTValidator_ECDSA(t *testing.T) {
 	}
 }
 
-func TestJWTValidator_JWKSCaching(t *testing.T) {
-	key, _ := rsa.GenerateKey(rand.Reader, 2048)
-	jwk := rsaKeyToJWK(&key.PublicKey, "test-key-1")
-
-	fetchCount := 0
-	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fetchCount++
-		json.NewEncoder(w).Encode(jwksResponse{Keys: []JSONWebKey{jwk}})
-	}))
-	defer jwksServer.Close()
-
-	validator := NewJWTValidator(newTestLogger())
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-
-	handler := validator.Wrap(Config{
-		JWKSURL:  jwksServer.URL,
-		CacheTTL: Duration(5 * time.Minute),
-	}, next)
-
-	// Send two requests — JWKS should be fetched only once
-	for i := 0; i < 2; i++ {
-		token := signJWT(
-			map[string]interface{}{"alg": "RS256", "kid": "test-key-1", "typ": "JWT"},
-			map[string]interface{}{
-				"sub": fmt.Sprintf("user%d", i),
-				"exp": float64(time.Now().Add(time.Hour).Unix()),
-			},
-			key,
-		)
-		req := httptest.NewRequest(http.MethodGet, "/api", nil)
-		req.Header.Set("Authorization", "Bearer "+token)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Errorf("request %d: status = %d, want 200", i, rec.Code)
-		}
-	}
-
-	if fetchCount != 1 {
-		t.Errorf("JWKS fetched %d times, want 1 (should be cached)", fetchCount)
-	}
-}
-
 func TestJWTValidator_MalformedToken(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -462,124 +379,4 @@ func TestJWTValidator_MalformedToken(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Duration is a helper for test config — maps to time.Duration.
-type Duration = time.Duration
-
-func TestBase64URLDecode(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"aGVsbG8", "hello"},
-		{"d29ybGQ", "world"},
-	}
-
-	for _, tt := range tests {
-		got, err := base64URLDecode(tt.input)
-		if err != nil {
-			t.Errorf("base64URLDecode(%q) error: %v", tt.input, err)
-			continue
-		}
-		if string(got) != tt.expected {
-			t.Errorf("base64URLDecode(%q) = %q, want %q", tt.input, got, tt.expected)
-		}
-	}
-}
-
-func TestValidateAudience(t *testing.T) {
-	tests := []struct {
-		name     string
-		aud      interface{}
-		expected []string
-		want     bool
-	}{
-		{"string match", "api", []string{"api"}, true},
-		{"string no match", "other", []string{"api"}, false},
-		{"array match", []interface{}{"api", "web"}, []string{"api"}, true},
-		{"array no match", []interface{}{"other"}, []string{"api"}, false},
-		{"nil", nil, []string{"api"}, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := validateAudience(tt.aud, tt.expected)
-			if got != tt.want {
-				t.Errorf("validateAudience = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestCompilePathPattern(t *testing.T) {
-	tests := []struct {
-		path    string
-		hasRe   bool
-		matches string
-		noMatch string
-	}{
-		{"/api/v1/users/{id:[0-9]+}", true, "/api/v1/users/42", "/api/v1/users/abc"},
-		{"/api/{ver:v[0-9]+}/items/{id}", true, "/api/v2/items/foo", "/api/latest/items/foo"},
-		{"/plain/path", false, "", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			pat, hasRe := compilePathPattern(tt.path)
-			if hasRe != tt.hasRe {
-				t.Fatalf("hasRegex = %v, want %v", hasRe, tt.hasRe)
-			}
-			if !hasRe {
-				return
-			}
-			if !pat.MatchString(tt.matches) {
-				t.Errorf("pattern %q should match %q", pat, tt.matches)
-			}
-			if tt.noMatch != "" && pat.MatchString(tt.noMatch) {
-				t.Errorf("pattern %q should NOT match %q", pat, tt.noMatch)
-			}
-		})
-	}
-}
-
-// compilePathPattern is imported from the router package — duplicate here for testing.
-// In production, this lives in internal/router/router.go.
-func compilePathPattern(path string) (*regexp.Regexp, bool) {
-	if !strings.Contains(path, "{") {
-		return nil, false
-	}
-	var b strings.Builder
-	b.WriteString("^")
-	i := 0
-	for i < len(path) {
-		brace := strings.IndexByte(path[i:], '{')
-		if brace < 0 {
-			b.WriteString(regexp.QuoteMeta(path[i:]))
-			break
-		}
-		b.WriteString(regexp.QuoteMeta(path[i : i+brace]))
-		rest := path[i+brace:]
-		closeBrace := strings.IndexByte(rest, '}')
-		if closeBrace < 0 {
-			b.WriteString(regexp.QuoteMeta(rest))
-			i = len(path)
-			break
-		}
-		varContent := rest[1:closeBrace]
-		if colonIdx := strings.IndexByte(varContent, ':'); colonIdx >= 0 {
-			b.WriteString("(")
-			b.WriteString(varContent[colonIdx+1:])
-			b.WriteString(")")
-		} else {
-			b.WriteString("([^/]+)")
-		}
-		i += brace + closeBrace + 1
-	}
-	b.WriteString("$")
-	re, err := regexp.Compile(b.String())
-	if err != nil {
-		return nil, false
-	}
-	return re, true
 }

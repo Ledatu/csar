@@ -1,0 +1,402 @@
+package router
+
+import (
+	"fmt"
+	"net"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/ledatu/csar/internal/cors"
+	"github.com/ledatu/csar/internal/resilience"
+	"github.com/ledatu/csar/internal/throttle"
+	"github.com/ledatu/csar/pkg/middleware"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+)
+
+// ServeHTTP implements the http.Handler interface.
+// Pipeline: match route -> strip sensitive headers -> security inject -> throttle.Wait -> circuit_breaker -> proxy.Forward
+func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	rt, captures := r.matchRoute(req.Method, req.URL.Path)
+	if rt == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprintf(w, `{"error":"no route matched","path":%q,"method":%q}`, req.URL.Path, req.Method)
+		return
+	}
+
+	// Apply path rewriting for regex routes (audit §3.2).
+	if rt.pathRewrite != "" && len(captures) > 0 {
+		rewritten := rt.pathPattern.ReplaceAllString(req.URL.Path, rt.pathRewrite)
+		req.URL.Path = rewritten
+		req.URL.RawPath = "" // reset encoded path
+	}
+
+	// Step -2: CORS preflight handling (checked before IP access control).
+	// This allows browsers to make OPTIONS preflight requests even from
+	// restricted networks (audit §3.2 Criticism 5).
+	if rt.corsConfig != nil {
+		corsMiddleware := cors.New()
+		corsCfg := cors.Config{
+			AllowedOrigins:   rt.corsConfig.AllowedOrigins,
+			AllowedMethods:   rt.corsConfig.AllowedMethods,
+			AllowedHeaders:   rt.corsConfig.AllowedHeaders,
+			ExposedHeaders:   rt.corsConfig.ExposedHeaders,
+			AllowCredentials: rt.corsConfig.AllowCredentials,
+			MaxAge:           rt.corsConfig.MaxAge,
+		}
+
+		// For OPTIONS preflight, handle immediately without further pipeline.
+		if req.Method == http.MethodOptions && req.Header.Get("Origin") != "" {
+			corsMiddleware.Wrap(corsCfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// no-op: preflight already handled by CORS middleware.
+			})).ServeHTTP(w, req)
+			return
+		}
+
+		// For normal requests, wrap the remaining pipeline with CORS headers.
+		corsMiddleware.Wrap(corsCfg, http.HandlerFunc(func(cw http.ResponseWriter, cr *http.Request) {
+			r.serveWithIPCheck(cw, cr, rt)
+		})).ServeHTTP(w, req)
+		return
+	}
+
+	r.serveWithIPCheck(w, req, rt)
+}
+
+// serveWithIPCheck continues the pipeline after CORS processing.
+func (r *Router) serveWithIPCheck(w http.ResponseWriter, req *http.Request, rt *route) {
+	// Step -1: IP access control (checked before anything else)
+	if !r.checkIPAccess(rt, req) {
+		clientIP := extractClientIP(req, rt.trustProxy)
+		r.logger.Warn("request denied by IP allowlist",
+			"client_ip", clientIP,
+			"route", rt.routeKey,
+		)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprintf(w, `{"error":"access denied","client_ip":%q}`, clientIP)
+		return
+	}
+
+	// Start tracing span
+	var span trace.Span
+	if r.telemetry != nil {
+		req, span = r.telemetry.StartSpan(req, "csar.route",
+			attribute.String("csar.route", rt.routeKey),
+			attribute.String("http.method", req.Method),
+			attribute.String("http.path", req.URL.Path),
+		)
+		defer span.End()
+	}
+
+	// Step 0a: Inbound JWT validation (audit §3.3.1).
+	// If the route requires JWT auth-validate, validate the token before proceeding.
+	if rt.jwtConfig != nil && r.jwtValidator != nil {
+		validated := r.jwtValidator.Wrap(*rt.jwtConfig, http.HandlerFunc(func(vw http.ResponseWriter, vr *http.Request) {
+			r.serveAfterAuth(vw, vr, rt)
+		}))
+		validated.ServeHTTP(w, req)
+		return
+	}
+
+	r.serveAfterAuth(w, req, rt)
+}
+
+// serveAfterAuth runs the pipeline after inbound JWT validation.
+// Pipeline continues: static headers -> security inject -> throttle -> circuit breaker -> proxy.
+func (r *Router) serveAfterAuth(w http.ResponseWriter, req *http.Request, rt *route) {
+	// Step 0b-0: Inject static headers from x-csar-headers.
+	// These are fixed per-route headers like User-Agent or x-client-secret
+	// that don't need KMS decryption.
+	for k, v := range rt.config.Headers {
+		req.Header.Set(k, v)
+	}
+
+	// Step 0b-1: Security — strip incoming headers and inject decrypted tokens.
+	// The router refuses to start if security config is set without an injector,
+	// so authInjector is guaranteed non-nil here. The nil check is purely defensive.
+	if len(rt.config.Security) > 0 && len(rt.injectHeaders) > 0 {
+		// Strip all client-supplied values for inject headers to prevent spoofing.
+		for _, h := range rt.injectHeaders {
+			req.Header.Del(h)
+		}
+
+		if r.authInjector == nil {
+			// Fail closed: should never happen (caught at init), but don't proxy without creds.
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, `{"error":"security injection required but not configured"}`)
+			return
+		}
+
+		// Build a handler chain: pipeline <- security[n-1] <- ... <- security[0].
+		// Each Wrap call creates a handler that resolves + injects one credential,
+		// then calls the next handler in the chain.
+		//
+		// Query param stripping: To avoid the multi-credential ordering bug where
+		// entry A strips a {query.*} param that entry B still needs, we collect
+		// ALL referenced query keys first, inject all credentials, then strip once
+		// before proxying (at the innermost handler, after all Wraps have run).
+
+		// Collect query params to strip from all security entries that have strip enabled.
+		var stripRefs []string
+		for _, sec := range rt.config.Security {
+			if sec.ShouldStripTokenParams() {
+				stripRefs = append(stripRefs, sec.TokenRef)
+			}
+		}
+		stripKeys := middleware.CollectQueryPlaceholders(stripRefs...)
+
+		var handler http.Handler = http.HandlerFunc(func(iw http.ResponseWriter, ir *http.Request) {
+			// Strip consumed query params ONCE, after all credentials have been resolved.
+			middleware.StripQueryKeys(ir, stripKeys)
+			r.servePipeline(iw, ir, rt)
+		})
+		for i := len(rt.config.Security) - 1; i >= 0; i-- {
+			sec := rt.config.Security[i]
+			authCfg := middleware.AuthInjectorConfig{
+				TokenRef:     sec.TokenRef,
+				KMSKeyID:     sec.KMSKeyID,
+				InjectHeader: sec.InjectHeader,
+				InjectFormat: sec.InjectFormat,
+				OnKMSError:   sec.OnKMSError,
+				TokenVersion: sec.TokenVersion,
+			}
+			handler = r.authInjector.Wrap(authCfg, handler)
+		}
+		handler.ServeHTTP(w, req)
+		return
+	}
+
+	r.servePipeline(w, req, rt)
+}
+
+// servePipeline runs the throttle -> circuit breaker -> proxy pipeline.
+func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *route) {
+	var totalWait time.Duration
+
+	// Step 0: Global throttle (fast in-memory counter, checked first)
+	if globalT := r.throttleManager.GetGlobal(); globalT != nil {
+		waitStart := time.Now()
+		if err := globalT.Wait(req.Context()); err != nil {
+			r.logger.Warn("request throttled by global limit",
+				"path", req.URL.Path,
+				"method", req.Method,
+				"error", err,
+			)
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", "5")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintf(w, `{"error":"global rate limit exceeded","detail":%q}`, err.Error())
+			return
+		}
+		totalWait += time.Since(waitStart)
+	}
+
+	// Step 1: Per-route throttle (smoothing — wait instead of reject)
+	if rt.throttler != nil {
+		// Check exclude-IPs: skip throttle if client IP is in the exclusion list.
+		skipThrottle := false
+		if len(rt.excludeIPs) > 0 {
+			clientIP := extractClientIP(req, rt.trustProxy)
+			ip := net.ParseIP(clientIP)
+			if ip != nil {
+				for _, cidr := range rt.excludeIPs {
+					if cidr.Contains(ip) {
+						skipThrottle = true
+						break
+					}
+				}
+			}
+		}
+
+		if !skipThrottle {
+			// Determine which throttler to use: check VIP overrides first.
+			activeThrottler := rt.throttler
+			for _, vo := range rt.vipOverrides {
+				headerVal := req.Header.Get(vo.header)
+				if headerVal != "" {
+					if altThrottler, ok := vo.values[headerVal]; ok {
+						activeThrottler = altThrottler
+						break
+					}
+				}
+			}
+
+			// Update queue depth metric
+			if r.metrics != nil {
+				r.metrics.SetThrottleQueueDepth(rt.routeKey, activeThrottler.Waiting()+1)
+			}
+
+			// Store request in context for dynamic key resolution.
+			ctx := throttle.WithRequest(req.Context(), req)
+
+			waitStart := time.Now()
+			err := activeThrottler.Wait(ctx)
+			waitDur := time.Since(waitStart)
+			totalWait += waitDur
+
+			if r.metrics != nil {
+				r.metrics.SetThrottleQueueDepth(rt.routeKey, activeThrottler.Waiting())
+			}
+
+			if err != nil {
+				if r.metrics != nil {
+					r.metrics.RecordThrottleWait(rt.routeKey, waitDur, true)
+				}
+				r.logger.Warn("request throttled",
+					"path", req.URL.Path,
+					"method", req.Method,
+					"error", err,
+				)
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Retry-After", "5")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				fmt.Fprintf(w, `{"error":"service temporarily unavailable","detail":%q}`, err.Error())
+				return
+			}
+
+			if r.metrics != nil {
+				r.metrics.RecordThrottleWait(rt.routeKey, waitDur, false)
+			}
+		}
+	}
+
+	// Set X-CSAR-Wait-MS response header with actual wait duration.
+	if totalWait > 0 {
+		w.Header().Set("X-CSAR-Wait-MS", strconv.FormatInt(totalWait.Milliseconds(), 10))
+	}
+
+	// Step 2: Circuit breaker
+	if rt.circuitBreaker != nil {
+		if r.metrics != nil {
+			r.metrics.SetCircuitBreakerState(rt.routeKey, int(rt.circuitBreaker.State()))
+		}
+
+		proxyCalled := false
+		err := rt.circuitBreaker.Execute(func() error {
+			proxyCalled = true
+			// Step 3: Proxy to upstream (inside circuit breaker)
+			rec := &statusCapture{ResponseWriter: w, statusCode: 200}
+			upstreamStart := time.Now()
+			r.upstreamHandler(rt).ServeHTTP(rec, req)
+			upstreamDur := time.Since(upstreamStart)
+
+			if r.metrics != nil {
+				r.metrics.RecordUpstream(rt.routeKey, rec.statusCode, upstreamDur)
+			}
+
+			if rec.statusCode >= 500 {
+				return fmt.Errorf("upstream returned %d", rec.statusCode)
+			}
+			return nil
+		})
+
+		if err != nil {
+			if r.metrics != nil {
+				r.metrics.SetCircuitBreakerState(rt.routeKey, int(rt.circuitBreaker.State()))
+				if rt.circuitBreaker.State() == resilience.StateOpen {
+					r.metrics.RecordCircuitBreakerTrip(rt.routeKey)
+				}
+			}
+			// Only write an error response if the proxy was never called
+			// (circuit was already open). If the proxy was called and
+			// returned 5xx, the response is already written to the client.
+			if !proxyCalled {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				fmt.Fprintf(w, `{"error":"circuit breaker open","route":%q}`, rt.routeKey)
+			}
+		}
+		return
+	}
+
+	// Step 3 (no circuit breaker): Proxy to upstream directly
+	upstreamStart := time.Now()
+	r.upstreamHandler(rt).ServeHTTP(w, req)
+	if r.metrics != nil {
+		r.metrics.RecordUpstream(rt.routeKey, 0, time.Since(upstreamStart))
+	}
+}
+
+// upstreamHandler returns the handler that proxies to the upstream.
+// Applies middleware layers in order: DLP wraps retry wraps proxy.
+// Multi-tenant routing replaces the proxy entirely.
+//
+// Streaming protocol bypass (audit §3.2): WebSocket upgrades and SSE
+// connections skip DLP and Retry middleware to avoid buffering breakage.
+func (r *Router) upstreamHandler(rt *route) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Streaming protocol bypass: skip buffering middleware for WebSocket/SSE.
+		if isStreamingRequest(req) {
+			r.logger.Debug("streaming protocol detected, bypassing DLP/Retry",
+				"route", rt.routeKey,
+				"upgrade", req.Header.Get("Connection"),
+			)
+			r.baseProxy(rt).ServeHTTP(w, req)
+			return
+		}
+
+		// Base handler: tenant routing OR retry-wrapped proxy OR plain proxy.
+		handler := r.baseProxy(rt)
+		if rt.retryHandler != nil {
+			handler = rt.retryHandler
+		}
+
+		// Wrap with DLP redaction (audit §3.3.2).
+		if rt.dlpConfig != nil && r.dlpRedactor != nil {
+			handler = r.dlpRedactor.Wrap(*rt.dlpConfig, handler)
+		}
+
+		// Wrap with response caching (audit §3.3).
+		if rt.cacheConfig != nil && r.responseCache != nil {
+			handler = r.responseCache.Wrap(*rt.cacheConfig, handler)
+		}
+
+		handler.ServeHTTP(w, req)
+	})
+}
+
+// baseProxy returns the base proxy handler (tenant routing or direct proxy).
+func (r *Router) baseProxy(rt *route) http.Handler {
+	if rt.tenantConfig != nil && r.tenantRouter != nil {
+		return r.tenantRouter.Proxy(*rt.tenantConfig, nil)
+	}
+	if rt.loadBalancer != nil {
+		return rt.loadBalancer
+	}
+	return rt.proxy
+}
+
+// isStreamingRequest detects WebSocket upgrade requests and SSE connections.
+// These must bypass buffering middleware (DLP, Retry) to function correctly.
+func isStreamingRequest(r *http.Request) bool {
+	// WebSocket: Connection: Upgrade + Upgrade: websocket
+	conn := strings.ToLower(r.Header.Get("Connection"))
+	upgrade := strings.ToLower(r.Header.Get("Upgrade"))
+	if strings.Contains(conn, "upgrade") && upgrade == "websocket" {
+		return true
+	}
+
+	// SSE: Accept: text/event-stream
+	accept := r.Header.Get("Accept")
+	if strings.Contains(accept, "text/event-stream") {
+		return true
+	}
+
+	return false
+}
+
+// statusCapture captures the HTTP status code without blocking the response.
+type statusCapture struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (s *statusCapture) WriteHeader(code int) {
+	s.statusCode = code
+	s.ResponseWriter.WriteHeader(code)
+}
