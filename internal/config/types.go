@@ -492,6 +492,11 @@ type TrafficConfig struct {
 	// VIPOverrides allows specific API keys (identified by a header value)
 	// to use an alternate throttling policy instead of the default one.
 	VIPOverrides []VIPOverride `yaml:"vip_overrides,omitempty" json:"vip_overrides,omitempty"`
+
+	// AdaptiveBackpressure enables upstream backpressure awareness.
+	// When enabled, the router reads Retry-After / X-RateLimit-Reset headers
+	// from upstream 429 responses and suspends the token bucket accordingly.
+	AdaptiveBackpressure *AdaptiveBackpressureConfig `yaml:"adaptive_backpressure,omitempty" json:"adaptive_backpressure,omitempty"`
 }
 
 // UnmarshalYAML handles bare string (policy reference) and inline object syntax.
@@ -596,6 +601,41 @@ type RetryConfig struct {
 	// RetryableMethods is the set of HTTP methods eligible for retry.
 	// Default: ["GET", "HEAD", "OPTIONS"].
 	RetryableMethods []string `yaml:"retryable_methods,omitempty" json:"retryable_methods,omitempty"`
+
+	// AutoRetry429 enables transparent internal retries for upstream 429 responses.
+	// When true and the upstream provides Retry-After, the router holds the client
+	// connection, sleeps for the upstream-specified delay, and retries internally.
+	// The client receives a 200 without ever seeing the 429.
+	AutoRetry429 bool `yaml:"auto_retry_429,omitempty" json:"auto_retry_429,omitempty"`
+
+	// MaxInternalWait is the maximum time the router will hold a client connection
+	// while waiting for an upstream backpressure period to pass.
+	// If the upstream asks to wait longer than this, the router returns 503 + X-CSAR-Status.
+	// Default: "30s".
+	MaxInternalWait Duration `yaml:"max_internal_wait,omitempty" json:"max_internal_wait,omitempty"`
+}
+
+// AdaptiveBackpressureConfig configures upstream backpressure awareness.
+// When enabled, the router reads rate-limit headers from upstream 429 responses
+// and dynamically suspends the token bucket to avoid hammering the upstream.
+type AdaptiveBackpressureConfig struct {
+	// Enabled toggles adaptive backpressure.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// RespectHeaders is the ordered list of response headers to check for wait time.
+	// Default: ["Retry-After", "X-RateLimit-Reset"].
+	RespectHeaders []string `yaml:"respect_headers,omitempty" json:"respect_headers,omitempty"`
+
+	// SuspendBucket pauses token generation for the route when backpressure is detected.
+	// Any incoming client requests during the suspension period wait in the queue
+	// (up to their max_wait), preventing them from hitting the upstream.
+	SuspendBucket bool `yaml:"suspend_bucket,omitempty" json:"suspend_bucket,omitempty"`
+
+	// MaxBodyBuffer caps the request body size (in bytes) that the backpressure
+	// middleware will buffer for transparent retry replay. Bodies larger than
+	// this bypass interception entirely and are proxied directly.
+	// Default: 10 MiB. Set to 0 to use the default.
+	MaxBodyBuffer int64 `yaml:"max_body_buffer,omitempty" json:"max_body_buffer,omitempty"`
 }
 
 // AuthValidateConfig configures inbound JWT/JWKS validation (audit §3.3.1).

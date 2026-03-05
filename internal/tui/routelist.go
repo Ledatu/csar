@@ -107,6 +107,7 @@ type routeListKeyMap struct {
 	Save   key.Binding
 	Reload key.Binding
 	Quit   key.Binding
+	Add    key.Binding
 }
 
 func newRouteListKeyMap() routeListKeyMap {
@@ -127,6 +128,10 @@ func newRouteListKeyMap() routeListKeyMap {
 			key.WithKeys("q", "ctrl+c"),
 			key.WithHelp("q", "quit"),
 		),
+		Add: key.NewBinding(
+			key.WithKeys("a"),
+			key.WithHelp("a", "add route"),
+		),
 	}
 }
 
@@ -145,10 +150,10 @@ func NewRouteList(cfg *config.Config, width, height int) RouteListModel {
 
 	keys := newRouteListKeyMap()
 	l.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{keys.Enter, keys.Save}
+		return []key.Binding{keys.Enter, keys.Add, keys.Save}
 	}
 	l.AdditionalFullHelpKeys = func() []key.Binding {
-		return []key.Binding{keys.Enter, keys.Save, keys.Reload}
+		return []key.Binding{keys.Enter, keys.Add, keys.Save, keys.Reload}
 	}
 
 	return RouteListModel{
@@ -171,6 +176,12 @@ func (m RouteListModel) SelectedRoute() *RouteItem {
 func (m *RouteListModel) UpdateItem(index int, item RouteItem) {
 	cmd := m.list.SetItem(index, item)
 	_ = cmd // discard tea.Cmd since we handle it in Update
+}
+
+// AddItem appends a new route item to the list.
+func (m *RouteListModel) AddItem(item RouteItem) {
+	cmd := m.list.InsertItem(len(m.list.Items()), item)
+	_ = cmd
 }
 
 // SelectedIndex returns the currently selected index.

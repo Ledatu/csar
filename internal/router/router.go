@@ -32,7 +32,8 @@ type route struct {
 	loadBalancer   http.Handler              // nil if no load balancing; otherwise a load-balancing handler
 	throttler      throttle.Waiter           // nil if no traffic shaping configured
 	circuitBreaker *resilience.CircuitBreaker // nil if no resilience configured
-	retryHandler   http.Handler              // proxy wrapped with retry middleware (nil = use proxy directly)
+	backpressureHandler http.Handler              // proxy wrapped with backpressure middleware (nil = disabled)
+	retryHandler        http.Handler              // proxy wrapped with retry middleware (nil = use proxy directly)
 	routeKey       string                    // "METHOD:PATH"
 	injectHeaders  []string                  // headers to strip/inject for security (e.g. ["Authorization", "X-Client-Secret"])
 	allowCIDRs     []*net.IPNet              // nil = use global; empty after init = deny all (shouldn't happen)

@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
+	"time"
 
 	"github.com/ledatu/csar/internal/authn"
+	"github.com/ledatu/csar/internal/backpressure"
 	"github.com/ledatu/csar/internal/cache"
 	"github.com/ledatu/csar/internal/config"
 	"github.com/ledatu/csar/internal/dlp"
@@ -169,6 +172,11 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 			)
 		}
 	}
+
+	// Set up backpressure middleware if adaptive_backpressure or auto_retry_429 is enabled.
+	// Must come before retry so that retry wraps backpressure in the handler chain:
+	//   retry → backpressure → proxy
+	r.setupBackpressure(rt, fr, key, logger)
 
 	// Set up retry middleware if retry config is present (audit §3.1).
 	if fr.Route.Retry != nil {
@@ -437,7 +445,18 @@ func (r *Router) setupThrottle(rt *route, cfg *config.Config, fr config.FlatRout
 }
 
 // setupRetry configures retry middleware for a route.
+// If backpressure middleware was already set up, retry wraps it instead of
+// the raw proxy — forming the chain: retry → backpressure → proxy.
 func (r *Router) setupRetry(rt *route, fr config.FlatRoute, key string, logger *slog.Logger) {
+	// Determine the base handler for retry to wrap.
+	var baseHandler http.Handler = rt.proxy
+	if rt.loadBalancer != nil {
+		baseHandler = rt.loadBalancer
+	}
+	if rt.backpressureHandler != nil {
+		baseHandler = rt.backpressureHandler
+	}
+
 	retryCfg := retry.Config{
 		MaxAttempts: fr.Route.Retry.MaxAttempts,
 		Backoff:     fr.Route.Retry.Backoff.Duration,
@@ -455,11 +474,61 @@ func (r *Router) setupRetry(rt *route, fr config.FlatRoute, key string, logger *
 			retryCfg.RetryableMethods[strings.ToUpper(m)] = struct{}{}
 		}
 	}
-	rt.retryHandler = retry.New(rt.proxy, retryCfg, logger)
+	rt.retryHandler = retry.New(baseHandler, retryCfg, logger)
 	logger.Info("retry middleware enabled",
 		"route", key,
 		"max_attempts", retryCfg.MaxAttempts,
 		"backoff", retryCfg.Backoff,
+	)
+}
+
+// setupBackpressure configures the upstream backpressure middleware for a route.
+// Enabled when either adaptive_backpressure (traffic config) or auto_retry_429
+// (retry config) is set. Wraps the base proxy handler.
+func (r *Router) setupBackpressure(rt *route, fr config.FlatRoute, key string, logger *slog.Logger) {
+	hasAdaptive := fr.Route.Traffic != nil &&
+		fr.Route.Traffic.AdaptiveBackpressure != nil &&
+		fr.Route.Traffic.AdaptiveBackpressure.Enabled
+	hasAutoRetry := fr.Route.Retry != nil && fr.Route.Retry.AutoRetry429
+
+	if !hasAdaptive && !hasAutoRetry {
+		return
+	}
+
+	bpCfg := backpressure.Config{
+		Enabled: true,
+	}
+
+	if hasAdaptive {
+		abp := fr.Route.Traffic.AdaptiveBackpressure
+		bpCfg.RespectHeaders = abp.RespectHeaders
+		bpCfg.SuspendBucket = abp.SuspendBucket
+		if abp.MaxBodyBuffer > 0 {
+			bpCfg.MaxBodyBuffer = abp.MaxBodyBuffer
+		}
+	}
+
+	if hasAutoRetry {
+		bpCfg.AutoRetry = true
+		bpCfg.MaxInternalWait = fr.Route.Retry.MaxInternalWait.Duration
+		if bpCfg.MaxInternalWait == 0 {
+			bpCfg.MaxInternalWait = 30 * time.Second
+		}
+	}
+
+	// Determine the base handler to wrap.
+	var baseHandler http.Handler = rt.proxy
+	if rt.loadBalancer != nil {
+		baseHandler = rt.loadBalancer
+	}
+
+	rt.backpressureHandler = backpressure.New(baseHandler, bpCfg, rt.throttler, logger)
+	logger.Info("backpressure middleware enabled",
+		"route", key,
+		"adaptive", hasAdaptive,
+		"auto_retry_429", hasAutoRetry,
+		"suspend_bucket", bpCfg.SuspendBucket,
+		"max_internal_wait", bpCfg.MaxInternalWait,
 	)
 }
 

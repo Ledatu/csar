@@ -19,6 +19,9 @@ func renderEnvExample(r *GenerateResult) string {
 		b.WriteString("# TLS certificates\n")
 		b.WriteString(fmt.Sprintf("CSAR_TLS_CERT_FILE=%s\n", r.TLSCert))
 		b.WriteString(fmt.Sprintf("CSAR_TLS_KEY_FILE=%s\n", r.TLSKey))
+		if r.TLSCA != "" {
+			b.WriteString(fmt.Sprintf("CSAR_TLS_CA_FILE=%s\n", r.TLSCA))
+		}
 		b.WriteString("\n")
 	}
 
@@ -27,6 +30,17 @@ func renderEnvExample(r *GenerateResult) string {
 	b.WriteString(fmt.Sprintf("CSAR_KMS_PROVIDER=%s\n", r.KMSProvider))
 	if r.KMSProvider == "local" {
 		b.WriteString("CSAR_KMS_LOCAL_KEYS=dev-key=dev-passphrase\n")
+	} else if r.KMSProvider == "yandexapi" {
+		if r.YandexKMSKeyID != "" {
+			b.WriteString(fmt.Sprintf("CSAR_KMS_KEY_ID=%s\n", r.YandexKMSKeyID))
+		} else {
+			b.WriteString("CSAR_KMS_KEY_ID=<your-kms-key-id>\n")
+		}
+		b.WriteString("\n")
+		b.WriteString("# Yandex Cloud KMS — IAM token for authentication\n")
+		b.WriteString("# Generate with: yc iam create-token\n")
+		// Never persist secrets — always use a placeholder.
+		b.WriteString("YANDEX_IAM_TOKEN=<your-yandex-iam-token>\n")
 	} else {
 		b.WriteString("CSAR_KMS_KEY_ID=your-kms-key-id\n")
 	}
@@ -36,11 +50,10 @@ func renderEnvExample(r *GenerateResult) string {
 	if r.EnableCoordinator {
 		b.WriteString("# Coordinator connection (gRPC)\n")
 		b.WriteString(fmt.Sprintf("CSAR_COORDINATOR_ADDRESS=%s\n", r.CoordinatorAddress))
-		isProd := r.Profile == "prod-single" || r.Profile == "prod-distributed"
-		if isProd {
-			b.WriteString("CSAR_COORDINATOR_CA_FILE=/etc/csar/tls/coordinator-ca.pem\n")
-			b.WriteString("CSAR_COORDINATOR_CERT_FILE=/etc/csar/tls/router-client-cert.pem\n")
-			b.WriteString("CSAR_COORDINATOR_KEY_FILE=/etc/csar/tls/router-client-key.pem\n")
+		if r.EnableTLS {
+			b.WriteString(fmt.Sprintf("CSAR_COORDINATOR_CA_FILE=%s\n", r.CoordinatorCACert))
+			b.WriteString(fmt.Sprintf("CSAR_COORDINATOR_CERT_FILE=%s\n", r.CoordinatorCertFile))
+			b.WriteString(fmt.Sprintf("CSAR_COORDINATOR_KEY_FILE=%s\n", r.CoordinatorKeyFile))
 		}
 		b.WriteString("\n")
 	}
@@ -49,11 +62,8 @@ func renderEnvExample(r *GenerateResult) string {
 	if r.RateLimitBackend == "redis" {
 		b.WriteString("# Redis\n")
 		b.WriteString(fmt.Sprintf("REDIS_ADDRESS=%s\n", r.RedisAddress))
-		if r.RedisPassword != "" {
-			b.WriteString(fmt.Sprintf("REDIS_PASSWORD=%s\n", r.RedisPassword))
-		} else {
-			b.WriteString("REDIS_PASSWORD=\n")
-		}
+		// Never persist secrets — always use a placeholder.
+		b.WriteString("REDIS_PASSWORD=<your-redis-password>\n")
 		b.WriteString("\n")
 	}
 
@@ -69,8 +79,9 @@ func renderEnvExample(r *GenerateResult) string {
 	// Token store
 	if r.IncludePostgres {
 		b.WriteString("# Token store DSN (for coordinator)\n")
-		b.WriteString(fmt.Sprintf("CSAR_TOKEN_STORE_DSN=postgres://csar:%s@postgres:5432/csar?sslmode=disable\n", r.PostgresPassword))
-		b.WriteString(fmt.Sprintf("POSTGRES_PASSWORD=%s\n", r.PostgresPassword))
+		// Never persist secrets — use placeholders.
+		b.WriteString("CSAR_TOKEN_STORE_DSN=postgres://csar:<password>@postgres:5432/csar?sslmode=disable\n")
+		b.WriteString("POSTGRES_PASSWORD=<your-postgres-password>\n")
 		b.WriteString("\n")
 	}
 

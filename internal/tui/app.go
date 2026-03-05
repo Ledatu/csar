@@ -32,6 +32,7 @@ type appScreen int
 const (
 	screenList appScreen = iota
 	screenEdit
+	screenAdd
 )
 
 // AppModel is the top-level Bubble Tea model for the TUI route editor.
@@ -41,6 +42,7 @@ type AppModel struct {
 	screen     appScreen
 	routeList  RouteListModel
 	routeEdit  RouteEditModel
+	routeAdd   RouteAddModel
 	width      int
 	height     int
 	statusMsg  string
@@ -95,12 +97,22 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateList(msg)
 		case screenEdit:
 			return m.updateEdit(msg)
+		case screenAdd:
+			return m.updateAdd(msg)
 		}
 
 	case RouteUpdatedMsg:
 		return m.handleRouteUpdated(msg)
 
 	case RouteEditCancelledMsg:
+		m.screen = screenList
+		m.statusMsg = ""
+		return m, nil
+
+	case RouteAddedMsg:
+		return m.handleRouteAdded(msg)
+
+	case RouteAddCancelledMsg:
 		m.screen = screenList
 		m.statusMsg = ""
 		return m, nil
@@ -125,6 +137,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.routeEdit, cmd = m.routeEdit.Update(msg)
 			return m, cmd
+		case screenAdd:
+			var cmd tea.Cmd
+			m.routeAdd, cmd = m.routeAdd.Update(msg)
+			return m, cmd
 		}
 	}
 
@@ -140,6 +156,11 @@ func (m AppModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.screen = screenEdit
 			return m, m.routeEdit.Init()
 		}
+
+	case "a":
+		m.routeAdd = NewRouteAdd(m.width, m.height)
+		m.screen = screenAdd
+		return m, m.routeAdd.Init()
 
 	case "ctrl+s":
 		return m, m.pushConfig()
@@ -159,6 +180,12 @@ func (m AppModel) updateEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m AppModel) updateAdd(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.routeAdd, cmd = m.routeAdd.Update(msg)
+	return m, cmd
+}
+
 func (m AppModel) handleRouteUpdated(msg RouteUpdatedMsg) (tea.Model, tea.Cmd) {
 	// Apply the edit back to the config
 	item := msg.Item
@@ -169,6 +196,26 @@ func (m AppModel) handleRouteUpdated(msg RouteUpdatedMsg) (tea.Model, tea.Cmd) {
 	m.routeList.UpdateItem(msg.Index, item)
 	m.screen = screenList
 	m.statusMsg = SuccessStyle.Render(fmt.Sprintf("%s Route updated: %s %s", IconCheck, strings.ToUpper(item.Method), item.Path))
+	m.statusErr = false
+	return m, nil
+}
+
+func (m AppModel) handleRouteAdded(msg RouteAddedMsg) (tea.Model, tea.Cmd) {
+	item := msg.Item
+
+	// Add to config
+	if m.cfg.Paths == nil {
+		m.cfg.Paths = make(map[string]config.PathConfig)
+	}
+	if _, ok := m.cfg.Paths[item.Path]; !ok {
+		m.cfg.Paths[item.Path] = make(config.PathConfig)
+	}
+	m.cfg.Paths[item.Path][item.Method] = item.Route
+
+	// Add to list
+	m.routeList.AddItem(item)
+	m.screen = screenList
+	m.statusMsg = SuccessStyle.Render(fmt.Sprintf("%s Route added: %s %s", IconCheck, strings.ToUpper(item.Method), item.Path))
 	m.statusErr = false
 	return m, nil
 }
@@ -216,6 +263,8 @@ func (m AppModel) View() string {
 		view = m.routeList.View()
 	case screenEdit:
 		view = m.routeEdit.View()
+	case screenAdd:
+		view = m.routeAdd.View()
 	}
 
 	// Status bar at the bottom

@@ -3,6 +3,7 @@ package throttle
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -24,8 +25,26 @@ type Waiter interface {
 	UpdateLimit(rps float64, burst int)
 }
 
+// Suspendable is an optional interface for throttlers that support
+// upstream backpressure suspension. When the upstream returns 429 with
+// a Retry-After header, the router calls SuspendFor to pause token
+// generation, preventing queued requests from hitting the upstream.
+type Suspendable interface {
+	SuspendFor(d time.Duration)
+}
+
+// RetryEstimator is an optional interface for throttlers that can compute
+// a meaningful Retry-After value from their real internal state (rate,
+// queue depth, suspension). The router uses this instead of hardcoded
+// fallbacks so that csar-ts clients pace themselves accurately.
+type RetryEstimator interface {
+	EstimateRetryAfter() int
+}
+
 // Compile-time checks: all throttler types must satisfy Waiter.
 var _ Waiter = (*Throttler)(nil)
+var _ Suspendable = (*Throttler)(nil)
+var _ RetryEstimator = (*Throttler)(nil)
 
 // Throttler manages per-route rate limiting with wait-based smoothing.
 // Instead of rejecting requests with 429, it queues them up to max_wait.
@@ -35,6 +54,11 @@ type Throttler struct {
 
 	// Observability: number of requests currently waiting in the queue.
 	waiting atomic.Int64
+
+	// Backpressure suspension: when suspendUntil is in the future, Wait()
+	// blocks until the suspension expires before attempting token acquisition.
+	suspendMu    sync.Mutex
+	suspendUntil time.Time
 }
 
 // New creates a new Throttler with the given RPS, burst, and max wait time.
@@ -48,14 +72,46 @@ func New(rps float64, burst int, maxWait time.Duration) *Throttler {
 	}
 }
 
+// SuspendFor pauses the throttler for the given duration.
+// While suspended, Wait() blocks all requests until the suspension expires.
+// This is triggered by adaptive backpressure when the upstream returns 429
+// with a Retry-After header — prevents the router from hammering the upstream.
+// If already suspended, the deadline is extended if the new one is later.
+func (t *Throttler) SuspendFor(d time.Duration) {
+	t.suspendMu.Lock()
+	until := time.Now().Add(d)
+	if until.After(t.suspendUntil) {
+		t.suspendUntil = until
+	}
+	t.suspendMu.Unlock()
+}
+
 // Wait blocks until the request is allowed or the max_wait timeout is exceeded.
 // Returns nil if the request is allowed, or an error if the wait timed out.
 // This is the core "smoothing" logic: requests queue instead of getting 429s.
+//
+// If the throttler is suspended (via SuspendFor), Wait first blocks until
+// the suspension expires, then proceeds with normal token acquisition.
 func (t *Throttler) Wait(ctx context.Context) error {
 	t.waiting.Add(1)
 	defer t.waiting.Add(-1)
 
-	// Create a context with the max_wait timeout
+	// ── Backpressure suspension check ─────────────────────────────
+	t.suspendMu.Lock()
+	suspendEnd := t.suspendUntil
+	t.suspendMu.Unlock()
+
+	if !suspendEnd.IsZero() && time.Now().Before(suspendEnd) {
+		remaining := time.Until(suspendEnd)
+		select {
+		case <-time.After(remaining):
+			// Suspension over — fall through to normal token acquisition.
+		case <-ctx.Done():
+			return fmt.Errorf("suspended (upstream backpressure): %w", ctx.Err())
+		}
+	}
+
+	// ── Normal token acquisition ──────────────────────────────────
 	waitCtx := ctx
 	if t.maxWait > 0 {
 		var cancel context.CancelFunc
@@ -78,6 +134,59 @@ func (t *Throttler) Wait(ctx context.Context) error {
 // Waiting returns the number of requests currently waiting in the queue.
 func (t *Throttler) Waiting() int64 {
 	return t.waiting.Load()
+}
+
+// EstimateRetryAfter computes a Retry-After value (in seconds) from the
+// real token bucket state. The estimate accounts for:
+//
+//  1. Suspension: if the bucket is suspended (upstream backpressure), the
+//     remaining suspension time is returned — no point retrying before then.
+//  2. Queue depth + refill rate: each queued request takes ~1/RPS seconds
+//     to drain. A new request joining the queue should wait at least
+//     ceil((waiting+1) / RPS) seconds.
+//  3. max_wait: if configured, caps the estimate — the client shouldn't
+//     wait longer than the queue timeout anyway.
+//
+// The result is always ≥ 1 second.
+func (t *Throttler) EstimateRetryAfter() int {
+	// If suspended, return the remaining suspension time.
+	t.suspendMu.Lock()
+	suspendEnd := t.suspendUntil
+	t.suspendMu.Unlock()
+
+	if !suspendEnd.IsZero() && time.Now().Before(suspendEnd) {
+		secs := int(math.Ceil(time.Until(suspendEnd).Seconds()))
+		if secs < 1 {
+			secs = 1
+		}
+		return secs
+	}
+
+	// Compute from the actual token refill rate and current queue depth.
+	// rate.Limiter.Limit() returns tokens/sec; 1/Limit() = seconds/token.
+	rps := float64(t.limiter.Limit())
+	if rps <= 0 {
+		// Rate is zero or Inf — can't estimate; fall back to 1s.
+		return 1
+	}
+
+	waiting := t.waiting.Load()
+	// How many seconds until (waiting+1) tokens are available:
+	secs := int(math.Ceil(float64(waiting+1) / rps))
+
+	// Cap at max_wait if configured — no point telling the client to wait
+	// longer than the queue timeout, they'd get rejected anyway.
+	if t.maxWait > 0 {
+		maxSecs := int(math.Ceil(t.maxWait.Seconds()))
+		if secs > maxSecs {
+			secs = maxSecs
+		}
+	}
+
+	if secs < 1 {
+		secs = 1
+	}
+	return secs
 }
 
 // UpdateLimit changes the rate limit dynamically (used for quota redistribution).

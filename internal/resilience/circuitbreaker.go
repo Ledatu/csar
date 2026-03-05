@@ -90,6 +90,12 @@ func (cb *CircuitBreaker) State() CircuitState {
 	return cb.currentState()
 }
 
+// TimeoutDuration returns the configured open-state timeout.
+// Used by the router to calculate dynamic Retry-After for csar-ts clients.
+func (cb *CircuitBreaker) TimeoutDuration() time.Duration {
+	return cb.cfg.Timeout
+}
+
 // Wrap returns an http.Handler that wraps the given handler with circuit breaking.
 func (cb *CircuitBreaker) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

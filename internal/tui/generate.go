@@ -24,6 +24,13 @@ type GenerateResult struct {
 	TLSCert   string
 	TLSKey    string
 	TLSMinVer string
+	TLSCA     string // CA cert path (for coordinator TLS)
+	TLSGenerated bool // true if dev certs were generated
+
+	// TLS coordinator client certs (for router → coordinator mTLS)
+	CoordinatorCACert   string
+	CoordinatorCertFile string
+	CoordinatorKeyFile  string
 
 	// Security
 	EnableSSRF bool
@@ -31,8 +38,14 @@ type GenerateResult struct {
 	// KMS
 	KMSProvider string
 
-	// Routes (first route — user can add more manually)
-	Routes []GenerateRoute
+	// Yandex KMS details (populated when KMSProvider == "yandexapi")
+	YandexAuthMode string // "iam_token", "oauth_token", "metadata"
+	YandexIAMToken string
+	YandexKMSKeyID string
+
+	// Routes (supports multiple routes)
+	Routes           []GenerateRoute
+	RouteSecurities  []RouteSecurityAnswers // parallel to Routes
 
 	// Rate limit backend
 	RateLimitBackend string
@@ -61,6 +74,7 @@ type GenerateResult struct {
 	GenerateCompose    bool
 	IncludeRedis       bool
 	IncludePostgres    bool
+	IncludeDBInit      bool
 	PostgresPassword   string
 	IncludeCoordinator bool
 	RouterPort         string
@@ -215,13 +229,43 @@ func RunGenerateWizard() (*GenerateResult, error) {
 		return nil, err
 	}
 
+	// ─── Page 2b: KMS Details (Yandex) ─────────────────────────────────────────
+
+	if r.KMSProvider == "yandexapi" {
+		kmsAns, err := runKMSWizard(r.KMSProvider)
+		if err != nil {
+			return nil, err
+		}
+		if kmsAns != nil {
+			r.YandexAuthMode = kmsAns.AuthMode
+			r.YandexIAMToken = kmsAns.IAMToken
+			r.YandexKMSKeyID = kmsAns.KeyID
+		}
+	}
+
+	// ─── Page 2c: TLS Certificates ─────────────────────────────────────────────
+
+	tlsAns, err := runTLSWizard(r.EnableTLS, r.OutputDir)
+	if err != nil {
+		return nil, err
+	}
+	if tlsAns != nil && tlsAns.GenerateCerts {
+		r.TLSGenerated = true
+		r.TLSCA = tlsAns.CACertPath
+		r.TLSCert = tlsAns.ServerCertPath
+		r.TLSKey = tlsAns.ServerKeyPath
+		r.CoordinatorCACert = tlsAns.CACertPath
+		r.CoordinatorCertFile = tlsAns.ClientCertPath
+		r.CoordinatorKeyFile = tlsAns.ClientKeyPath
+	}
+
 	// ─── Page 3: First Route ────────────────────────────────────────────────────
 
 	form3 := huh.NewForm(
 		huh.NewGroup(
 			huh.NewNote().
 				Title("  Your First Route").
-				Description("Configure the primary API route.\nYou can add more routes later by editing config.yaml."),
+				Description("Configure the primary API route.\nYou can add more routes in the next step."),
 
 			huh.NewInput().
 				Title("Route path").
@@ -578,6 +622,14 @@ func RunGenerateWizard() (*GenerateResult, error) {
 		return nil, err
 	}
 
+	// ─── Multi-route + security ────────────────────────────────────────────────
+
+	defaultKMSKeyID := r.YandexKMSKeyID
+	allRoutes, allSecurities, err := runMultiRouteWizard(route, defaultKMSKeyID)
+	if err != nil {
+		return nil, err
+	}
+
 	// ─── Apply defaults ─────────────────────────────────────────────────────────
 
 	if r.ProjectName == "" {
@@ -589,21 +641,27 @@ func RunGenerateWizard() (*GenerateResult, error) {
 	if r.OutputDir == "" {
 		r.OutputDir = "."
 	}
-	if route.Path == "" {
-		route.Path = "/api/v1/example"
+
+	// Apply route defaults
+	for i := range allRoutes {
+		rt := &allRoutes[i]
+		if rt.Path == "" {
+			rt.Path = "/api/v1/example"
+		}
+		if rt.TargetURL == "" {
+			rt.TargetURL = "http://localhost:3000" + rt.Path
+		}
+		if rt.RPS == "" {
+			rt.RPS = "10"
+		}
+		if rt.Burst == "" {
+			rt.Burst = "20"
+		}
+		if rt.MaxWait == "" {
+			rt.MaxWait = "5s"
+		}
 	}
-	if route.TargetURL == "" {
-		route.TargetURL = "http://localhost:3000" + route.Path
-	}
-	if route.RPS == "" {
-		route.RPS = "10"
-	}
-	if route.Burst == "" {
-		route.Burst = "20"
-	}
-	if route.MaxWait == "" {
-		route.MaxWait = "5s"
-	}
+
 	if r.RouterPort == "" {
 		r.RouterPort = "8080"
 	}
@@ -637,8 +695,21 @@ func RunGenerateWizard() (*GenerateResult, error) {
 	if r.TLSKey == "" && r.EnableTLS {
 		r.TLSKey = "/etc/csar/tls/server-key.pem"
 	}
+	if r.TLSCA == "" && r.EnableTLS {
+		r.TLSCA = "/etc/csar/tls/ca.pem"
+	}
+	if r.CoordinatorCACert == "" && r.EnableCoordinator && r.EnableTLS {
+		r.CoordinatorCACert = "/etc/csar/tls/ca.pem"
+	}
+	if r.CoordinatorCertFile == "" && r.EnableCoordinator && r.EnableTLS {
+		r.CoordinatorCertFile = "/etc/csar/tls/client-cert.pem"
+	}
+	if r.CoordinatorKeyFile == "" && r.EnableCoordinator && r.EnableTLS {
+		r.CoordinatorKeyFile = "/etc/csar/tls/client-key.pem"
+	}
 
-	r.Routes = []GenerateRoute{route}
+	r.Routes = allRoutes
+	r.RouteSecurities = allSecurities
 
 	return r, nil
 }

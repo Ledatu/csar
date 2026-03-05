@@ -48,11 +48,32 @@ func renderConfigYAML(r *GenerateResult) string {
 		b.WriteString("  block_metadata: true\n\n")
 	}
 
-	// KMS
+	// KMS — with full Yandex configuration when applicable
 	if r.KMSProvider != "" {
 		b.WriteString("kms:\n")
 		b.WriteString(fmt.Sprintf("  provider: %q\n", r.KMSProvider))
-		if r.KMSProvider != "local" {
+
+		if r.KMSProvider == "yandexapi" {
+			// Yandex-specific block with auth_mode and token
+			b.WriteString("  yandex:\n")
+			authMode := r.YandexAuthMode
+			if authMode == "" {
+				authMode = "iam_token"
+			}
+			b.WriteString(fmt.Sprintf("    auth_mode: %q\n", authMode))
+			if authMode == "iam_token" {
+				// Never persist secrets into generated files — always use env var reference.
+				// The actual token should be set via YANDEX_IAM_TOKEN env var or a secrets manager.
+				b.WriteString("    iam_token: \"${YANDEX_IAM_TOKEN}\"\n")
+			}
+			if r.YandexKMSKeyID != "" {
+				b.WriteString(fmt.Sprintf("  default_key_id: %q\n", r.YandexKMSKeyID))
+			}
+			b.WriteString("  cache:\n")
+			b.WriteString("    enabled: true\n")
+			b.WriteString("    ttl: \"60s\"\n")
+			b.WriteString("    max_entries: 10000\n")
+		} else if r.KMSProvider != "local" {
 			b.WriteString("  cache:\n")
 			b.WriteString("    enabled: true\n")
 			b.WriteString("    ttl: \"60s\"\n")
@@ -65,6 +86,22 @@ func renderConfigYAML(r *GenerateResult) string {
 		b.WriteString("\n")
 	}
 
+	// Security profiles — collect unique security configs from routes
+	secProfiles := collectSecurityProfiles(r)
+	if len(secProfiles) > 0 {
+		b.WriteString("security_profiles:\n")
+		for name, sec := range secProfiles {
+			b.WriteString(fmt.Sprintf("  %s:\n", name))
+			if sec.KMSKeyID != "" {
+				b.WriteString(fmt.Sprintf("    kms_key_id: %q\n", sec.KMSKeyID))
+			}
+			b.WriteString(fmt.Sprintf("    token_ref: %q\n", sec.TokenRef))
+			b.WriteString(fmt.Sprintf("    inject_header: %q\n", sec.InjectHeader))
+			b.WriteString(fmt.Sprintf("    inject_format: %q\n", sec.InjectFormat))
+		}
+		b.WriteString("\n")
+	}
+
 	// Redis
 	if r.RateLimitBackend == "redis" {
 		addr := r.RedisAddress
@@ -73,9 +110,8 @@ func renderConfigYAML(r *GenerateResult) string {
 		}
 		b.WriteString("redis:\n")
 		b.WriteString(fmt.Sprintf("  address: %q\n", addr))
-		if r.RedisPassword != "" {
-			b.WriteString(fmt.Sprintf("  password: %q\n", r.RedisPassword))
-		}
+		// Never persist Redis password — use env var reference.
+		b.WriteString("  password: \"${REDIS_PASSWORD}\"\n")
 		b.WriteString("  key_prefix: \"csar:rl:\"\n\n")
 	}
 
@@ -84,11 +120,11 @@ func renderConfigYAML(r *GenerateResult) string {
 	b.WriteString(fmt.Sprintf("  enabled: %t\n", r.EnableCoordinator))
 	if r.EnableCoordinator {
 		b.WriteString(fmt.Sprintf("  address: %q\n", r.CoordinatorAddress))
-		if isProd {
-			b.WriteString("  ca_file: \"${CSAR_COORDINATOR_CA_FILE}\"\n")
-			b.WriteString("  cert_file: \"${CSAR_COORDINATOR_CERT_FILE}\"\n")
-			b.WriteString("  key_file: \"${CSAR_COORDINATOR_KEY_FILE}\"\n")
-		} else {
+		if r.EnableTLS {
+			b.WriteString(fmt.Sprintf("  ca_file: %q\n", r.CoordinatorCACert))
+			b.WriteString(fmt.Sprintf("  cert_file: %q\n", r.CoordinatorCertFile))
+			b.WriteString(fmt.Sprintf("  key_file: %q\n", r.CoordinatorKeyFile))
+		} else if !isProd {
 			b.WriteString("  allow_insecure: true\n")
 		}
 	}
@@ -107,7 +143,7 @@ func renderConfigYAML(r *GenerateResult) string {
 
 	// Paths
 	b.WriteString("paths:\n")
-	for _, route := range r.Routes {
+	for i, route := range r.Routes {
 		b.WriteString(fmt.Sprintf("  %s:\n", route.Path))
 		b.WriteString(fmt.Sprintf("    %s:\n", route.Method))
 		b.WriteString("      x-csar-backend:\n")
@@ -122,12 +158,29 @@ func renderConfigYAML(r *GenerateResult) string {
 			b.WriteString("        #   - \"my-api\"\n")
 		}
 
-		// Security placeholder
-		b.WriteString("      # x-csar-security:\n")
-		b.WriteString("      #   kms_key_id: \"your-key-id\"\n")
-		b.WriteString("      #   token_ref: \"api_token\"\n")
-		b.WriteString("      #   inject_header: \"Authorization\"\n")
-		b.WriteString("      #   inject_format: \"Bearer {token}\"\n")
+		// Route security — reference profile or inline
+		if i < len(r.RouteSecurities) && r.RouteSecurities[i].IsSecured {
+			sec := r.RouteSecurities[i]
+			profileName := securityProfileName(sec)
+			if profileName != "" {
+				b.WriteString(fmt.Sprintf("      x-csar-security: %q\n", profileName))
+			} else {
+				b.WriteString("      x-csar-security:\n")
+				if sec.KMSKeyID != "" {
+					b.WriteString(fmt.Sprintf("        kms_key_id: %q\n", sec.KMSKeyID))
+				}
+				b.WriteString(fmt.Sprintf("        token_ref: %q\n", sec.TokenRef))
+				b.WriteString(fmt.Sprintf("        inject_header: %q\n", sec.InjectHeader))
+				b.WriteString(fmt.Sprintf("        inject_format: %q\n", sec.InjectFormat))
+			}
+		} else if i >= len(r.RouteSecurities) {
+			// Legacy fallback: show commented-out security placeholder
+			b.WriteString("      # x-csar-security:\n")
+			b.WriteString("      #   kms_key_id: \"your-key-id\"\n")
+			b.WriteString("      #   token_ref: \"api_token\"\n")
+			b.WriteString("      #   inject_header: \"Authorization\"\n")
+			b.WriteString("      #   inject_format: \"Bearer {token}\"\n")
+		}
 
 		// Traffic
 		b.WriteString("      x-csar-traffic:\n")
@@ -160,4 +213,29 @@ func renderConfigYAML(r *GenerateResult) string {
 	b.WriteString("        target_url: \"http://localhost:8080\"\n")
 
 	return b.String()
+}
+
+// collectSecurityProfiles gathers unique security profiles from all routes
+// to emit as reusable security_profiles in config.yaml.
+func collectSecurityProfiles(r *GenerateResult) map[string]RouteSecurityAnswers {
+	profiles := make(map[string]RouteSecurityAnswers)
+	for _, sec := range r.RouteSecurities {
+		if !sec.IsSecured || sec.TokenRef == "" {
+			continue
+		}
+		name := securityProfileName(sec)
+		if name != "" {
+			profiles[name] = sec
+		}
+	}
+	return profiles
+}
+
+// securityProfileName generates a profile name from security answers.
+// Returns empty string if not enough info for a profile.
+func securityProfileName(sec RouteSecurityAnswers) string {
+	if sec.TokenRef == "" {
+		return ""
+	}
+	return sec.TokenRef
 }

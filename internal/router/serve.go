@@ -175,8 +175,20 @@ func (r *Router) serveAfterAuth(w http.ResponseWriter, req *http.Request, rt *ro
 }
 
 // servePipeline runs the throttle -> circuit breaker -> proxy pipeline.
+//
+// csar-ts protocol: The router emits X-CSAR-Status and X-CSAR-Wait-MS headers
+// so the csar-ts client SDK can distinguish throttle vs circuit-breaker vs success.
+// See: https://github.com/Ledatu/csar-ts
 func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *route) {
 	var totalWait time.Duration
+
+	// ── csar-ts observability: log client-reported RPS hint ──────────
+	if clientLimit := req.Header.Get("X-CSAR-Client-Limit"); clientLimit != "" {
+		r.logger.Debug("client RPS hint received",
+			"X-CSAR-Client-Limit", clientLimit,
+			"route", rt.routeKey,
+		)
+	}
 
 	// Step 0: Global throttle (fast in-memory counter, checked first)
 	if globalT := r.throttleManager.GetGlobal(); globalT != nil {
@@ -188,7 +200,9 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 				"error", err,
 			)
 			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Retry-After", "5")
+			w.Header().Set("X-CSAR-Status", "throttled")
+			w.Header().Set("Retry-After", strconv.Itoa(globalT.EstimateRetryAfter()))
+			w.Header().Set("X-CSAR-Wait-MS", strconv.FormatInt(time.Since(waitStart).Milliseconds(), 10))
 			w.WriteHeader(http.StatusServiceUnavailable)
 			fmt.Fprintf(w, `{"error":"global rate limit exceeded","detail":%q}`, err.Error())
 			return
@@ -252,8 +266,22 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 					"method", req.Method,
 					"error", err,
 				)
+				// csar-ts protocol: X-CSAR-Status: throttled + Retry-After.
+				// Compute Retry-After from the active throttler's real state
+				// (rate, queue depth, suspension). Falls back to max_wait config.
+				retryAfter := 1
+				if est, ok := activeThrottler.(throttle.RetryEstimator); ok {
+					retryAfter = est.EstimateRetryAfter()
+				} else if rt.config.Traffic != nil && rt.config.Traffic.MaxWait.Duration > 0 {
+					retryAfter = int(rt.config.Traffic.MaxWait.Duration.Seconds())
+					if retryAfter < 1 {
+						retryAfter = 1
+					}
+				}
 				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("Retry-After", "5")
+				w.Header().Set("X-CSAR-Status", "throttled")
+				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+				w.Header().Set("X-CSAR-Wait-MS", strconv.FormatInt(waitDur.Milliseconds(), 10))
 				w.WriteHeader(http.StatusServiceUnavailable)
 				fmt.Fprintf(w, `{"error":"service temporarily unavailable","detail":%q}`, err.Error())
 				return
@@ -306,9 +334,23 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 			// (circuit was already open). If the proxy was called and
 			// returned 5xx, the response is already written to the client.
 			if !proxyCalled {
+				// csar-ts protocol: X-CSAR-Status with circuit breaker state.
+				cbState := rt.circuitBreaker.State()
+				csarStatus := "circuit_open"
+				if cbState == resilience.StateHalfOpen {
+					csarStatus = "circuit_half_open"
+				}
+				cbTimeout := rt.circuitBreaker.TimeoutDuration()
+				retryAfterSecs := int(cbTimeout.Seconds())
+				if retryAfterSecs < 1 {
+					retryAfterSecs = 1 // minimum: 1s (CB timeout was sub-second or zero)
+				}
+				retryAfter := strconv.Itoa(retryAfterSecs)
 				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("X-CSAR-Status", csarStatus)
+				w.Header().Set("Retry-After", retryAfter)
 				w.WriteHeader(http.StatusServiceUnavailable)
-				fmt.Fprintf(w, `{"error":"circuit breaker open","route":%q}`, rt.routeKey)
+				fmt.Fprintf(w, `{"error":"circuit breaker open","route":%q,"state":%q}`, rt.routeKey, csarStatus)
 			}
 		}
 		return
@@ -341,7 +383,11 @@ func (r *Router) upstreamHandler(rt *route) http.Handler {
 		}
 
 		// Base handler: tenant routing OR retry-wrapped proxy OR plain proxy.
+		// Chain: retry → backpressure → proxy (all optional layers).
 		handler := r.baseProxy(rt)
+		if rt.backpressureHandler != nil {
+			handler = rt.backpressureHandler
+		}
 		if rt.retryHandler != nil {
 			handler = rt.retryHandler
 		}
