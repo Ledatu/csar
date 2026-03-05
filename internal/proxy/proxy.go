@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -11,6 +12,37 @@ import (
 	"strings"
 	"time"
 )
+
+// ── Context-based header passthrough ─────────────────────────────────
+// httputil.ReverseProxy replaces the ResponseWriter's header map with the
+// upstream's response headers. To ensure CSAR backpressure headers survive
+// the proxy, the router injects them into the request context and
+// modifyResponse copies them back onto the final response.
+
+// csarCtxKey is an unexported type for CSAR header context keys.
+type csarCtxKey struct{ name string }
+
+var (
+	ctxKeyWaitMS    = csarCtxKey{"X-CSAR-Wait-MS"}
+	ctxKeyStatus    = csarCtxKey{"X-CSAR-Status"}
+	ctxKeyRetryAftr = csarCtxKey{"Retry-After"}
+)
+
+// WithCSARHeaders stores X-CSAR-Wait-MS, X-CSAR-Status, and Retry-After
+// values in the request context so they survive the ReverseProxy round-trip.
+// Empty values are ignored.
+func WithCSARHeaders(ctx context.Context, waitMS, status, retryAfter string) context.Context {
+	if waitMS != "" {
+		ctx = context.WithValue(ctx, ctxKeyWaitMS, waitMS)
+	}
+	if status != "" {
+		ctx = context.WithValue(ctx, ctxKeyStatus, status)
+	}
+	if retryAfter != "" {
+		ctx = context.WithValue(ctx, ctxKeyRetryAftr, retryAfter)
+	}
+	return ctx
+}
 
 // TLSConfig configures outbound TLS for the reverse proxy.
 type TLSConfig struct {
@@ -161,9 +193,21 @@ func joinPaths(base, reqPath string) string {
 	return strings.TrimRight(base, "/") + "/" + strings.TrimLeft(reqPath, "/")
 }
 
-// modifyResponse is a hook for future logging/metrics on responses.
+// modifyResponse re-injects CSAR backpressure headers into the upstream
+// response. The values were stashed in the request context by the router
+// (via WithCSARHeaders) before the proxy ran, and would otherwise be lost
+// because httputil.ReverseProxy replaces the ResponseWriter's header map.
 func (rp *ReverseProxy) modifyResponse(resp *http.Response) error {
-	// Hook for future metrics: record upstream response status, latency, etc.
+	ctx := resp.Request.Context()
+	if v, ok := ctx.Value(ctxKeyWaitMS).(string); ok && v != "" {
+		resp.Header.Set("X-CSAR-Wait-MS", v)
+	}
+	if v, ok := ctx.Value(ctxKeyStatus).(string); ok && v != "" {
+		resp.Header.Set("X-CSAR-Status", v)
+	}
+	if v, ok := ctx.Value(ctxKeyRetryAftr).(string); ok && v != "" {
+		resp.Header.Set("Retry-After", v)
+	}
 	return nil
 }
 

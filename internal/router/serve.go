@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ledatu/csar/internal/cors"
+	"github.com/ledatu/csar/internal/proxy"
 	"github.com/ledatu/csar/internal/resilience"
 	"github.com/ledatu/csar/internal/throttle"
 	"github.com/ledatu/csar/pkg/middleware"
@@ -294,8 +295,13 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 	}
 
 	// Set X-CSAR-Wait-MS response header with actual wait duration.
+	// Also inject into the request context so the value survives through
+	// httputil.ReverseProxy (which replaces the ResponseWriter's header map).
 	if totalWait > 0 {
-		w.Header().Set("X-CSAR-Wait-MS", strconv.FormatInt(totalWait.Milliseconds(), 10))
+		waitMS := strconv.FormatInt(totalWait.Milliseconds(), 10)
+		w.Header().Set("X-CSAR-Wait-MS", waitMS)
+		ctx := proxy.WithCSARHeaders(req.Context(), waitMS, "", "")
+		req = req.WithContext(ctx)
 	}
 
 	// Step 2: Circuit breaker

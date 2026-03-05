@@ -56,10 +56,15 @@ func (m *Middleware) Wrap(cfg Config, next http.Handler) http.Handler {
 		cfg.MaxAge = 86400 // 24 hours
 	}
 
+	// Always expose CSAR backpressure headers so browser-based clients
+	// (csar-ts SDK) can read them from cross-origin responses.
+	csarHeaders := []string{"X-CSAR-Wait-MS", "X-CSAR-Status", "Retry-After"}
+	exposed := dedupHeaders(append(cfg.ExposedHeaders, csarHeaders...))
+
 	// Pre-compute header values.
 	allowMethodsStr := strings.Join(cfg.AllowedMethods, ", ")
 	allowHeadersStr := strings.Join(cfg.AllowedHeaders, ", ")
-	exposeHeadersStr := strings.Join(cfg.ExposedHeaders, ", ")
+	exposeHeadersStr := strings.Join(exposed, ", ")
 	maxAgeStr := strconv.Itoa(cfg.MaxAge)
 
 	// Build origin lookup set for fast matching.
@@ -117,4 +122,20 @@ func (m *Middleware) Wrap(cfg Config, next http.Handler) http.Handler {
 		// Normal request — proxy to the next handler.
 		next.ServeHTTP(w, r)
 	})
+}
+
+// dedupHeaders returns the input slice with duplicate header names removed
+// (case-insensitive). The first occurrence wins.
+func dedupHeaders(headers []string) []string {
+	seen := make(map[string]bool, len(headers))
+	out := make([]string, 0, len(headers))
+	for _, h := range headers {
+		key := strings.ToLower(h)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, h)
+	}
+	return out
 }

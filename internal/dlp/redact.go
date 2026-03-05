@@ -77,6 +77,12 @@ func (rd *Redactor) Wrap(cfg Config, next http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Preserve X-CSAR-* and Retry-After headers that were set by earlier
+		// pipeline stages (e.g. throttle). Inner handlers (like ReverseProxy)
+		// may overwrite the ResponseWriter's header map, so we snapshot these
+		// before handing off and restore them before flushing.
+		savedCSARHeaders := snapshotCSARHeaders(w.Header())
+
 		// Use a capturing response writer to intercept the response body.
 		capture := &captureWriter{
 			ResponseWriter: w,
@@ -85,6 +91,10 @@ func (rd *Redactor) Wrap(cfg Config, next http.Handler) http.Handler {
 		}
 
 		next.ServeHTTP(capture, r)
+
+		// Restore any X-CSAR-* / Retry-After headers that may have been
+		// cleared by the inner handler chain (e.g. httputil.ReverseProxy).
+		restoreCSARHeaders(w.Header(), savedCSARHeaders)
 
 		// Check if the response was too large to buffer.
 		if capture.overflowed {
@@ -253,6 +263,30 @@ func (cw *captureWriter) Write(b []byte) (int, error) {
 	}
 
 	return cw.buf.Write(b)
+}
+
+// snapshotCSARHeaders returns a copy of all X-CSAR-* and Retry-After headers
+// from the given header map. Used to preserve backpressure metadata across
+// middleware layers that may clear the header map.
+func snapshotCSARHeaders(h http.Header) http.Header {
+	snap := make(http.Header)
+	for k, vv := range h {
+		if strings.HasPrefix(strings.ToUpper(k), "X-CSAR-") || strings.EqualFold(k, "Retry-After") {
+			snap[k] = append([]string(nil), vv...)
+		}
+	}
+	return snap
+}
+
+// restoreCSARHeaders merges the previously-saved CSAR headers back into the
+// header map, but only if they are not already present (inner handlers may
+// have set fresh values via ModifyResponse).
+func restoreCSARHeaders(dst, saved http.Header) {
+	for k, vv := range saved {
+		if dst.Get(k) == "" {
+			dst[k] = vv
+		}
+	}
 }
 
 // isJSON checks if the content type indicates JSON.
