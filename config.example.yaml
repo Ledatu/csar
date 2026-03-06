@@ -60,10 +60,12 @@ listen_addr: ":8080"
 #     max_entries: 10000
 #   yandex:
 #     endpoint: "https://kms.api.cloud.yandex.net/kms/v1/keys"  # default
-#     auth_mode: "metadata"                        # "iam_token", "oauth_token", "metadata"
-#     # iam_token: ""        # static IAM token (dev only)
-#     # oauth_token: ""      # for IAM exchange
-#     # sa_key_file: ""      # service-account JSON key
+#     auth_mode: "metadata"                        # "iam_token", "oauth_token", "metadata", "service_account"
+#     # iam_token: ""        # static IAM token (dev only, expires ~12h)
+#     # oauth_token: ""      # personal OAuth token → auto-refreshed IAM token
+#     # sa_key_file: ""      # service-account JSON key (recommended for production outside Yandex Cloud VMs)
+#     #                      # Download: Console → Service Accounts → <account> → API keys → Create
+#     #                      # The key file must contain: id, service_account_id, private_key (PKCS#8 PEM)
 #   # local_keys:            # for provider: "local"
 #   #   key1: "passphrase1"
 #   #   key2: "passphrase2"

@@ -3,14 +3,20 @@ package kms
 import (
 	"bytes"
 	"context"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
+
+	jwtlib "github.com/golang-jwt/jwt/v5"
 
 	"github.com/ledatu/csar/internal/logging"
 )
@@ -37,12 +43,16 @@ type YandexAPIProvider struct {
 	mu        sync.RWMutex
 	authToken string // current IAM token
 
-	// For token refresh (metadata / oauth flows).
-	authMode      string // "iam_token" | "oauth_token" | "metadata"
-	oauthToken    string // cached OAuth token for exchange
-	tokenExpiry   time.Time
-	metadataURL   string // instance metadata endpoint
-	saKeyFile     string // service-account key file path (not used yet, reserved)
+	// For token refresh (metadata / oauth / service_account flows).
+	authMode    string    // "iam_token" | "oauth_token" | "metadata" | "service_account"
+	oauthToken  string    // cached OAuth token for exchange
+	tokenExpiry time.Time
+	metadataURL string // instance metadata endpoint
+
+	// service_account key material (loaded once at startup).
+	saID        string          // key ID  (from key JSON "id")
+	saAccountID string          // service-account ID (from key JSON "service_account_id")
+	saPrivKey   *rsa.PrivateKey // RSA private key decoded from key JSON "private_key"
 }
 
 // YandexAPIConfig holds constructor parameters for YandexAPIProvider.
@@ -50,7 +60,8 @@ type YandexAPIConfig struct {
 	// Endpoint is the KMS API base URL (default: https://kms.api.cloud.yandex.net/kms/v1/keys).
 	Endpoint string
 
-	// AuthMode selects the credential source: "iam_token", "oauth_token", "metadata".
+	// AuthMode selects the credential source:
+	// "iam_token", "oauth_token", "metadata", "service_account".
 	AuthMode string
 
 	// IAMToken is a static IAM bearer token (for dev/testing).
@@ -61,7 +72,9 @@ type YandexAPIConfig struct {
 	// Uses logging.Secret to prevent accidental logging of the plaintext value.
 	OAuthToken logging.Secret
 
-	// SAKeyFile is the path to a service-account key JSON file (reserved).
+	// SAKeyFile is the path to a service-account key JSON file.
+	// Required when AuthMode == "service_account".
+	// Download from Yandex Cloud Console → Service Accounts → Keys → Create API key.
 	SAKeyFile string
 
 	// Timeout caps each HTTP request to the KMS API.
@@ -89,7 +102,6 @@ func NewYandexAPIProvider(cfg YandexAPIConfig) (*YandexAPIProvider, error) {
 		},
 		authMode:    cfg.AuthMode,
 		oauthToken:  cfg.OAuthToken.Plaintext(),
-		saKeyFile:   cfg.SAKeyFile,
 		metadataURL: "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token",
 	}
 
@@ -109,8 +121,21 @@ func NewYandexAPIProvider(cfg YandexAPIConfig) (*YandexAPIProvider, error) {
 	case "metadata":
 		// IAM token will be obtained from the instance metadata service.
 
+	case "service_account":
+		if cfg.SAKeyFile == "" {
+			return nil, fmt.Errorf("yandexapi: auth_mode=service_account requires a non-empty sa_key_file")
+		}
+		saKey, err := loadSAKey(cfg.SAKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("yandexapi: load sa_key_file: %w", err)
+		}
+		p.saID = saKey.ID
+		p.saAccountID = saKey.ServiceAccountID
+		p.saPrivKey = saKey.privateKey
+		// IAM token will be obtained on first API call via JWT exchange.
+
 	default:
-		return nil, fmt.Errorf("yandexapi: unsupported auth_mode %q; supported: iam_token, oauth_token, metadata", cfg.AuthMode)
+		return nil, fmt.Errorf("yandexapi: unsupported auth_mode %q; supported: iam_token, oauth_token, metadata, service_account", cfg.AuthMode)
 	}
 
 	return p, nil
@@ -282,6 +307,8 @@ func (p *YandexAPIProvider) refreshToken(ctx context.Context) (string, error) {
 		tok, exp, err = p.exchangeOAuthToken(ctx)
 	case "metadata":
 		tok, exp, err = p.fetchMetadataToken(ctx)
+	case "service_account":
+		tok, exp, err = p.exchangeSAToken(ctx)
 	default:
 		return "", fmt.Errorf("yandexapi: cannot refresh token for auth_mode=%q", p.authMode)
 	}
@@ -371,8 +398,151 @@ func (p *YandexAPIProvider) fetchMetadataToken(ctx context.Context) (string, tim
 }
 
 // ---------------------------------------------------------------------------
-// Wire types
+// Service-account key file: loader
 // ---------------------------------------------------------------------------
+
+// saKeyJSON mirrors the JSON structure of a Yandex Cloud service-account key file,
+// as downloaded from the Console → Service Accounts → Keys → Create API key.
+type saKeyJSON struct {
+	ID               string `json:"id"`
+	ServiceAccountID string `json:"service_account_id"`
+	PrivateKey       string `json:"private_key"` // PEM-encoded PKCS#8 RSA private key
+	privateKey       *rsa.PrivateKey
+}
+
+// loadSAKey reads and parses a Yandex Cloud service-account key JSON file.
+func loadSAKey(path string) (*saKeyJSON, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	var k saKeyJSON
+	if err := json.Unmarshal(data, &k); err != nil {
+		return nil, fmt.Errorf("parse JSON: %w", err)
+	}
+
+	if k.ID == "" {
+		return nil, fmt.Errorf("missing \"id\" field")
+	}
+	if k.ServiceAccountID == "" {
+		return nil, fmt.Errorf("missing \"service_account_id\" field")
+	}
+	if k.PrivateKey == "" {
+		return nil, fmt.Errorf("missing \"private_key\" field")
+	}
+
+	block, _ := pem.Decode([]byte(k.PrivateKey))
+	if block == nil {
+		return nil, fmt.Errorf("private_key: not a valid PEM block")
+	}
+
+	// Yandex exports keys as PKCS#8 ("BEGIN PRIVATE KEY").
+	keyIface, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		// Fallback: try PKCS#1 ("BEGIN RSA PRIVATE KEY").
+		rsaKey, err2 := x509.ParsePKCS1PrivateKey(block.Bytes)
+		if err2 != nil {
+			return nil, fmt.Errorf("private_key: parse PKCS#8: %w; parse PKCS#1: %v", err, err2)
+		}
+		k.privateKey = rsaKey
+	} else {
+		rsaKey, ok := keyIface.(*rsa.PrivateKey)
+		if !ok {
+			return nil, fmt.Errorf("private_key: expected RSA key, got %T", keyIface)
+		}
+		k.privateKey = rsaKey
+	}
+
+	return &k, nil
+}
+
+// ---------------------------------------------------------------------------
+// Service-account JWT signing and IAM token exchange
+// ---------------------------------------------------------------------------
+
+// exchangeSAToken mints a short-lived JWT signed with the service-account
+// private key and exchanges it for a Yandex IAM token.
+//
+// Yandex IAM JWT spec:
+//
+//	Header : { "typ": "JWT", "alg": "RS256", "kid": "<key_id>" }
+//	Payload: { "iss": "<service_account_id>",
+//	           "aud": "https://iam.api.cloud.yandex.net/iam/v1/tokens",
+//	           "iat": <unix_now>, "exp": <unix_now+60> }
+//	Signed  : RS256 (SHA-256 + PKCS#1 v1.5)
+//
+// POST https://iam.api.cloud.yandex.net/iam/v1/tokens
+// Body: { "jwt": "<signed_jwt>" }
+func (p *YandexAPIProvider) exchangeSAToken(ctx context.Context) (string, time.Time, error) {
+	jwt, err := p.mintSAJWT()
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("yandexapi: mint SA JWT: %w", err)
+	}
+
+	payload := map[string]string{"jwt": jwt}
+	body, _ := json.Marshal(payload)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://iam.api.cloud.yandex.net/iam/v1/tokens",
+		bytes.NewReader(body))
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("yandexapi: build SA token request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("yandexapi: SA token exchange HTTP: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return "", time.Time{}, fmt.Errorf("yandexapi: SA token exchange: HTTP %d: %s", resp.StatusCode, string(b))
+	}
+
+	var result iamTokenResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", time.Time{}, fmt.Errorf("yandexapi: decode SA token response: %w", err)
+	}
+
+	expiry := result.ExpiresAt
+	if expiry.IsZero() {
+		expiry = time.Now().Add(11 * time.Hour)
+	}
+
+	return result.IAMToken, expiry, nil
+}
+
+// mintSAJWT creates and signs a JWT for the Yandex IAM token endpoint using
+// RS256 via github.com/golang-jwt/jwt/v5 (already a project dependency).
+//
+// Yandex IAM JWT spec:
+//
+//	Header : { "typ": "JWT", "alg": "RS256", "kid": "<key_id>" }
+//	Payload: { "iss": "<service_account_id>",
+//	           "aud": "https://iam.api.cloud.yandex.net/iam/v1/tokens",
+//	           "iat": <unix_now>, "exp": <unix_now+60> }
+func (p *YandexAPIProvider) mintSAJWT() (string, error) {
+	now := time.Now()
+	claims := jwtlib.MapClaims{
+		"iss": p.saAccountID,
+		"aud": jwtlib.ClaimStrings{"https://iam.api.cloud.yandex.net/iam/v1/tokens"},
+		"iat": jwtlib.NewNumericDate(now),
+		"exp": jwtlib.NewNumericDate(now.Add(60 * time.Second)),
+	}
+	tok := jwtlib.NewWithClaims(jwtlib.SigningMethodRS256, claims)
+	tok.Header["kid"] = p.saID
+
+	signed, err := tok.SignedString(p.saPrivKey)
+	if err != nil {
+		return "", fmt.Errorf("sign SA JWT: %w", err)
+	}
+	return signed, nil
+}
+
+
 
 // Yandex KMS encrypt request.
 type yandexEncryptRequest struct {
