@@ -27,7 +27,6 @@ import (
 // Reference: https://yandex.cloud/en/docs/kms/api-ref/SymmetricCrypto/
 const defaultYandexKMSEndpoint = "https://kms.yandex/kms/v1/keys"
 
-
 // YandexAPIProvider implements Provider by calling the Yandex Cloud KMS
 // symmetric crypto REST API directly over HTTPS — no go-sdk dependency.
 //
@@ -44,8 +43,8 @@ type YandexAPIProvider struct {
 	authToken string // current IAM token
 
 	// For token refresh (metadata / oauth / service_account flows).
-	authMode    string    // "iam_token" | "oauth_token" | "metadata" | "service_account"
-	oauthToken  string    // cached OAuth token for exchange
+	authMode    string // "iam_token" | "oauth_token" | "metadata" | "service_account"
+	oauthToken  string // cached OAuth token for exchange
 	tokenExpiry time.Time
 	metadataURL string // instance metadata endpoint
 
@@ -470,7 +469,7 @@ func loadSAKey(path string) (*saKeyJSON, error) {
 //	Payload: { "iss": "<service_account_id>",
 //	           "aud": "https://iam.api.cloud.yandex.net/iam/v1/tokens",
 //	           "iat": <unix_now>, "exp": <unix_now+60> }
-//	Signed  : RS256 (SHA-256 + PKCS#1 v1.5)
+//	Signed  : PS256 (SHA-256 + PKCS#1 v1.5)
 //
 // POST https://iam.api.cloud.yandex.net/iam/v1/tokens
 // Body: { "jwt": "<signed_jwt>" }
@@ -520,7 +519,7 @@ func (p *YandexAPIProvider) exchangeSAToken(ctx context.Context) (string, time.T
 //
 // Yandex IAM JWT spec:
 //
-//	Header : { "typ": "JWT", "alg": "RS256", "kid": "<key_id>" }
+//	Header : { "typ": "JWT", "alg": "PS256", "kid": "<key_id>" }
 //	Payload: { "iss": "<service_account_id>",
 //	           "aud": "https://iam.api.cloud.yandex.net/iam/v1/tokens",
 //	           "iat": <unix_now>, "exp": <unix_now+60> }
@@ -532,7 +531,7 @@ func (p *YandexAPIProvider) mintSAJWT() (string, error) {
 		"iat": jwtlib.NewNumericDate(now),
 		"exp": jwtlib.NewNumericDate(now.Add(60 * time.Second)),
 	}
-	tok := jwtlib.NewWithClaims(jwtlib.SigningMethodRS256, claims)
+	tok := jwtlib.NewWithClaims(jwtlib.SigningMethodPS256, claims)
 	tok.Header["kid"] = p.saID
 
 	signed, err := tok.SignedString(p.saPrivKey)
@@ -541,8 +540,6 @@ func (p *YandexAPIProvider) mintSAJWT() (string, error) {
 	}
 	return signed, nil
 }
-
-
 
 // Yandex KMS encrypt request.
 type yandexEncryptRequest struct {
