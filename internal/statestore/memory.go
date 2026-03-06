@@ -14,6 +14,7 @@ type MemoryStore struct {
 	routers  map[string]RouterInfo
 	quotas   map[string]*QuotaPolicy
 	watchers []chan []RouteEntry
+	closed   map[chan []RouteEntry]bool
 }
 
 // NewMemoryStore creates a new in-memory StateStore.
@@ -22,6 +23,7 @@ func NewMemoryStore() *MemoryStore {
 		routes:  make(map[string]RouteEntry),
 		routers: make(map[string]RouterInfo),
 		quotas:  make(map[string]*QuotaPolicy),
+		closed:  make(map[chan []RouteEntry]bool),
 	}
 }
 
@@ -76,7 +78,10 @@ func (m *MemoryStore) WatchRoutes(ctx context.Context) (<-chan []RouteEntry, err
 				break
 			}
 		}
-		close(ch)
+		if !m.closed[ch] {
+			m.closed[ch] = true
+			close(ch)
+		}
 	}()
 
 	return ch, nil
@@ -137,7 +142,10 @@ func (m *MemoryStore) Close() error {
 	defer m.mu.Unlock()
 
 	for _, ch := range m.watchers {
-		close(ch)
+		if !m.closed[ch] {
+			m.closed[ch] = true
+			close(ch)
+		}
 	}
 	m.watchers = nil
 	return nil
