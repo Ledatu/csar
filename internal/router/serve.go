@@ -152,8 +152,19 @@ func (r *Router) serveAfterAuth(w http.ResponseWriter, req *http.Request, rt *ro
 		stripKeys := middleware.CollectQueryPlaceholders(stripRefs...)
 
 		var handler http.Handler = http.HandlerFunc(func(iw http.ResponseWriter, ir *http.Request) {
+			// Snapshot the original query values for throttle key resolution
+			// BEFORE stripping. StripQueryKeys mutates ir.URL.RawQuery in
+			// place, which would cause DynamicThrottler to resolve
+			// {query.id} → "_unknown_" for the shared *url.URL.
+			var origQuery = ir.URL.Query() // parsed copy — survives the strip
+
 			// Strip consumed query params ONCE, after all credentials have been resolved.
 			middleware.StripQueryKeys(ir, stripKeys)
+
+			// Inject the pre-strip snapshot so DynamicThrottler.resolveKey
+			// finds the original values when resolving {query.*} keys.
+			ir = ir.WithContext(throttle.WithOriginalQuery(ir.Context(), origQuery))
+
 			r.servePipeline(iw, ir, rt)
 		})
 		for i := len(rt.config.Security) - 1; i >= 0; i-- {

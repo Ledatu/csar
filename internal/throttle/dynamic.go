@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -28,6 +29,23 @@ func WithRequest(ctx context.Context, r *http.Request) context.Context {
 func requestFromContext(ctx context.Context) *http.Request {
 	r, _ := ctx.Value(requestContextKey{}).(*http.Request)
 	return r
+}
+
+// originalQueryKey is the context key for storing a pre-strip query snapshot.
+type originalQueryKey struct{}
+
+// WithOriginalQuery stores a snapshot of the URL query values in the context
+// BEFORE strip_token_params removes consumed query parameters. This ensures
+// DynamicThrottler.resolveKey can resolve {query.*} keys from the original
+// URL even after StripQueryKeys has mutated the request's URL in place.
+func WithOriginalQuery(ctx context.Context, values url.Values) context.Context {
+	return context.WithValue(ctx, originalQueryKey{}, values)
+}
+
+// originalQueryFromContext retrieves the pre-strip query snapshot, or nil.
+func originalQueryFromContext(ctx context.Context) url.Values {
+	v, _ := ctx.Value(originalQueryKey{}).(url.Values)
+	return v
 }
 
 // placeholderPattern matches {query.param} and {header.Header-Name} placeholders.
@@ -146,10 +164,18 @@ func (dt *DynamicThrottler) UpdateLimit(rps float64, burst int) {
 // {query.param} → URL query parameter value
 // {header.Name} → HTTP header value
 // Unresolved placeholders are replaced with "_unknown_".
+//
+// For {query.*} lookups, resolveKey first checks for a pre-strip query snapshot
+// stored in the request context by WithOriginalQuery. This handles the case where
+// strip_token_params has removed query params (e.g. id) that the throttle
+// key template still needs to resolve.
 func (dt *DynamicThrottler) resolveKey(req *http.Request) string {
 	if req == nil {
 		return dt.keyTemplate
 	}
+	// Pre-fetch the original query snapshot (may be nil if no stripping occurred).
+	origQuery := originalQueryFromContext(req.Context())
+
 	return placeholderPattern.ReplaceAllStringFunc(dt.keyTemplate, func(match string) string {
 		parts := placeholderPattern.FindStringSubmatch(match)
 		if len(parts) != 3 {
@@ -158,7 +184,15 @@ func (dt *DynamicThrottler) resolveKey(req *http.Request) string {
 		source, name := parts[1], parts[2]
 		switch source {
 		case "query":
-			v := req.URL.Query().Get(name)
+			// Prefer pre-strip snapshot so {query.seller_id} resolves even
+			// after StripQueryKeys has removed seller_id from the live URL.
+			var v string
+			if origQuery != nil {
+				v = origQuery.Get(name)
+			}
+			if v == "" {
+				v = req.URL.Query().Get(name)
+			}
 			if v == "" {
 				return "_unknown_"
 			}
