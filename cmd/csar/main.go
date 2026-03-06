@@ -58,6 +58,7 @@ func run() error {
 	yandexAuthMode := flag.String("yandex-auth-mode", "metadata", "auth mode for Yandex KMS: \"iam_token\", \"oauth_token\", \"metadata\"")
 	yandexIAMToken := flag.String("yandex-iam-token", "", "static IAM token for Yandex KMS (dev only)")
 	yandexOAuthToken := flag.String("yandex-oauth-token", "", "OAuth token for IAM token exchange (Yandex KMS)")
+	yandexSAKeyFile := flag.String("yandex-sa-key-file", "", "Service account key file for Yandex KMS")
 
 	// KMS cache flags
 	kmsCacheTTL := flag.Duration("kms-cache-ttl", 0, "TTL for KMS decrypt cache (0 to disable, e.g. \"60s\")")
@@ -171,7 +172,7 @@ func run() error {
 		}
 
 		kmsP, err := initKMSProvider(providerName, *kmsLocalKeys, cfg,
-			*yandexKMSEndpoint, *yandexAuthMode, *yandexIAMToken, *yandexOAuthToken)
+			*yandexKMSEndpoint, *yandexAuthMode, *yandexIAMToken, *yandexOAuthToken, *yandexSAKeyFile)
 		if err != nil {
 			return fmt.Errorf("initializing KMS provider: %w", err)
 		}
@@ -333,14 +334,14 @@ func run() error {
 			if r.AuthInjector() != nil {
 				ccOpts = append(ccOpts, coordclient.WithAuthInjector(r.AuthInjector()))
 			}
-		cc := coordclient.New(
-			coordSvcClient,
-			hostname,
-			cfg.ListenAddr,
-			sharedTM,
-			logger.With("component", "coordclient"),
-			ccOpts...,
-		)
+			cc := coordclient.New(
+				coordSvcClient,
+				hostname,
+				cfg.ListenAddr,
+				sharedTM,
+				logger.With("component", "coordclient"),
+				ccOpts...,
+			)
 			go cc.Run(ctx)
 			logger.Info("coordinator subscription client started",
 				"router_id", hostname,

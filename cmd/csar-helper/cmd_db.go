@@ -90,6 +90,7 @@ var (
 	migrateYandexAuthMode   string
 	migrateYandexIAMToken   string
 	migrateYandexOAuthToken string
+	migrateYandexSAKeyFile  string
 )
 
 var dbMigrateCmd = &cobra.Command{
@@ -325,6 +326,7 @@ func init() {
 	dbMigrateCmd.Flags().StringVar(&migrateYandexAuthMode, "yandex-auth-mode", "metadata", "Yandex KMS auth mode: iam_token, oauth_token, metadata")
 	dbMigrateCmd.Flags().StringVar(&migrateYandexIAMToken, "yandex-iam-token", "", "static IAM token for Yandex KMS")
 	dbMigrateCmd.Flags().StringVar(&migrateYandexOAuthToken, "yandex-oauth-token", "", "OAuth token for IAM token exchange")
+	dbMigrateCmd.Flags().StringVar(&migrateYandexSAKeyFile, "yandex-sa-key-file", "", "Service account key file for Yandex KMS")
 
 	// token encrypt flags
 	tokenEncryptCmd.Flags().StringVar(&tokenEncryptPlaintext, "plaintext", "", "plaintext token to encrypt (or read from stdin)")

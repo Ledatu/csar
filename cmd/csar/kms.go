@@ -12,6 +12,7 @@ import (
 // initKMSProvider creates a KMS provider based on the resolved provider name.
 func initKMSProvider(provider, localKeys string, cfg *config.Config,
 	yandexEndpoint, yandexAuthMode, yandexIAMToken, yandexOAuthToken string,
+	yandexSAKeyFile string,
 ) (kms.Provider, error) {
 	switch provider {
 	case "local":
@@ -35,6 +36,7 @@ func initKMSProvider(provider, localKeys string, cfg *config.Config,
 			AuthMode:   yandexAuthMode,
 			IAMToken:   logging.NewSecret(yandexIAMToken),
 			OAuthToken: logging.NewSecret(yandexOAuthToken),
+			SAKeyFile:  yandexSAKeyFile,
 		}
 		// Merge with YAML config if present.
 		if cfg.KMS != nil && cfg.KMS.Yandex != nil {
@@ -50,6 +52,9 @@ func initKMSProvider(provider, localKeys string, cfg *config.Config,
 			}
 			if yCfg.OAuthToken.IsEmpty() {
 				yCfg.OAuthToken = y.OAuthToken
+			}
+			if yCfg.SAKeyFile == "" {
+				yCfg.SAKeyFile = y.SAKeyFile
 			}
 		}
 		if cfg.KMS != nil && cfg.KMS.OperationTimeout.Duration > 0 {
