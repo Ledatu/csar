@@ -11,6 +11,7 @@ package authn
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rsa"
 	"encoding/base64"
@@ -382,6 +383,8 @@ func verifySignature(alg string, jwk *JSONWebKey, signingInput, signature []byte
 		return verifyRSA(alg, jwk, signingInput, signature)
 	case strings.HasPrefix(alg, "ES"):
 		return verifyECDSA(alg, jwk, signingInput, signature)
+	case alg == "EdDSA":
+		return verifyEdDSA(jwk, signingInput, signature)
 	default:
 		return fmt.Errorf("unsupported algorithm: %s", alg)
 	}
@@ -468,6 +471,28 @@ func verifyECDSA(alg string, jwk *JSONWebKey, signingInput, signature []byte) er
 
 	if !ecdsa.Verify(pubKey, digest, r, s) {
 		return errors.New("ECDSA signature verification failed")
+	}
+	return nil
+}
+
+// verifyEdDSA verifies an Ed25519 (EdDSA) signature.
+// The JWT x parameter is the raw 32-byte public key, base64url-encoded.
+func verifyEdDSA(jwk *JSONWebKey, signingInput, signature []byte) error {
+	if jwk.Kty != "OKP" || jwk.Crv != "Ed25519" {
+		return errors.New("key type mismatch: expected OKP Ed25519")
+	}
+
+	xBytes, err := base64URLDecode(jwk.X)
+	if err != nil {
+		return fmt.Errorf("decoding Ed25519 public key x: %w", err)
+	}
+	if len(xBytes) != ed25519.PublicKeySize {
+		return fmt.Errorf("invalid Ed25519 public key length: %d", len(xBytes))
+	}
+
+	pubKey := ed25519.PublicKey(xBytes)
+	if !ed25519.Verify(pubKey, signingInput, signature) {
+		return errors.New("EdDSA signature verification failed")
 	}
 	return nil
 }

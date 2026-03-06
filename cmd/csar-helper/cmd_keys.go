@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	csarcrypto "github.com/ledatu/csar/internal/crypto"
 	"github.com/spf13/cobra"
@@ -151,8 +152,66 @@ Output variables:
 	},
 }
 
+// ─── keys issue-token ──────────────────────────────────────────────────────────
+
+var (
+	keysIssuePrivKey     string
+	keysIssuePubKey      string
+	keysIssueKID         string
+	keysIssueSub         string
+	keysIssueIss         string
+	keysIssueAud         []string
+	keysIssueTTL         time.Duration
+	keysIssueExtraClaims []string
+)
+
+var keysIssueTokenCmd = &cobra.Command{
+	Use:   "issue-token",
+	Short: "Issue a signed JWT using a private key",
+	Long: `Generates and signs a JWT using the provided private key (Ed25519 or RSA).
+
+The key ID (kid) is automatically derived from the public key's SHA-256 hash.
+You can override it with --kid or by providing --pub-key.
+
+The token is printed to stdout so it can be captured in a shell variable:
+
+  TOKEN=$(csar-helper keys issue-token --priv-key csar.key --sub myservice --ttl 1h)`,
+	Example: `  # Minimal: sign with Ed25519 key, 1h TTL
+  csar-helper keys issue-token --priv-key csar.key
+
+  # Full example with custom claims
+  csar-helper keys issue-token \
+    --priv-key csar.key --pub-key csar.pub \
+    --sub seller1 --iss csar-dev --aud wb-api \
+    --ttl 24h \
+    --claim seller_id=4c68d0cf-947a-5740-95e3-dce57b196455 \
+    --claim role=admin`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		extra, err := csarcrypto.ParseExtraClaims(keysIssueExtraClaims)
+		if err != nil {
+			return err
+		}
+
+		token, err := csarcrypto.IssueToken(csarcrypto.IssueTokenOptions{
+			PrivKeyPath: keysIssuePrivKey,
+			PubKeyPath:  keysIssuePubKey,
+			KID:         keysIssueKID,
+			Subject:     keysIssueSub,
+			Issuer:      keysIssueIss,
+			Audience:    keysIssueAud,
+			TTL:         keysIssueTTL,
+			ExtraClaims: extra,
+		})
+		if err != nil {
+			return err
+		}
+
+		fmt.Println(token)
+		return nil
+	},
+}
+
 func init() {
-	// keys generate flags
 	keysGenerateCmd.Flags().StringVar(&keysGenAlgorithm, "algorithm", "ed25519", "key algorithm: ed25519, rsa")
 	keysGenerateCmd.Flags().IntVar(&keysGenRSABits, "rsa-bits", 2048, "RSA key size in bits (only for --algorithm=rsa)")
 	keysGenerateCmd.Flags().StringVar(&keysGenOutputDir, "output", ".", "output directory for key files")
@@ -166,6 +225,16 @@ func init() {
 	keysToEnvCmd.Flags().StringVar(&keysToEnvPrivKey, "priv-key", "", "path to PEM-encoded private key (required)")
 	keysToEnvCmd.Flags().StringVar(&keysToEnvPubKey, "pub-key", "", "path to PEM-encoded public key (required)")
 
-	keysCmd.AddCommand(keysGenerateCmd, keysToJWKSCmd, keysToEnvCmd)
+	// keys issue-token flags
+	keysIssueTokenCmd.Flags().StringVar(&keysIssuePrivKey, "priv-key", "", "path to PEM-encoded private key (required)")
+	keysIssueTokenCmd.Flags().StringVar(&keysIssuePubKey, "pub-key", "", "path to PEM-encoded public key (for kid derivation)")
+	keysIssueTokenCmd.Flags().StringVar(&keysIssueKID, "kid", "", "override key ID (kid header)")
+	keysIssueTokenCmd.Flags().StringVar(&keysIssueSub, "sub", "", "subject claim (sub)")
+	keysIssueTokenCmd.Flags().StringVar(&keysIssueIss, "iss", "", "issuer claim (iss)")
+	keysIssueTokenCmd.Flags().StringArrayVar(&keysIssueAud, "aud", nil, "audience claim (aud), repeatable")
+	keysIssueTokenCmd.Flags().DurationVar(&keysIssueTTL, "ttl", time.Hour, "token lifetime (e.g. 1h, 30m, 24h)")
+	keysIssueTokenCmd.Flags().StringArrayVar(&keysIssueExtraClaims, "claim", nil, "extra claim as key=value, repeatable (e.g. --claim role=admin)")
+
+	keysCmd.AddCommand(keysGenerateCmd, keysToJWKSCmd, keysToEnvCmd, keysIssueTokenCmd)
 	rootCmd.AddCommand(keysCmd)
 }
