@@ -669,6 +669,11 @@ type AuthValidateConfig struct {
 	// before proxying. Map key = claim name, value = header name.
 	// Example: {"sub": "X-User-ID", "email": "X-User-Email"}
 	ForwardClaims map[string]string `yaml:"forward_claims,omitempty" json:"forward_claims,omitempty"`
+
+	// CookieName, if set, reads the JWT from the named cookie instead of
+	// a request header. When set, HeaderName and TokenPrefix are ignored.
+	// Useful for browser-based auth where csar-auth issues session cookies.
+	CookieName string `yaml:"cookie_name,omitempty" json:"cookie_name,omitempty"`
 }
 
 // RedactConfig configures response payload redaction / DLP (audit §3.3.2).

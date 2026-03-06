@@ -52,6 +52,10 @@ type Config struct {
 	// ForwardClaims copies JWT claims into request headers.
 	// Map key = claim name, value = header name.
 	ForwardClaims map[string]string
+
+	// CookieName, if set, reads the JWT from the named cookie instead
+	// of a request header. HeaderName and TokenPrefix are ignored when set.
+	CookieName string
 }
 
 // JWTValidator validates inbound JWT tokens against a JWKS endpoint.
@@ -118,19 +122,32 @@ func (v *JWTValidator) Wrap(cfg Config, next http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Extract token from header
-		authHeader := r.Header.Get(cfg.HeaderName)
-		if authHeader == "" {
-			v.reject(w, http.StatusUnauthorized, "missing authorization header")
-			return
+		var tokenStr string
+
+		if cfg.CookieName != "" {
+			// Extract token from cookie.
+			cookie, err := r.Cookie(cfg.CookieName)
+			if err != nil {
+				v.reject(w, http.StatusUnauthorized, "missing session cookie")
+				return
+			}
+			tokenStr = cookie.Value
+		} else {
+			// Extract token from header.
+			authHeader := r.Header.Get(cfg.HeaderName)
+			if authHeader == "" {
+				v.reject(w, http.StatusUnauthorized, "missing authorization header")
+				return
+			}
+
+			if !strings.HasPrefix(authHeader, cfg.TokenPrefix) {
+				v.reject(w, http.StatusUnauthorized, "invalid token format")
+				return
+			}
+
+			tokenStr = strings.TrimPrefix(authHeader, cfg.TokenPrefix)
 		}
 
-		if !strings.HasPrefix(authHeader, cfg.TokenPrefix) {
-			v.reject(w, http.StatusUnauthorized, "invalid token format")
-			return
-		}
-
-		tokenStr := strings.TrimPrefix(authHeader, cfg.TokenPrefix)
 		if tokenStr == "" {
 			v.reject(w, http.StatusUnauthorized, "empty token")
 			return

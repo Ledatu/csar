@@ -546,6 +546,7 @@ func (r *Router) setupJWT(rt *route, fr config.FlatRoute, key string, logger *sl
 		CacheTTL:       fr.Route.AuthValidate.CacheTTL.Duration,
 		RequiredClaims: fr.Route.AuthValidate.RequiredClaims,
 		ForwardClaims:  fr.Route.AuthValidate.ForwardClaims,
+		CookieName:     fr.Route.AuthValidate.CookieName,
 	}
 	logger.Info("JWT validation enabled",
 		"route", key,
