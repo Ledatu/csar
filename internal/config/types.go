@@ -76,6 +76,11 @@ func (sc *SecurityConfigs) UnmarshalYAML(value *yaml.Node) error {
 
 // Config holds the top-level CSAR configuration.
 type Config struct {
+	// Include is a list of file paths or glob patterns to merge into this config.
+	// Paths are resolved relative to the directory of the file containing the include.
+	// Processed before YAML unmarshaling of the main config body.
+	Include []string `yaml:"include,omitempty" json:"include,omitempty"`
+
 	// Profile declares the deployment profile: "dev-local", "prod-single", "prod-distributed", or "".
 	// Used by csar-helper validate to enforce profile-specific constraints.
 	Profile string `yaml:"profile,omitempty" json:"profile,omitempty"`
@@ -120,6 +125,22 @@ type Config struct {
 	// Routes reference them via x-csar-traffic: "policy_name" or x-csar-traffic.use: "policy_name".
 	// Inline fields on the route override policy defaults (shallow merge).
 	ThrottlingPolicies map[string]ThrottlingPolicy `yaml:"throttling_policies,omitempty" json:"throttling_policies,omitempty"`
+
+	// CORSPolicies defines named, reusable CORS configurations.
+	// Routes reference them via x-csar-cors: "policy_name".
+	CORSPolicies map[string]CORSConfig `yaml:"cors_policies,omitempty" json:"cors_policies,omitempty"`
+
+	// RetryPolicies defines named, reusable retry configurations.
+	// Routes reference them via x-csar-retry: "policy_name".
+	RetryPolicies map[string]RetryConfig `yaml:"retry_policies,omitempty" json:"retry_policies,omitempty"`
+
+	// RedactPolicies defines named, reusable redaction configurations.
+	// Routes reference them via x-csar-redact: "policy_name".
+	RedactPolicies map[string]RedactConfig `yaml:"redact_policies,omitempty" json:"redact_policies,omitempty"`
+
+	// AuthValidatePolicies defines named, reusable auth validation configurations.
+	// Routes reference them via x-csar-auth-validate: "policy_name".
+	AuthValidatePolicies map[string]AuthValidateConfig `yaml:"auth_validate_policies,omitempty" json:"auth_validate_policies,omitempty"`
 
 	// GlobalThrottle defines a global rate limit applied to ALL routes as a safety net.
 	// Checked before per-route throttle. Uses a fast in-memory atomic counter.
@@ -189,6 +210,14 @@ type AccessControlConfig struct {
 	TrustProxy bool `yaml:"trust_proxy,omitempty" json:"trust_proxy,omitempty"`
 }
 
+// SourceMeta records where a config field was declared.
+// Used for diagnostics and the inspect command — not serialized to YAML/proto.
+type SourceMeta struct {
+	File   string // absolute path to the source file
+	Line   int    // line number in the source file
+	Policy string // policy name if inherited, empty if inline
+}
+
 // RouteConfig defines a single route entry with x-csar-* extensions.
 type RouteConfig struct {
 	// Backend configuration.
@@ -239,6 +268,10 @@ type RouteConfig struct {
 	// If the upstream response exceeds this, it is truncated and an error is returned.
 	// Applies to DLP and Retry middleware buffering. Default: 0 (unlimited).
 	MaxResponseSize int64 `yaml:"max_response_size,omitempty" json:"max_response_size,omitempty"`
+
+	// SourceInfo records which file and line each field was declared in.
+	// Populated during multi-file loading for diagnostics. Not serialized.
+	SourceInfo map[string]SourceMeta `yaml:"-" json:"-"`
 }
 
 // BackendConfig configures the upstream target.
@@ -581,7 +614,16 @@ type ResilienceConfig struct {
 
 // RetryConfig configures automatic retry for upstream requests.
 // Only idempotent methods (GET, HEAD, OPTIONS by default) are retried.
+//
+// Supports bare string syntax for policy references:
+//
+//	x-csar-retry: "safe-retry"             # bare string → policy ref
+//	x-csar-retry: { max_attempts: 3, ... } # inline object
+//	x-csar-retry: { use: "safe-retry", max_attempts: 5 } # policy ref + overrides
 type RetryConfig struct {
+	// Use is an optional reference to a named retry_policies entry.
+	Use string `yaml:"use,omitempty" json:"use,omitempty"`
+
 	// MaxAttempts is the maximum number of total attempts (including the original).
 	// Default: 3.
 	MaxAttempts int `yaml:"max_attempts" json:"max_attempts"`
@@ -615,6 +657,21 @@ type RetryConfig struct {
 	MaxInternalWait Duration `yaml:"max_internal_wait,omitempty" json:"max_internal_wait,omitempty"`
 }
 
+// UnmarshalYAML handles bare string (policy reference) and inline object syntax for RetryConfig.
+func (rc *RetryConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		rc.Use = value.Value
+		return nil
+	}
+	type retryAlias RetryConfig
+	var alias retryAlias
+	if err := value.Decode(&alias); err != nil {
+		return err
+	}
+	*rc = RetryConfig(alias)
+	return nil
+}
+
 // AdaptiveBackpressureConfig configures upstream backpressure awareness.
 // When enabled, the router reads rate-limit headers from upstream 429 responses
 // and dynamically suspends the token bucket to avoid hammering the upstream.
@@ -640,7 +697,15 @@ type AdaptiveBackpressureConfig struct {
 
 // AuthValidateConfig configures inbound JWT/JWKS validation (audit §3.3.1).
 // When present on a route, CSAR validates the bearer token before proxying.
+//
+// Supports bare string syntax for policy references:
+//
+//	x-csar-auth-validate: "jwt-internal"          # bare string → policy ref
+//	x-csar-auth-validate: { jwks_url: "...", ... } # inline object
 type AuthValidateConfig struct {
+	// Use is an optional reference to a named auth_validate_policies entry.
+	Use string `yaml:"use,omitempty" json:"use,omitempty"`
+
 	// JWKSURL is the endpoint serving the JSON Web Key Set.
 	// Example: "https://auth.example.com/.well-known/jwks.json"
 	JWKSURL string `yaml:"jwks_url" json:"jwks_url"`
@@ -676,9 +741,32 @@ type AuthValidateConfig struct {
 	CookieName string `yaml:"cookie_name,omitempty" json:"cookie_name,omitempty"`
 }
 
+// UnmarshalYAML handles bare string (policy reference) and inline object syntax for AuthValidateConfig.
+func (av *AuthValidateConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		av.Use = value.Value
+		return nil
+	}
+	type avAlias AuthValidateConfig
+	var alias avAlias
+	if err := value.Decode(&alias); err != nil {
+		return err
+	}
+	*av = AuthValidateConfig(alias)
+	return nil
+}
+
 // RedactConfig configures response payload redaction / DLP (audit §3.3.2).
 // Matching JSON fields are masked before the response is returned to the client.
+//
+// Supports bare string syntax for policy references:
+//
+//	x-csar-redact: "pii-mask"                    # bare string → policy ref
+//	x-csar-redact: { fields: ["email"], ... }    # inline object
 type RedactConfig struct {
+	// Use is an optional reference to a named redact_policies entry.
+	Use string `yaml:"use,omitempty" json:"use,omitempty"`
+
 	// Fields is a list of JSON field paths to redact.
 	// Supports dot notation (e.g. "user.email", "data.ssn").
 	// Nested wildcards: "users.*.email" redacts email in every array element.
@@ -698,6 +786,21 @@ func (rc *RedactConfig) IsEnabled() bool {
 		return true // default when block is present
 	}
 	return *rc.Enabled
+}
+
+// UnmarshalYAML handles bare string (policy reference) and inline object syntax for RedactConfig.
+func (rc *RedactConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		rc.Use = value.Value
+		return nil
+	}
+	type redactAlias RedactConfig
+	var alias redactAlias
+	if err := value.Decode(&alias); err != nil {
+		return err
+	}
+	*rc = RedactConfig(alias)
+	return nil
 }
 
 // TenantConfig configures multi-tenant routing (audit §3.3.3).
@@ -720,7 +823,15 @@ type TenantConfig struct {
 // CORSConfig configures Cross-Origin Resource Sharing (CORS) for a route.
 // When present, CSAR automatically handles preflight OPTIONS requests
 // and injects CORS headers into responses.
+//
+// Supports bare string syntax for policy references:
+//
+//	x-csar-cors: "standard-cors"                         # bare string → policy ref
+//	x-csar-cors: { allowed_origins: ["*"], ... }         # inline object
 type CORSConfig struct {
+	// Use is an optional reference to a named cors_policies entry.
+	Use string `yaml:"use,omitempty" json:"use,omitempty"`
+
 	// AllowedOrigins is the list of allowed origins.
 	// Use "*" to allow all origins (not recommended for production).
 	AllowedOrigins []string `yaml:"allowed_origins" json:"allowed_origins"`
@@ -742,6 +853,21 @@ type CORSConfig struct {
 	// MaxAge is the max time (in seconds) a preflight response can be cached.
 	// Default: 86400 (24 hours).
 	MaxAge int `yaml:"max_age,omitempty" json:"max_age,omitempty"`
+}
+
+// UnmarshalYAML handles bare string (policy reference) and inline object syntax for CORSConfig.
+func (cc *CORSConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		cc.Use = value.Value
+		return nil
+	}
+	type corsAlias CORSConfig
+	var alias corsAlias
+	if err := value.Decode(&alias); err != nil {
+		return err
+	}
+	*cc = CORSConfig(alias)
+	return nil
 }
 
 // CacheConfig configures HTTP response caching for a route.

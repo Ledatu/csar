@@ -57,6 +57,9 @@ func (c *Config) ResolveSecurityProfiles() error {
 				}
 				merged.Profile = "" // clear ref after resolution
 				route.Security[i] = merged
+
+				// Annotate source metadata for inherited fields.
+				annotatePolicy(&route, "x-csar-security", sec.Profile)
 			}
 			methods[method] = route
 		}

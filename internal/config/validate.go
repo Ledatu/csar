@@ -36,7 +36,8 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	var warnings []string
+	// Preserve warnings from include/merge phase.
+	warnings := append([]string{}, c.Warnings...)
 
 	isProd := c.SecurityPolicy != nil && c.SecurityPolicy.Environment == "prod"
 
@@ -314,6 +315,30 @@ func (c *Config) Validate() error {
 		if route.Traffic != nil && route.Traffic.Use != "" {
 			return fmt.Errorf("path %s method %s: x-csar-traffic has unresolved policy reference %q — "+
 				"call ResolveThrottlePolicies() before Validate()", path, method, route.Traffic.Use)
+		}
+
+		// Validate unresolved CORS policy references.
+		if route.CORS != nil && route.CORS.Use != "" {
+			return fmt.Errorf("path %s method %s: x-csar-cors has unresolved policy reference %q — "+
+				"call ResolveCORSPolicies() before Validate()", path, method, route.CORS.Use)
+		}
+
+		// Validate unresolved retry policy references.
+		if route.Retry != nil && route.Retry.Use != "" {
+			return fmt.Errorf("path %s method %s: x-csar-retry has unresolved policy reference %q — "+
+				"call ResolveRetryPolicies() before Validate()", path, method, route.Retry.Use)
+		}
+
+		// Validate unresolved redact policy references.
+		if route.Redact != nil && route.Redact.Use != "" {
+			return fmt.Errorf("path %s method %s: x-csar-redact has unresolved policy reference %q — "+
+				"call ResolveRedactPolicies() before Validate()", path, method, route.Redact.Use)
+		}
+
+		// Validate unresolved auth-validate policy references.
+		if route.AuthValidate != nil && route.AuthValidate.Use != "" {
+			return fmt.Errorf("path %s method %s: x-csar-auth-validate has unresolved policy reference %q — "+
+				"call ResolveAuthValidatePolicies() before Validate()", path, method, route.AuthValidate.Use)
 		}
 
 		// Validate dynamic key requires redis backend.

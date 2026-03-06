@@ -46,6 +46,7 @@ func (c *Config) ResolveThrottlePolicies() error {
 			}
 			merged.Use = "" // clear ref after resolution
 			route.Traffic = merged
+			annotatePolicy(&route, "x-csar-traffic", policyName)
 			methods[method] = route
 		}
 	}
