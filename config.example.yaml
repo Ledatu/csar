@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=./csar.schema.json
 # CSAR - Centralized Smart API Router
 # Example configuration using OpenAPI-style x-csar-* extensions
 
