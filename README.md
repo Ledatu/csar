@@ -69,7 +69,7 @@ Each request passes through these stages in order:
 | **SSRF Protection** | Custom `DialContext` validates resolved IPs against RFC 1918/3927/4291/metadata ranges. Prevents DNS rebinding (TOCTOU) by connecting directly to validated IPs. |
 | **TLS Everywhere** | Inbound HTTPS + mTLS, outbound upstream TLS + mTLS, router↔coordinator TLS + mTLS. |
 | **Observability** | Prometheus metrics (request count, latency, status codes, throttle queue depth) + OpenTelemetry distributed tracing. |
-| **Coordinator** | Central gRPC control plane that pushes config updates, distributes encrypted secrets, allocates per-router quotas, and broadcasts token invalidation events. |
+| **Coordinator** | Central gRPC control plane that pushes config updates, distributes encrypted secrets, allocates per-router quotas, and broadcasts token invalidation events. Supports three token backends (file, PostgreSQL, S3 on-demand) and three config sources (file, S3, HTTP) with SHA-256 integrity checking (TOFU or pinned). |
 | **Multi-File Config** | Split configuration across multiple files with `include:` glob patterns, cycle detection, and deterministic merge order. |
 | **Named Policies** | Define reusable throttling, CORS, retry, redact, auth-validate, and security policies at the top level. Routes reference them by name with optional inline overrides. |
 | **Env Var Expansion** | Config string values support `${VAR}` and `$VAR` expansion, applied post-YAML-parse (injection-safe). |
@@ -139,6 +139,22 @@ orders_api_token:
   --client-ca /etc/csar/tls/client-ca.pem \
   --allowed-routers "router-1.csar.internal,router-2.csar.internal" \
   --token-file /etc/csar/tokens.yaml
+
+# Production with S3 token store (on-demand fetching) + HTTP config source:
+./bin/csar-coordinator \
+  --listen :9090 \
+  --tls-cert /etc/csar/tls/server.pem \
+  --tls-key /etc/csar/tls/server-key.pem \
+  --client-ca /etc/csar/tls/client-ca.pem \
+  --token-source s3 \
+  --s3-bucket my-tokens-bucket \
+  --s3-prefix tokens/ \
+  --s3-auth-mode service_account \
+  --s3-sa-key-file /etc/csar/sa-key.json \
+  --config-source http \
+  --config-url https://config-server.internal/routes.yaml \
+  --config-http-bearer "${CONFIG_BEARER_TOKEN}" \
+  --config-refresh-interval 60s
 ```
 
 ### Token Management with `csar-helper`
@@ -461,6 +477,8 @@ When the coordinator is enabled, the router automatically subscribes to its gRPC
 
 ### `csar-coordinator`
 
+#### Core flags
+
 | Flag | Default | Description |
 |---|---|---|
 | `--listen` | `:9090` | gRPC listen address |
@@ -468,8 +486,99 @@ When the coordinator is enabled, the router automatically subscribes to its gRPC
 | `--tls-key` | *(empty)* | Server TLS private key |
 | `--client-ca` | *(empty)* | Client CA for mTLS |
 | `--allowed-routers` | *(empty)* | Comma-separated CN/SAN allowlist |
-| `--allow-insecure-dev` | `false` | Allow running without TLS |
-| `--token-file` | *(empty)* | YAML file with pre-encrypted token entries |
+| `--allow-insecure-dev` | `false` | Allow running without TLS (dev only) |
+
+#### Token source (choose one)
+
+| Flag | Default | Description |
+|---|---|---|
+| `--token-file` | *(empty)* | YAML file with pre-encrypted token entries (`file` source) |
+| `--token-source` | *(auto-detect)* | Explicit backend: `file`, `postgres`, `s3` |
+
+#### PostgreSQL token source (`--token-source=postgres`)
+
+| Flag | Default | Description |
+|---|---|---|
+| `--postgres-dsn` | *(required)* | PostgreSQL connection string |
+| `--postgres-max-conns` | `10` | Max open DB connections |
+| `--postgres-refresh-interval` | `30s` | Polling interval for token changes |
+
+#### S3 token source (`--token-source=s3`)
+
+Tokens are fetched **on-demand** — no `ListObjects` calls are made at startup or during operation. Each token is fetched individually the first time it is requested.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--s3-bucket` | *(required)* | S3 bucket name |
+| `--s3-endpoint` | `https://storage.yandexcloud.net` | S3-compatible endpoint |
+| `--s3-region` | `ru-central1` | S3 region for signing |
+| `--s3-prefix` | `tokens/` | Key prefix for token objects |
+| `--s3-auth-mode` | `static` | Auth: `static`, `iam_token`, `oauth_token`, `metadata`, `service_account` |
+| `--s3-access-key-id` | *(empty)* | Access key ID (static auth) |
+| `--s3-secret-access-key` | *(empty)* | Secret access key (static auth) |
+| `--s3-iam-token` | *(empty)* | Static IAM token (iam_token auth) |
+| `--s3-oauth-token` | *(empty)* | OAuth token for IAM exchange (oauth_token auth) |
+| `--s3-sa-key-file` | *(empty)* | Service account key JSON file (service_account auth) |
+| `--s3-kms-mode` | `kms` | Token encryption mode: `kms` (CSAR KMS) or `passthrough` (SSE-only) |
+
+#### State store
+
+| Flag | Default | Description |
+|---|---|---|
+| `--store` | `memory` | State store backend: `memory`, `etcd` |
+| `--etcd-endpoints` | `localhost:2379` | Comma-separated etcd endpoints |
+| `--etcd-prefix` | `/csar` | etcd key prefix |
+| `--etcd-router-ttl` | `30` | etcd lease TTL (seconds) for router entries |
+
+#### Config source (`--config-source`)
+
+The coordinator can load route configuration from an external source and push it into the state store, polling for changes at a configurable interval. Supports three backends: `file`, `s3`, `http`.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--config-source` | *(empty)* | Source backend: `file`, `s3`, `http` (empty = disabled) |
+| `--config-refresh-interval` | `60s` | Polling interval |
+| `--config-sha256` | *(empty)* | Pin expected SHA-256 hash (hex); empty = TOFU mode |
+
+**`--config-source=file`**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--config-file` | *(required)* | Path to YAML config file |
+
+**`--config-source=http`**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--config-url` | *(required)* | URL to fetch config from |
+| `--config-http-header` | *(empty)* | Extra headers: `key=value,key2=value2` |
+| `--config-http-bearer` | *(empty)* | Bearer token for `Authorization` header |
+
+**`--config-source=s3`**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--config-s3-bucket` | *(required)* | S3 bucket for config |
+| `--config-s3-key` | `config.yaml` | S3 object key |
+| `--config-s3-endpoint` | `https://storage.yandexcloud.net` | S3 endpoint |
+| `--config-s3-region` | `ru-central1` | S3 region |
+| `--config-s3-auth-mode` | `static` | Auth mode (same values as token S3 source) |
+| `--config-s3-access-key-id` | *(empty)* | Access key ID (static auth) |
+| `--config-s3-secret-access-key` | *(empty)* | Secret access key (static auth) |
+| `--config-s3-iam-token` | *(empty)* | Static IAM token (iam_token auth) |
+| `--config-s3-oauth-token` | *(empty)* | OAuth token for IAM exchange |
+| `--config-s3-sa-key-file` | *(empty)* | Service account key JSON file |
+
+##### Config source integrity
+
+The watcher validates every fetched config against a SHA-256 hash using one of two policies:
+
+| Policy | Behaviour |
+|---|---|
+| **TOFU** (default) | Trusts the first fetch, then detects unexpected content changes when the ETag is unchanged — catches silent content replacement / tampering. |
+| **Pinned** (`--config-sha256`) | Validates every fetch against the operator-provided hash; rejects any mismatch. |
+
+On any partial store failure during diff application the ETag is invalidated, forcing a full re-fetch and re-apply on the next poll rather than silently leaving the state store in a half-applied state.
 
 ### `csar-helper`
 
@@ -651,8 +760,9 @@ make test-e2e          # Docker-based end-to-end tests
 | Package | What's Tested |
 |---|---|
 | `internal/config` | YAML parsing, validation (TLS, security, coordinator, access control, health check, CORS, cache, traffic backend), profile enforcement, runtime KMS provider validation, multi-file includes, named policy resolution |
+| `internal/configsource` | Watcher diff + apply cycle, partial-apply ETag invalidation, Apply mutex serialisation, TOFU + pinned hash policies, file/HTTP/S3 source adapters |
 | `internal/router` | Route matching, prefix boundary, IP allowlisting, `trust_proxy` isolation, fail-closed auth, streaming bypass, load balancing, CORS integration |
-| `internal/coordinator` | AuthService (token CRUD, gRPC errors), coordinator subscribe/health |
+| `internal/coordinator` | AuthService (token CRUD, gRPC errors), coordinator subscribe/health, S3 on-demand token fetching |
 | `internal/kms` | Encrypt/decrypt, cache (SHA-256 keys), local provider, Yandex Cloud KMS |
 | `internal/throttle` | Token bucket, burst, max wait timeout, quota updates |
 | `internal/resilience` | Circuit breaker state transitions |
@@ -686,8 +796,9 @@ internal/
   authn/                  JWT/JWKS validation + cookie auth
   cache/                  Response caching middleware
   config/                 YAML config loading, multi-file includes, policy resolution, validation
+  configsource/           Pluggable config sources for coordinator (file, S3, HTTP) with SHA-256 integrity
   coordclient/            Coordinator subscription client (quota + token invalidation)
-  coordinator/            gRPC coordinator + AuthService
+  coordinator/            gRPC coordinator + AuthService + token store backends (PostgreSQL, S3, file)
   cors/                   CORS middleware
   dlp/                    Data Loss Prevention (response redaction)
   helper/                 csar-helper logic (migration, encryption, profiles, token sources)
@@ -699,10 +810,12 @@ internal/
   resilience/             Circuit breaker
   retry/                  Retry middleware with backoff
   router/                 Core HTTP router (matching, pipeline, IP ACL)
-  statestore/             Pluggable state store (memory, PostgreSQL placeholder)
+  s3store/                S3-compatible object storage client (static + IAM auth, on-demand fetching)
+  statestore/             Pluggable state store (memory, etcd, PostgreSQL placeholder)
   telemetry/              OpenTelemetry tracing
   tenant/                 Multi-tenant routing
   throttle/               Token-bucket rate limiter + Redis distributed limiter
+  ycloud/                 Yandex Cloud IAM token resolver (singleflight refresh, multiple auth modes)
 pkg/
   health/                 Health check handler
   middleware/             Auth injection, token fetchers (static, file, gRPC)
