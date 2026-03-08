@@ -43,4 +43,4 @@ docs/
 
 audit*
 
-.gocache/
+.gocache/cmd/csar-mcp/schema.json

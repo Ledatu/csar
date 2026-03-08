@@ -19,7 +19,11 @@ build-mockapi:
 build-helper:
 	go build -o $(BUILD_DIR)/csar-helper ./cmd/csar-helper
 
-build-all: build build-coordinator build-mockapi build-helper
+build-mcp:
+	cp csar.schema.json cmd/csar-mcp/schema.json
+	go build -o $(BUILD_DIR)/csar-mcp ./cmd/csar-mcp
+
+build-all: build build-coordinator build-mockapi build-helper build-mcp
 
 run: build
 	./$(BUILD_DIR)/$(APP_NAME) -config config.example.yaml
