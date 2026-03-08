@@ -17,6 +17,7 @@ import (
 	"time"
 
 	jwtlib "github.com/golang-jwt/jwt/v5"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/ledatu/csar/internal/logging"
 )
@@ -37,7 +38,7 @@ type AuthConfig struct {
 	SAKeyFile string
 
 	// Static credentials (for S3-compatible APIs).
-	AccessKeyID    logging.Secret
+	AccessKeyID     logging.Secret
 	SecretAccessKey logging.Secret
 }
 
@@ -60,6 +61,11 @@ type IAMTokenResolver struct {
 	saPrivKey   *rsa.PrivateKey
 
 	client *http.Client
+
+	// sf collapses concurrent refresh requests into a single HTTP call.
+	// This prevents the write lock from being held for the entire duration
+	// of the network call (50-200ms), which would block all readers.
+	sf singleflight.Group
 }
 
 // NewIAMTokenResolver creates a resolver for the given auth config.
@@ -130,38 +136,74 @@ func (r *IAMTokenResolver) ResolveToken(ctx context.Context) (string, error) {
 	return r.refreshToken(ctx)
 }
 
+// refreshResult holds the token + expiry returned by a singleflight refresh.
+type refreshResult struct {
+	token  string
+	expiry time.Time
+}
+
 // refreshToken obtains a new IAM token based on the configured auth mode.
+//
+// Uses singleflight to collapse concurrent refresh requests into a single
+// HTTP call. The write lock is only held briefly to update the cached token
+// after the network call completes, so readers (ResolveToken callers) are
+// never blocked for the duration of the HTTP round-trip.
 func (r *IAMTokenResolver) refreshToken(ctx context.Context) (string, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	// Double-check after acquiring write lock.
+	// Quick check: another goroutine may have already refreshed.
+	r.mu.RLock()
 	if r.authToken != "" && time.Now().Add(30*time.Second).Before(r.expiry) {
-		return r.authToken, nil
+		tok := r.authToken
+		r.mu.RUnlock()
+		return tok, nil
 	}
+	r.mu.RUnlock()
 
-	var tok string
-	var exp time.Time
-	var err error
+	// Use singleflight to perform the HTTP call without holding any lock.
+	// All concurrent callers will share the result of a single network call.
+	res, err, _ := r.sf.Do("refresh", func() (interface{}, error) {
+		// Double-check inside singleflight (may have been refreshed by a
+		// previous singleflight call that just completed).
+		r.mu.RLock()
+		if r.authToken != "" && time.Now().Add(30*time.Second).Before(r.expiry) {
+			tok := r.authToken
+			r.mu.RUnlock()
+			return refreshResult{token: tok, expiry: r.expiry}, nil
+		}
+		r.mu.RUnlock()
 
-	switch r.authMode {
-	case "oauth_token":
-		tok, exp, err = r.exchangeOAuthToken(ctx)
-	case "metadata":
-		tok, exp, err = r.fetchMetadataToken(ctx)
-	case "service_account":
-		tok, exp, err = r.exchangeSAToken(ctx)
-	default:
-		return "", fmt.Errorf("ycloud: cannot refresh token for auth_mode=%q", r.authMode)
-	}
+		var tok string
+		var exp time.Time
+		var refreshErr error
+
+		switch r.authMode {
+		case "oauth_token":
+			tok, exp, refreshErr = r.exchangeOAuthToken(ctx)
+		case "metadata":
+			tok, exp, refreshErr = r.fetchMetadataToken(ctx)
+		case "service_account":
+			tok, exp, refreshErr = r.exchangeSAToken(ctx)
+		default:
+			return nil, fmt.Errorf("ycloud: cannot refresh token for auth_mode=%q", r.authMode)
+		}
+
+		if refreshErr != nil {
+			return nil, refreshErr
+		}
+
+		// Briefly acquire write lock to update the cached token.
+		r.mu.Lock()
+		r.authToken = tok
+		r.expiry = exp
+		r.mu.Unlock()
+
+		return refreshResult{token: tok, expiry: exp}, nil
+	})
 
 	if err != nil {
 		return "", err
 	}
 
-	r.authToken = tok
-	r.expiry = exp
-	return tok, nil
+	return res.(refreshResult).token, nil
 }
 
 // exchangeOAuthToken exchanges a Yandex OAuth token for an IAM token.

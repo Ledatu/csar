@@ -26,6 +26,7 @@ import (
 	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
 
+	"github.com/ledatu/csar/internal/configsource"
 	"github.com/ledatu/csar/internal/coordinator"
 	"github.com/ledatu/csar/internal/logging"
 	"github.com/ledatu/csar/internal/s3store"
@@ -67,13 +68,37 @@ func main() {
 	s3OAuthToken := flag.String("s3-oauth-token", "", "OAuth token for S3 IAM exchange (oauth_token auth)")
 	s3SAKeyFile := flag.String("s3-sa-key-file", "", "Service account key JSON file for S3 (service_account auth)")
 	s3KMSMode := flag.String("s3-kms-mode", "kms", "S3 KMS mode: passthrough (SSE only), kms (CSAR KMS encrypted)")
-	s3RefreshInterval := flag.Duration("s3-refresh-interval", 30*time.Second, "how often to poll S3 for token changes")
 
 	// State store flags
 	storeType := flag.String("store", "memory", "state store backend: memory, etcd")
 	etcdEndpoints := flag.String("etcd-endpoints", "localhost:2379", "comma-separated etcd endpoints")
 	etcdPrefix := flag.String("etcd-prefix", "/csar", "etcd key prefix")
 	etcdRouterTTL := flag.Int64("etcd-router-ttl", 30, "etcd lease TTL in seconds for router entries")
+
+	// Config source flags — load route configuration from file, S3, or HTTP.
+	configSource := flag.String("config-source", "", "config source: file, s3, http (empty = no config loading)")
+	configRefreshInterval := flag.Duration("config-refresh-interval", 60*time.Second, "config source polling interval")
+	configSHA256 := flag.String("config-sha256", "", "expected SHA-256 hash of config (hex); empty = TOFU mode")
+
+	// Config source: file
+	configFile := flag.String("config-file", "", "path to YAML config file (config-source=file)")
+
+	// Config source: HTTP
+	configURL := flag.String("config-url", "", "URL to fetch config from (config-source=http)")
+	configHTTPHeader := flag.String("config-http-header", "", "extra HTTP headers for config fetch (key=value, comma-separated)")
+	configHTTPBearer := flag.String("config-http-bearer", "", "bearer token for HTTP config source")
+
+	// Config source: S3 (prefixed with config-s3- to avoid conflict with token S3 flags)
+	configS3Bucket := flag.String("config-s3-bucket", "", "S3 bucket for config (config-source=s3)")
+	configS3Key := flag.String("config-s3-key", "config.yaml", "S3 object key for config")
+	configS3Endpoint := flag.String("config-s3-endpoint", "https://storage.yandexcloud.net", "S3 endpoint for config")
+	configS3Region := flag.String("config-s3-region", "ru-central1", "S3 region for config")
+	configS3AuthMode := flag.String("config-s3-auth-mode", "static", "S3 auth mode for config: static, iam_token, oauth_token, metadata, service_account")
+	configS3AccessKeyID := flag.String("config-s3-access-key-id", "", "S3 access key ID for config (static auth)")
+	configS3SecretAccessKey := flag.String("config-s3-secret-access-key", "", "S3 secret access key for config (static auth)")
+	configS3IAMToken := flag.String("config-s3-iam-token", "", "IAM token for config S3 (iam_token auth)")
+	configS3OAuthToken := flag.String("config-s3-oauth-token", "", "OAuth token for config S3 (oauth_token auth)")
+	configS3SAKeyFile := flag.String("config-s3-sa-key-file", "", "SA key JSON file for config S3 (service_account auth)")
 
 	flag.Parse()
 
@@ -115,6 +140,90 @@ func main() {
 		os.Exit(1)
 	}
 	defer store.Close()
+
+	// Initialize config source watcher (loads route configuration into StateStore).
+	var configWatcher *configsource.ConfigWatcher
+	if *configSource != "" {
+		var src configsource.ConfigSource
+		switch *configSource {
+		case "file":
+			if *configFile == "" {
+				logger.Error("--config-source=file requires --config-file")
+				os.Exit(1)
+			}
+			src = configsource.NewFileSource(*configFile)
+			logger.Info("config source: file", "path", *configFile)
+
+		case "s3":
+			if *configS3Bucket == "" {
+				logger.Error("--config-source=s3 requires --config-s3-bucket")
+				os.Exit(1)
+			}
+			cfgS3Client, err := s3store.NewClient(s3store.Config{
+				Bucket:   *configS3Bucket,
+				Endpoint: *configS3Endpoint,
+				Region:   *configS3Region,
+				Prefix:   "", // S3Source uses full key, not prefix
+				Auth: ycloud.AuthConfig{
+					AuthMode:        *configS3AuthMode,
+					IAMToken:        logging.NewSecret(*configS3IAMToken),
+					OAuthToken:      logging.NewSecret(*configS3OAuthToken),
+					SAKeyFile:       *configS3SAKeyFile,
+					AccessKeyID:     logging.NewSecret(*configS3AccessKeyID),
+					SecretAccessKey: logging.NewSecret(*configS3SecretAccessKey),
+				},
+			}, logger)
+			if err != nil {
+				logger.Error("failed to create config S3 client", "error", err)
+				os.Exit(1)
+			}
+			src = configsource.NewS3Source(cfgS3Client, *configS3Key)
+			logger.Info("config source: s3", "bucket", *configS3Bucket, "key", *configS3Key)
+
+		case "http":
+			if *configURL == "" {
+				logger.Error("--config-source=http requires --config-url")
+				os.Exit(1)
+			}
+			headers := parseConfigHTTPHeaders(*configHTTPHeader, *configHTTPBearer)
+			src = configsource.NewHTTPSource(*configURL, headers, nil)
+			logger.Info("config source: http", "url", *configURL)
+
+		default:
+			logger.Error("unknown --config-source value; supported: \"file\", \"s3\", \"http\"",
+				"config_source", *configSource,
+			)
+			os.Exit(1)
+		}
+
+		var opts []configsource.WatcherOption
+		if *configSHA256 != "" {
+			opts = append(opts,
+				configsource.WithHashPolicy(configsource.HashPinned),
+				configsource.WithPinnedHash(*configSHA256),
+			)
+			logger.Info("config hash policy: pinned", "sha256", *configSHA256)
+		} else {
+			opts = append(opts, configsource.WithHashPolicy(configsource.HashTOFU))
+			logger.Info("config hash policy: TOFU (Trust On First Use)")
+		}
+
+		configWatcher = configsource.NewConfigWatcher(
+			src, store,
+			logger.With("component", "config_watcher"),
+			opts...,
+		)
+
+		// Initial config load — fatal on failure.
+		initCtx, initCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if _, err := configWatcher.Apply(initCtx); err != nil {
+			initCancel()
+			logger.Error("initial config load failed", "error", err)
+			os.Exit(1)
+		}
+		initCancel()
+		logger.Info("initial config loaded from source")
+	}
 
 	// Create coordinator
 	coord := coordinator.New(store, logger)
@@ -206,11 +315,11 @@ func main() {
 			Region:   *s3Region,
 			Prefix:   *s3Prefix,
 			Auth: ycloud.AuthConfig{
-				AuthMode:       *s3AuthMode,
-				IAMToken:       logging.NewSecret(*s3IAMToken),
-				OAuthToken:     logging.NewSecret(*s3OAuthToken),
-				SAKeyFile:      *s3SAKeyFile,
-				AccessKeyID:    logging.NewSecret(*s3AccessKeyID),
+				AuthMode:        *s3AuthMode,
+				IAMToken:        logging.NewSecret(*s3IAMToken),
+				OAuthToken:      logging.NewSecret(*s3OAuthToken),
+				SAKeyFile:       *s3SAKeyFile,
+				AccessKeyID:     logging.NewSecret(*s3AccessKeyID),
 				SecretAccessKey: logging.NewSecret(*s3SecretAccessKey),
 			},
 		}, logger)
@@ -222,26 +331,18 @@ func main() {
 		s3Store := coordinator.NewS3TokenStore(s3Client, *s3KMSMode, logger)
 		tokenStore = s3Store
 
-		// Initial load.
-		entries, err := s3Store.LoadAll(context.Background())
-		if err != nil {
-			logger.Error("failed to load tokens from S3", "error", err)
-			os.Exit(1)
-		}
-		loaded := authSvc.LoadTokensFromMap(entries)
-		logger.Info("loaded tokens from token store into AuthService",
-			"backend", "s3",
-			"bucket", *s3Bucket,
-			"kms_mode", *s3KMSMode,
-			"count", loaded,
-			"refresh_interval", *s3RefreshInterval,
-		)
-
+		// S3 backend uses on-demand fetching: no initial LoadAll, no periodic
+		// refresh loop. Tokens are fetched individually via FetchOne when
+		// first requested through the AuthService read-through path.
+		// This avoids S3 ListObjects calls entirely, preventing silent data
+		// truncation and eliminating unnecessary bulk fetches.
 		authSvc.SetBackend(tokenStore)
 
-		refresher = coordinator.NewTokenRefresher(tokenStore, logger.With("component", "token_refresher"))
-		refresher.SeedVersions(entries)
-		refreshInterval = *s3RefreshInterval
+		logger.Info("S3 token store configured (on-demand mode — no listing)",
+			"bucket", *s3Bucket,
+			"prefix", *s3Prefix,
+			"kms_mode", *s3KMSMode,
+		)
 
 	case "file", "":
 		if *tokenFile != "" {
@@ -311,10 +412,12 @@ func main() {
 			"This mode is for development only. Set --tls-cert and --tls-key for production use.")
 	}
 
-	// In production mode (TLS enabled), enforce that AuthService has tokens loaded.
-	// An empty AuthService in production is almost certainly a misconfiguration.
+	// In production mode (TLS enabled), enforce that AuthService has tokens loaded
+	// (or a backend configured for on-demand fetching).
+	// An empty AuthService with no backend in production is almost certainly a misconfiguration.
 	isTLSEnabled := *tlsCert != "" && *tlsKey != ""
-	if isTLSEnabled && authSvc.TokenCount() == 0 {
+	isOnDemandBackend := resolvedTokenSource == "s3"
+	if isTLSEnabled && authSvc.TokenCount() == 0 && !isOnDemandBackend {
 		logger.Error("AuthService has no tokens loaded in production mode (TLS enabled). " +
 			"Provide --token-file with pre-encrypted token entries. " +
 			"This prevents runtime failures when routers request tokens.")
@@ -342,6 +445,12 @@ func main() {
 	if refresher != nil {
 		go refresher.RunPeriodicRefresh(ctx, refreshInterval, authSvc, coord)
 		logger.Info("token store refresh loop started", "interval", refreshInterval)
+	}
+
+	// Start config source watcher (if configured).
+	if configWatcher != nil {
+		go configWatcher.RunPeriodicWatch(ctx, *configRefreshInterval)
+		logger.Info("config watcher started", "interval", *configRefreshInterval)
 	}
 
 	// Graceful shutdown
@@ -487,6 +596,24 @@ func authStreamInterceptor(logger *slog.Logger, allowlist []string) grpc.StreamS
 		}
 		return handler(srv, ss)
 	}
+}
+
+// parseConfigHTTPHeaders parses comma-separated "key=value" pairs and an
+// optional bearer token into a headers map for HTTPSource.
+func parseConfigHTTPHeaders(raw, bearer string) map[string]string {
+	headers := make(map[string]string)
+	if bearer != "" {
+		headers["Authorization"] = "Bearer " + bearer
+	}
+	if raw != "" {
+		for _, pair := range strings.Split(raw, ",") {
+			pair = strings.TrimSpace(pair)
+			if k, v, ok := strings.Cut(pair, "="); ok {
+				headers[strings.TrimSpace(k)] = strings.TrimSpace(v)
+			}
+		}
+	}
+	return headers
 }
 
 // coordinatorTokenFileEntry is the on-disk format for pre-encrypted tokens.

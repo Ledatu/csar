@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -175,9 +176,7 @@ func (c *Client) listObjectsSDK(ctx context.Context) ([]ObjectEntry, error) {
 
 			entry, err := c.getObjectSDK(ctx, *obj.Key, tokenRef)
 			if err != nil {
-				c.logger.Warn("s3store: skipping object due to fetch error",
-					"key", *obj.Key, "error", err)
-				continue
+				return nil, fmt.Errorf("s3store: fetch object %q: %w", *obj.Key, err)
 			}
 			entries = append(entries, entry)
 		}
@@ -241,9 +240,7 @@ func (c *Client) listObjectsIAM(ctx context.Context) ([]ObjectEntry, error) {
 
 			entry, err := c.getObjectIAM(ctx, obj.Key, tokenRef)
 			if err != nil {
-				c.logger.Warn("s3store: skipping object due to fetch error",
-					"key", obj.Key, "error", err)
-				continue
+				return nil, fmt.Errorf("s3store: fetch object %q: %w", obj.Key, err)
 			}
 			entries = append(entries, entry)
 		}
@@ -264,6 +261,11 @@ func (c *Client) listPageIAM(ctx context.Context, continuationToken string) ([]s
 		return nil, "", fmt.Errorf("s3store: auth: %w", err)
 	}
 
+	bucketBase, err := c.bucketURL()
+	if err != nil {
+		return nil, "", err
+	}
+
 	params := url.Values{
 		"list-type": {"2"},
 		"prefix":    {c.cfg.Prefix},
@@ -272,7 +274,7 @@ func (c *Client) listPageIAM(ctx context.Context, continuationToken string) ([]s
 		params.Set("continuation-token", continuationToken)
 	}
 
-	reqURL := fmt.Sprintf("%s/%s?%s", c.cfg.Endpoint, c.cfg.Bucket, params.Encode())
+	reqURL := bucketBase + "?" + params.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
@@ -304,6 +306,31 @@ func (c *Client) listPageIAM(ctx context.Context, continuationToken string) ([]s
 	return result.Contents, nextToken, nil
 }
 
+// objectURL builds a well-formed S3 request URL for the given object key.
+//
+// Using url.URL avoids the manual escaping pitfalls of fmt.Sprintf string
+// concatenation: path.Join normalises slashes, and url.URL.String() re-encodes
+// the path components correctly regardless of what the Endpoint string looks like
+// (trailing slash, embedded path prefix, etc.).
+func (c *Client) objectURL(key string) (string, error) {
+	base, err := url.Parse(c.cfg.Endpoint)
+	if err != nil {
+		return "", fmt.Errorf("s3store: parse endpoint %q: %w", c.cfg.Endpoint, err)
+	}
+	base.Path = path.Join(base.Path, c.cfg.Bucket, key)
+	return base.String(), nil
+}
+
+// bucketURL builds the S3 bucket URL used for ListObjectsV2 requests.
+func (c *Client) bucketURL() (string, error) {
+	base, err := url.Parse(c.cfg.Endpoint)
+	if err != nil {
+		return "", fmt.Errorf("s3store: parse endpoint %q: %w", c.cfg.Endpoint, err)
+	}
+	base.Path = path.Join(base.Path, c.cfg.Bucket)
+	return base.String(), nil
+}
+
 // getObjectIAM fetches a single object via raw HTTP with IAM auth.
 func (c *Client) getObjectIAM(ctx context.Context, key, tokenRef string) (ObjectEntry, error) {
 	token, err := c.resolver.ResolveToken(ctx)
@@ -311,7 +338,10 @@ func (c *Client) getObjectIAM(ctx context.Context, key, tokenRef string) (Object
 		return ObjectEntry{}, fmt.Errorf("s3store: auth: %w", err)
 	}
 
-	reqURL := fmt.Sprintf("%s/%s/%s", c.cfg.Endpoint, c.cfg.Bucket, key)
+	reqURL, err := c.objectURL(key)
+	if err != nil {
+		return ObjectEntry{}, err
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {

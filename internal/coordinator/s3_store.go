@@ -3,9 +3,12 @@ package coordinator
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	"github.com/ledatu/csar/internal/s3store"
 )
@@ -43,28 +46,17 @@ func NewS3TokenStore(client *s3store.Client, kmsMode string, logger *slog.Logger
 	}
 }
 
-// LoadAll lists all token objects under the configured prefix, parses their
-// JSON bodies, and returns a map suitable for AuthServiceImpl.LoadTokensFromMap.
-func (s *S3TokenStore) LoadAll(ctx context.Context) (map[string]TokenEntry, error) {
-	objects, err := s.client.ListObjects(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("s3 token store: list: %w", err)
-	}
-
-	entries := make(map[string]TokenEntry, len(objects))
-	for _, obj := range objects {
-		entry, err := s.parseObject(obj)
-		if err != nil {
-			s.logger.Warn("s3 token store: skipping malformed object",
-				"token_ref", obj.TokenRef,
-				"error", err,
-			)
-			continue
-		}
-		entries[obj.TokenRef] = entry
-	}
-
-	return entries, nil
+// LoadAll is intentionally a no-op for the S3 token store. The S3 backend
+// uses on-demand fetching exclusively: tokens are fetched individually via
+// FetchOne (read-through in AuthServiceImpl) when first requested, rather
+// than listing and bulk-fetching all objects from the bucket.
+//
+// This eliminates the risk of silent data truncation on transient S3 errors
+// during listing, avoids unnecessary S3 API calls for tokens that may never
+// be needed, and ensures instant coordinator startup.
+func (s *S3TokenStore) LoadAll(_ context.Context) (map[string]TokenEntry, error) {
+	s.logger.Info("s3 token store: LoadAll is a no-op — tokens are fetched on demand via FetchOne")
+	return make(map[string]TokenEntry), nil
 }
 
 // FetchOne retrieves a single token from S3 by its ref.
@@ -72,8 +64,11 @@ func (s *S3TokenStore) LoadAll(ctx context.Context) (map[string]TokenEntry, erro
 func (s *S3TokenStore) FetchOne(ctx context.Context, tokenRef string) (TokenEntry, error) {
 	obj, err := s.client.GetObject(ctx, tokenRef)
 	if err != nil {
-		// Check for "not found" in the error message from s3store.
-		if strings.Contains(err.Error(), "not found") {
+		// Detect "not found" from both auth modes:
+		// - IAM raw HTTP: error message contains "not found"
+		// - AWS SDK (static auth): returns *types.NoSuchKey
+		var nsk *types.NoSuchKey
+		if strings.Contains(err.Error(), "not found") || errors.As(err, &nsk) {
 			return TokenEntry{}, fmt.Errorf("token ref %q: %w", tokenRef, ErrTokenNotFound)
 		}
 		return TokenEntry{}, fmt.Errorf("s3 token store: fetch %q: %w", tokenRef, err)
