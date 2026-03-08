@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/ledatu/csar/internal/helper"
+	"github.com/ledatu/csar/internal/logging"
+	"github.com/ledatu/csar/internal/s3store"
+	"github.com/ledatu/csar/internal/ycloud"
 	"github.com/spf13/cobra"
 )
 
@@ -85,6 +88,19 @@ var (
 	migrateJQPath      string
 	migrateHTTPHeaders []string
 
+	// S3 source
+	migrateS3Bucket         string
+	migrateS3Endpoint       string
+	migrateS3Region         string
+	migrateS3Prefix         string
+	migrateS3AuthMode       string
+	migrateS3AccessKeyID    string
+	migrateS3SecretAccessKey string
+	migrateS3IAMToken       string
+	migrateS3OAuthToken     string
+	migrateS3SAKeyFile      string
+	migrateS3KMSMode        string
+
 	// Yandex KMS
 	migrateYandexEndpoint   string
 	migrateYandexAuthMode   string
@@ -155,8 +171,38 @@ optionally encrypts them, and inserts/upserts them into the target database.`,
 				JQPath:      migrateJQPath,
 			})
 
+		case "s3":
+			if migrateS3Bucket == "" {
+				return fmt.Errorf("--s3-bucket is required for S3 source")
+			}
+			s3Client, err := s3store.NewClient(s3store.Config{
+				Bucket:   migrateS3Bucket,
+				Endpoint: migrateS3Endpoint,
+				Region:   migrateS3Region,
+				Prefix:   migrateS3Prefix,
+				Auth: ycloud.AuthConfig{
+					AuthMode:       migrateS3AuthMode,
+					IAMToken:       logging.NewSecret(migrateS3IAMToken),
+					OAuthToken:     logging.NewSecret(migrateS3OAuthToken),
+					SAKeyFile:      migrateS3SAKeyFile,
+					AccessKeyID:    logging.NewSecret(migrateS3AccessKeyID),
+					SecretAccessKey: logging.NewSecret(migrateS3SecretAccessKey),
+				},
+			}, logger)
+			if err != nil {
+				return fmt.Errorf("creating S3 client: %w", err)
+			}
+			kmsMode := migrateS3KMSMode
+			if kmsMode == "" {
+				kmsMode = "kms"
+			}
+			tokenSource = helper.NewS3Source(helper.S3SourceConfig{
+				Client:  s3Client,
+				KMSMode: kmsMode,
+			})
+
 		default:
-			return fmt.Errorf("unknown source type %q; supported: sql, yaml, json, env, vault, http", migrateSource)
+			return fmt.Errorf("unknown source type %q; supported: sql, yaml, json, env, vault, http, s3", migrateSource)
 		}
 
 		// Parse local keys
@@ -287,7 +333,7 @@ func init() {
 	dbInitCmd.Flags().BoolVar(&dbInitStateStore, "state-store", false, "also create state store tables (csar_routers, csar_quotas)")
 
 	// db migrate flags
-	dbMigrateCmd.Flags().StringVar(&migrateSource, "source", "", "source type: sql, yaml, json, env, vault, http (required)")
+	dbMigrateCmd.Flags().StringVar(&migrateSource, "source", "", "source type: sql, yaml, json, env, vault, http, s3 (required)")
 	dbMigrateCmd.Flags().StringVar(&migrateTargetDSN, "target-dsn", "", "target database DSN (required)")
 	dbMigrateCmd.Flags().StringVar(&migrateTable, "table", "csar_tokens", "target table name")
 	dbMigrateCmd.Flags().BoolVar(&migrateEncrypt, "encrypt", false, "encrypt plaintext tokens before inserting")
@@ -320,6 +366,19 @@ func init() {
 	dbMigrateCmd.Flags().StringVar(&migrateHTTPURL, "http-url", "", "HTTP API URL for token fetch")
 	dbMigrateCmd.Flags().StringVar(&migrateJQPath, "jq", "", "dot-separated path to extract tokens from JSON response")
 	dbMigrateCmd.Flags().StringSliceVar(&migrateHTTPHeaders, "http-header", nil, "HTTP headers in \"Key: Value\" format (repeatable)")
+
+	// S3 source flags
+	dbMigrateCmd.Flags().StringVar(&migrateS3Bucket, "s3-bucket", "", "S3 bucket name for token storage")
+	dbMigrateCmd.Flags().StringVar(&migrateS3Endpoint, "s3-endpoint", "https://storage.yandexcloud.net", "S3-compatible endpoint URL")
+	dbMigrateCmd.Flags().StringVar(&migrateS3Region, "s3-region", "ru-central1", "S3 region")
+	dbMigrateCmd.Flags().StringVar(&migrateS3Prefix, "s3-prefix", "tokens/", "S3 key prefix for token objects")
+	dbMigrateCmd.Flags().StringVar(&migrateS3AuthMode, "s3-auth-mode", "static", "S3 auth mode: static, iam_token, oauth_token, metadata, service_account")
+	dbMigrateCmd.Flags().StringVar(&migrateS3AccessKeyID, "s3-access-key-id", "", "S3 access key ID (static auth)")
+	dbMigrateCmd.Flags().StringVar(&migrateS3SecretAccessKey, "s3-secret-access-key", "", "S3 secret access key (static auth)")
+	dbMigrateCmd.Flags().StringVar(&migrateS3IAMToken, "s3-iam-token", "", "IAM token for S3 (iam_token auth)")
+	dbMigrateCmd.Flags().StringVar(&migrateS3OAuthToken, "s3-oauth-token", "", "OAuth token for S3 IAM exchange (oauth_token auth)")
+	dbMigrateCmd.Flags().StringVar(&migrateS3SAKeyFile, "s3-sa-key-file", "", "SA key file for S3 (service_account auth)")
+	dbMigrateCmd.Flags().StringVar(&migrateS3KMSMode, "s3-kms-mode", "kms", "S3 KMS mode: passthrough (SSE only), kms (CSAR KMS encrypted)")
 
 	// Yandex KMS flags
 	dbMigrateCmd.Flags().StringVar(&migrateYandexEndpoint, "yandex-kms-endpoint", "", "Yandex Cloud KMS API endpoint")

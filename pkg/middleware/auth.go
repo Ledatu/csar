@@ -180,26 +180,33 @@ func (a *AuthInjector) Wrap(cfg AuthInjectorConfig, next http.Handler) http.Hand
 			keyID = cfg.KMSKeyID
 		}
 
-		// Decrypt the token
-		plainToken, err := a.provider.Decrypt(r.Context(), keyID, encToken)
-		if err != nil {
-			a.logger.Error("failed to decrypt token",
-				"token_ref", resolvedRef,
-				"kms_key_id", keyID,
-				"error", err,
-			)
-			if onError == "serve_stale" {
-				if stale := a.getStale(resolvedRef); stale != "" {
-					a.logger.Warn("serving stale token due to decrypt error",
-						"token_ref", resolvedRef,
-					)
-					r.Header.Set(cfg.InjectHeader, stale)
-					next.ServeHTTP(w, r)
-					return
+		// Decrypt the token (or pass through if no KMS key — S3 passthrough mode).
+		var plainToken []byte
+		if keyID == "" {
+			// Passthrough mode: token is already plaintext (e.g. S3 SSE
+			// handles encryption at rest, no CSAR KMS round-trip needed).
+			plainToken = encToken
+		} else {
+			plainToken, err = a.provider.Decrypt(r.Context(), keyID, encToken)
+			if err != nil {
+				a.logger.Error("failed to decrypt token",
+					"token_ref", resolvedRef,
+					"kms_key_id", keyID,
+					"error", err,
+				)
+				if onError == "serve_stale" {
+					if stale := a.getStale(resolvedRef); stale != "" {
+						a.logger.Warn("serving stale token due to decrypt error",
+							"token_ref", resolvedRef,
+						)
+						r.Header.Set(cfg.InjectHeader, stale)
+						next.ServeHTTP(w, r)
+						return
+					}
 				}
+				http.Error(w, `{"error":"auth: token decrypt failed"}`, http.StatusBadGateway)
+				return
 			}
-			http.Error(w, `{"error":"auth: token decrypt failed"}`, http.StatusBadGateway)
-			return
 		}
 
 		// Format and inject the header

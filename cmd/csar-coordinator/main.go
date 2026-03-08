@@ -27,7 +27,10 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ledatu/csar/internal/coordinator"
+	"github.com/ledatu/csar/internal/logging"
+	"github.com/ledatu/csar/internal/s3store"
 	"github.com/ledatu/csar/internal/statestore"
+	"github.com/ledatu/csar/internal/ycloud"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
 )
 
@@ -43,14 +46,28 @@ func main() {
 	allowedRouters := flag.String("allowed-routers", "", "comma-separated list of allowed router CN/SAN identities (empty = allow all authenticated)")
 	allowInsecureDev := flag.Bool("allow-insecure-dev", false, "allow running without TLS (development only — NEVER use in production)")
 
-	// Token source flags — choose one: --token-file (dev) or --token-source=postgres (production).
+	// Token source flags — choose one: --token-file (dev), --token-source=postgres, or --token-source=s3.
 	tokenFile := flag.String("token-file", "", "path to YAML file with pre-encrypted token entries for AuthService")
-	tokenSourceFlag := flag.String("token-source", "", "token backend: \"file\" (default, uses --token-file), \"postgres\"")
+	tokenSourceFlag := flag.String("token-source", "", "token backend: \"file\" (default, uses --token-file), \"postgres\", \"s3\"")
 
 	// PostgreSQL flags (used when --token-source=postgres)
 	postgresDSN := flag.String("postgres-dsn", "", "PostgreSQL connection string (e.g. \"postgres://user:pass@host:5432/db?sslmode=require\")")
 	postgresMaxConns := flag.Int("postgres-max-conns", 10, "max open database connections")
 	postgresRefreshInterval := flag.Duration("postgres-refresh-interval", 30*time.Second, "how often to poll PostgreSQL for token changes (e.g. \"30s\")")
+
+	// S3 flags (used when --token-source=s3)
+	s3Bucket := flag.String("s3-bucket", "", "S3 bucket name for token storage")
+	s3Endpoint := flag.String("s3-endpoint", "https://storage.yandexcloud.net", "S3-compatible endpoint URL")
+	s3Region := flag.String("s3-region", "ru-central1", "S3 region for signing")
+	s3Prefix := flag.String("s3-prefix", "tokens/", "S3 key prefix for token objects")
+	s3AuthMode := flag.String("s3-auth-mode", "static", "S3 auth mode: static, iam_token, oauth_token, metadata, service_account")
+	s3AccessKeyID := flag.String("s3-access-key-id", "", "S3 access key ID (static auth)")
+	s3SecretAccessKey := flag.String("s3-secret-access-key", "", "S3 secret access key (static auth)")
+	s3IAMToken := flag.String("s3-iam-token", "", "IAM token for S3 (iam_token auth)")
+	s3OAuthToken := flag.String("s3-oauth-token", "", "OAuth token for S3 IAM exchange (oauth_token auth)")
+	s3SAKeyFile := flag.String("s3-sa-key-file", "", "Service account key JSON file for S3 (service_account auth)")
+	s3KMSMode := flag.String("s3-kms-mode", "kms", "S3 KMS mode: passthrough (SSE only), kms (CSAR KMS encrypted)")
+	s3RefreshInterval := flag.Duration("s3-refresh-interval", 30*time.Second, "how often to poll S3 for token changes")
 
 	// State store flags
 	storeType := flag.String("store", "memory", "state store backend: memory, etcd")
@@ -111,6 +128,8 @@ func main() {
 		switch {
 		case *postgresDSN != "":
 			resolvedTokenSource = "postgres"
+		case *s3Bucket != "":
+			resolvedTokenSource = "s3"
 		case *tokenFile != "":
 			resolvedTokenSource = "file"
 		}
@@ -121,6 +140,7 @@ func main() {
 	// reference for invalidation broadcasts).
 	var tokenStore coordinator.TokenStore
 	var refresher *coordinator.TokenRefresher
+	var refreshInterval time.Duration
 
 	switch resolvedTokenSource {
 	case "postgres":
@@ -172,6 +192,56 @@ func main() {
 		// Set up the backend-agnostic refresher.
 		refresher = coordinator.NewTokenRefresher(tokenStore, logger.With("component", "token_refresher"))
 		refresher.SeedVersions(entries)
+		refreshInterval = *postgresRefreshInterval
+
+	case "s3":
+		if *s3Bucket == "" {
+			logger.Error("--token-source=s3 requires --s3-bucket")
+			os.Exit(1)
+		}
+
+		s3Client, err := s3store.NewClient(s3store.Config{
+			Bucket:   *s3Bucket,
+			Endpoint: *s3Endpoint,
+			Region:   *s3Region,
+			Prefix:   *s3Prefix,
+			Auth: ycloud.AuthConfig{
+				AuthMode:       *s3AuthMode,
+				IAMToken:       logging.NewSecret(*s3IAMToken),
+				OAuthToken:     logging.NewSecret(*s3OAuthToken),
+				SAKeyFile:      *s3SAKeyFile,
+				AccessKeyID:    logging.NewSecret(*s3AccessKeyID),
+				SecretAccessKey: logging.NewSecret(*s3SecretAccessKey),
+			},
+		}, logger)
+		if err != nil {
+			logger.Error("failed to create S3 client", "error", err)
+			os.Exit(1)
+		}
+
+		s3Store := coordinator.NewS3TokenStore(s3Client, *s3KMSMode, logger)
+		tokenStore = s3Store
+
+		// Initial load.
+		entries, err := s3Store.LoadAll(context.Background())
+		if err != nil {
+			logger.Error("failed to load tokens from S3", "error", err)
+			os.Exit(1)
+		}
+		loaded := authSvc.LoadTokensFromMap(entries)
+		logger.Info("loaded tokens from token store into AuthService",
+			"backend", "s3",
+			"bucket", *s3Bucket,
+			"kms_mode", *s3KMSMode,
+			"count", loaded,
+			"refresh_interval", *s3RefreshInterval,
+		)
+
+		authSvc.SetBackend(tokenStore)
+
+		refresher = coordinator.NewTokenRefresher(tokenStore, logger.With("component", "token_refresher"))
+		refresher.SeedVersions(entries)
+		refreshInterval = *s3RefreshInterval
 
 	case "file", "":
 		if *tokenFile != "" {
@@ -191,11 +261,11 @@ func main() {
 		} else {
 			logger.Warn("WARNING: no token source configured — AuthService has no tokens loaded. " +
 				"All GetEncryptedToken RPCs will return NotFound. " +
-				"Use --token-source=postgres with --postgres-dsn, or --token-file to load pre-encrypted tokens.")
+				"Use --token-source=postgres with --postgres-dsn, --token-source=s3 with --s3-bucket, or --token-file to load pre-encrypted tokens.")
 		}
 
 	default:
-		logger.Error("unknown --token-source value; supported: \"file\", \"postgres\"",
+		logger.Error("unknown --token-source value; supported: \"file\", \"postgres\", \"s3\"",
 			"token_source", resolvedTokenSource,
 		)
 		os.Exit(1)
@@ -270,8 +340,8 @@ func main() {
 	defer ctxCancel()
 
 	if refresher != nil {
-		go refresher.RunPeriodicRefresh(ctx, *postgresRefreshInterval, authSvc, coord)
-		logger.Info("token store refresh loop started", "interval", *postgresRefreshInterval)
+		go refresher.RunPeriodicRefresh(ctx, refreshInterval, authSvc, coord)
+		logger.Info("token store refresh loop started", "interval", refreshInterval)
 	}
 
 	// Graceful shutdown
