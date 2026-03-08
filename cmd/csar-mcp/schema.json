@@ -1,0 +1,1048 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ledatu/csar/csar.schema.json",
+  "title": "CSAR Configuration",
+  "description": "Configuration schema for CSAR (Coordinated Stateless API Router). Validates config.yaml files with autocomplete support.",
+  "type": "object",
+  "required": ["listen_addr", "paths"],
+  "additionalProperties": false,
+  "properties": {
+    "include": {
+      "type": "array",
+      "description": "List of file paths or glob patterns to merge into this config. Paths are resolved relative to the directory of the file containing the include.",
+      "items": { "type": "string" },
+      "examples": [["routes/*.yaml", "policies/throttle.yaml"]]
+    },
+    "profile": {
+      "type": "string",
+      "description": "Deployment profile. Enforces security constraints at startup.",
+      "enum": ["dev-local", "prod-single", "prod-distributed"]
+    },
+    "listen_addr": {
+      "type": "string",
+      "description": "HTTP(S) listen address for the API gateway.",
+      "examples": [":8080", "0.0.0.0:443"]
+    },
+    "tls": { "$ref": "#/$defs/TLSConfig" },
+    "access_control": { "$ref": "#/$defs/AccessControlConfig" },
+    "security_policy": { "$ref": "#/$defs/SecurityPolicyConfig" },
+    "ssrf_protection": { "$ref": "#/$defs/SSRFConfig" },
+    "kms": { "$ref": "#/$defs/KMSConfig" },
+    "coordinator": { "$ref": "#/$defs/CoordinatorConfig" },
+    "redis": { "$ref": "#/$defs/RedisConfig" },
+    "security_profiles": {
+      "type": "object",
+      "description": "Named reusable security configurations. Routes reference them via x-csar-security: \"profile_name\".",
+      "additionalProperties": { "$ref": "#/$defs/SecurityConfig" }
+    },
+    "circuit_breakers": {
+      "type": "object",
+      "description": "Named circuit breaker profiles referenced by x-csar-resilience.circuit_breaker.",
+      "additionalProperties": { "$ref": "#/$defs/CircuitBreakerProfile" }
+    },
+    "throttling_policies": {
+      "type": "object",
+      "description": "Named reusable throttling configurations. Routes reference them via x-csar-traffic: \"policy_name\" or x-csar-traffic.use.",
+      "additionalProperties": { "$ref": "#/$defs/ThrottlingPolicy" }
+    },
+    "cors_policies": {
+      "type": "object",
+      "description": "Named reusable CORS configurations. Routes reference them via x-csar-cors: \"policy_name\".",
+      "additionalProperties": { "$ref": "#/$defs/CORSConfigObject" }
+    },
+    "retry_policies": {
+      "type": "object",
+      "description": "Named reusable retry configurations. Routes reference them via x-csar-retry: \"policy_name\".",
+      "additionalProperties": { "$ref": "#/$defs/RetryConfigObject" }
+    },
+    "redact_policies": {
+      "type": "object",
+      "description": "Named reusable redaction configurations. Routes reference them via x-csar-redact: \"policy_name\".",
+      "additionalProperties": { "$ref": "#/$defs/RedactConfigObject" }
+    },
+    "auth_validate_policies": {
+      "type": "object",
+      "description": "Named reusable auth validation configurations. Routes reference them via x-csar-auth-validate: \"policy_name\".",
+      "additionalProperties": { "$ref": "#/$defs/AuthValidateConfigObject" }
+    },
+    "global_throttle": { "$ref": "#/$defs/GlobalThrottleConfig" },
+    "paths": {
+      "type": "object",
+      "description": "Route definitions using OpenAPI-style x-csar-* extensions. Keys are URL path patterns.",
+      "additionalProperties": { "$ref": "#/$defs/PathConfig" }
+    }
+  },
+  "$defs": {
+    "Duration": {
+      "type": "string",
+      "description": "Go duration string (e.g. \"30s\", \"5m\", \"1h30m\", \"500ms\").",
+      "pattern": "^[0-9]+(ns|us|µs|ms|s|m|h)([0-9]+(ns|us|µs|ms|s|m|h))*$",
+      "examples": ["30s", "5m", "1h", "500ms", "1m30s", "100ms"]
+    },
+    "TLSConfig": {
+      "type": "object",
+      "description": "Inbound TLS configuration (clients connecting to CSAR).",
+      "additionalProperties": false,
+      "required": ["cert_file", "key_file"],
+      "properties": {
+        "cert_file": {
+          "type": "string",
+          "description": "Path to the TLS certificate (PEM)."
+        },
+        "key_file": {
+          "type": "string",
+          "description": "Path to the TLS private key (PEM)."
+        },
+        "client_ca_file": {
+          "type": "string",
+          "description": "Path to the CA that signed client certs. Enables mutual TLS."
+        },
+        "min_version": {
+          "type": "string",
+          "description": "Minimum TLS version.",
+          "enum": ["1.2", "1.3"],
+          "default": "1.2"
+        }
+      }
+    },
+    "CoordinatorConfig": {
+      "type": "object",
+      "description": "Settings for the gRPC control plane connection.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Toggles coordinator mode.",
+          "default": false
+        },
+        "address": {
+          "type": "string",
+          "description": "gRPC address of the coordinator (e.g. \"coordinator:9090\")."
+        },
+        "discovery_method": {
+          "type": "string",
+          "description": "Service discovery method for coordinator.",
+          "enum": ["static", "dns", "consul", "kubernetes"],
+          "default": "static"
+        },
+        "ca_file": {
+          "type": "string",
+          "description": "Path to the CA certificate for verifying the coordinator server."
+        },
+        "cert_file": {
+          "type": "string",
+          "description": "Client certificate (PEM) for mTLS to the coordinator."
+        },
+        "key_file": {
+          "type": "string",
+          "description": "Client private key (PEM) for mTLS to the coordinator."
+        },
+        "allow_insecure": {
+          "type": "boolean",
+          "description": "Permit plaintext gRPC to the coordinator. Development only.",
+          "default": false
+        }
+      }
+    },
+    "AccessControlConfig": {
+      "type": "object",
+      "description": "IP-based access control. Supports individual IPs and CIDR ranges (IPv4/IPv6).",
+      "additionalProperties": false,
+      "properties": {
+        "allow_cidrs": {
+          "type": "array",
+          "description": "Allowed client IP addresses or CIDR ranges. Only matching clients are permitted.",
+          "items": { "type": "string" },
+          "examples": [["10.0.0.0/8", "192.168.1.100", "::1"]]
+        },
+        "trust_proxy": {
+          "type": "boolean",
+          "description": "Trust X-Forwarded-For / X-Real-IP headers for extracting the real client IP.",
+          "default": false
+        }
+      }
+    },
+    "SecurityPolicyConfig": {
+      "type": "object",
+      "description": "Environment-level security constraints. In \"prod\" mode, insecure options are rejected at startup.",
+      "additionalProperties": false,
+      "properties": {
+        "environment": {
+          "type": "string",
+          "description": "Deployment tier.",
+          "enum": ["dev", "stage", "prod"]
+        },
+        "forbid_insecure_in_prod": {
+          "type": "boolean",
+          "description": "Reject configurations using allow_insecure or omitting TLS in production."
+        },
+        "require_mtls_for_coordinator": {
+          "type": "boolean",
+          "description": "Require mTLS between routers and the coordinator in production."
+        },
+        "redact_sensitive_logs": {
+          "type": "boolean",
+          "description": "Redact token values, KMS key IDs, and security-relevant fields from structured logs."
+        }
+      }
+    },
+    "SSRFConfig": {
+      "type": "object",
+      "description": "SSRF protection for outbound proxy connections. All options default to true (block).",
+      "additionalProperties": false,
+      "properties": {
+        "block_private": {
+          "type": "boolean",
+          "description": "Block connections to RFC 1918 private subnets (10.x, 172.16.x, 192.168.x).",
+          "default": true
+        },
+        "block_loopback": {
+          "type": "boolean",
+          "description": "Block connections to loopback addresses (127.0.0.0/8, ::1).",
+          "default": true
+        },
+        "block_link_local": {
+          "type": "boolean",
+          "description": "Block connections to link-local addresses (169.254.0.0/16, fe80::/10).",
+          "default": true
+        },
+        "block_metadata": {
+          "type": "boolean",
+          "description": "Block connections to cloud metadata endpoints (169.254.169.254).",
+          "default": true
+        },
+        "allowed_internal_hosts": {
+          "type": "array",
+          "description": "Explicit allowlist of internal hosts that may be accessed despite SSRF protections.",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "KMSConfig": {
+      "type": "object",
+      "description": "Global Key Management Service configuration for token encryption/decryption.",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "KMS backend provider.",
+          "enum": ["local", "yandexapi"]
+        },
+        "default_key_id": {
+          "type": "string",
+          "description": "Default KMS key used when a route doesn't specify one."
+        },
+        "operation_timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "Timeout for individual encrypt/decrypt calls."
+        },
+        "retry": { "$ref": "#/$defs/KMSRetryConfig" },
+        "cache": { "$ref": "#/$defs/KMSCacheConfig" },
+        "yandex": { "$ref": "#/$defs/YandexKMSConfig" },
+        "local_keys": {
+          "type": "object",
+          "description": "Key=passphrase mappings for the \"local\" provider. For development only.",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "KMSRetryConfig": {
+      "type": "object",
+      "description": "Retry/backoff configuration for KMS operations.",
+      "additionalProperties": false,
+      "properties": {
+        "max_attempts": {
+          "type": "integer",
+          "description": "Maximum number of retry attempts."
+        },
+        "base_delay": {
+          "$ref": "#/$defs/Duration",
+          "description": "Initial delay between retries."
+        },
+        "max_delay": {
+          "$ref": "#/$defs/Duration",
+          "description": "Maximum delay between retries."
+        },
+        "jitter": {
+          "type": "boolean",
+          "description": "Add random jitter to retry delays to prevent thundering herd."
+        }
+      }
+    },
+    "KMSCacheConfig": {
+      "type": "object",
+      "description": "In-memory caching for KMS decrypt results.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable decrypt result caching."
+        },
+        "ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "Cache TTL for decrypted values."
+        },
+        "max_entries": {
+          "type": "integer",
+          "description": "Maximum number of cached entries (prevents memory exhaustion)."
+        }
+      }
+    },
+    "YandexKMSConfig": {
+      "type": "object",
+      "description": "Yandex Cloud KMS provider settings.",
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "description": "KMS API endpoint.",
+          "default": "https://kms.api.cloud.yandex.net/kms/v1/keys"
+        },
+        "auth_mode": {
+          "type": "string",
+          "description": "Credential source for Yandex Cloud authentication.",
+          "enum": ["iam_token", "oauth_token", "metadata", "service_account"]
+        },
+        "iam_token": {
+          "type": "string",
+          "description": "Static IAM token (dev/testing only, expires ~12h)."
+        },
+        "oauth_token": {
+          "type": "string",
+          "description": "Personal OAuth token — auto-refreshed to IAM token."
+        },
+        "sa_key_file": {
+          "type": "string",
+          "description": "Path to service account JSON key file. Recommended for production outside Yandex Cloud VMs."
+        }
+      }
+    },
+    "RedisConfig": {
+      "type": "object",
+      "description": "Redis connection for distributed rate limiting. Required when any route uses traffic.backend: \"redis\".",
+      "additionalProperties": false,
+      "required": ["address"],
+      "properties": {
+        "address": {
+          "type": "string",
+          "description": "Redis server address (e.g. \"redis:6379\")."
+        },
+        "password": {
+          "type": "string",
+          "description": "Redis AUTH password."
+        },
+        "db": {
+          "type": "integer",
+          "description": "Redis database number.",
+          "default": 0
+        },
+        "key_prefix": {
+          "type": "string",
+          "description": "Prefix for all rate limiting keys.",
+          "default": "csar:rl:"
+        }
+      }
+    },
+    "CircuitBreakerProfile": {
+      "type": "object",
+      "description": "Named circuit breaker configuration.",
+      "additionalProperties": false,
+      "required": ["max_requests", "interval", "timeout", "failure_threshold"],
+      "properties": {
+        "max_requests": {
+          "type": "integer",
+          "description": "Maximum number of requests allowed in half-open state.",
+          "minimum": 1
+        },
+        "interval": {
+          "$ref": "#/$defs/Duration",
+          "description": "Cyclic period of the closed state for clearing internal counts."
+        },
+        "timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "Duration of the open state before transitioning to half-open."
+        },
+        "failure_threshold": {
+          "type": "integer",
+          "description": "Number of consecutive failures before opening the circuit.",
+          "minimum": 1
+        }
+      }
+    },
+    "ThrottlingPolicy": {
+      "type": "object",
+      "description": "Named reusable throttling configuration.",
+      "additionalProperties": false,
+      "required": ["rate", "burst"],
+      "properties": {
+        "rate": {
+          "type": "number",
+          "description": "Allowed requests per second.",
+          "exclusiveMinimum": 0
+        },
+        "burst": {
+          "type": "integer",
+          "description": "Token bucket burst size.",
+          "minimum": 1
+        },
+        "max_wait": {
+          "$ref": "#/$defs/Duration",
+          "description": "Maximum time a request can wait in the queue."
+        },
+        "backend": {
+          "type": "string",
+          "description": "Rate limiting backend.",
+          "enum": ["local", "redis", "coordinator"],
+          "default": "local"
+        },
+        "key": {
+          "type": "string",
+          "description": "Dynamic throttle key template for per-entity rate limiting. Supports {query.param} and {header.Name} placeholders.",
+          "examples": ["seller:{query.seller_id}", "user:{header.X-User-ID}"]
+        },
+        "exclude_ips": {
+          "type": "array",
+          "description": "IPs/CIDRs that bypass this throttle entirely.",
+          "items": { "type": "string" }
+        },
+        "vip_overrides": {
+          "type": "array",
+          "description": "Header-based throttle policy switching for VIP clients.",
+          "items": { "$ref": "#/$defs/VIPOverride" }
+        }
+      }
+    },
+    "GlobalThrottleConfig": {
+      "type": "object",
+      "description": "Global rate limit safety net applied to ALL routes before per-route throttle. Uses fast in-memory atomic counter.",
+      "additionalProperties": false,
+      "required": ["rate", "burst"],
+      "properties": {
+        "rate": {
+          "type": "number",
+          "description": "Global requests per second limit across all routes.",
+          "exclusiveMinimum": 0
+        },
+        "burst": {
+          "type": "integer",
+          "description": "Maximum burst size.",
+          "minimum": 1
+        },
+        "max_wait": {
+          "$ref": "#/$defs/Duration",
+          "description": "Maximum time a request can wait. \"0s\" = reject immediately when exceeded.",
+          "default": "0s"
+        }
+      }
+    },
+    "VIPOverride": {
+      "type": "object",
+      "description": "Maps header values to alternate throttling policies.",
+      "additionalProperties": false,
+      "required": ["header", "values"],
+      "properties": {
+        "header": {
+          "type": "string",
+          "description": "HTTP header to check (e.g. \"X-API-Key\")."
+        },
+        "values": {
+          "type": "object",
+          "description": "Maps header values to throttling policy names.",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "SecurityConfig": {
+      "type": "object",
+      "description": "Token injection via KMS. Fetches encrypted tokens, decrypts via KMS, injects into upstream headers.",
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "type": "string",
+          "description": "Reference to a named security_profiles entry. Inline fields override the profile's values."
+        },
+        "kms_key_id": {
+          "type": "string",
+          "description": "KMS key identifier for decryption."
+        },
+        "token_ref": {
+          "type": "string",
+          "description": "Reference passed to AuthService to fetch the encrypted token. Supports {query.param} and {header.Name} placeholders.",
+          "examples": ["api_token", "bearer_{query.account_id}"]
+        },
+        "token_version": {
+          "type": "string",
+          "description": "Opaque version string for cache invalidation. Bump when rotating tokens."
+        },
+        "inject_header": {
+          "type": "string",
+          "description": "HTTP header to inject the decrypted token into.",
+          "examples": ["Authorization", "X-Client-Secret"]
+        },
+        "inject_format": {
+          "type": "string",
+          "description": "Format template for the header value. Use {token} as placeholder.",
+          "examples": ["Bearer {token}", "{token}"]
+        },
+        "on_kms_error": {
+          "type": "string",
+          "description": "Behavior when the KMS provider is unavailable.",
+          "enum": ["fail_closed", "serve_stale"],
+          "default": "fail_closed"
+        },
+        "strip_token_params": {
+          "type": "boolean",
+          "description": "Remove query parameters used in token_ref placeholders before forwarding to upstream.",
+          "default": true
+        }
+      }
+    },
+    "SecurityConfigs": {
+      "description": "Security configuration. Supports a profile name (string), a single inline object, or an array of mixed strings and objects.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Named security profile reference."
+        },
+        {
+          "$ref": "#/$defs/SecurityConfig"
+        },
+        {
+          "type": "array",
+          "description": "Array of security configs (profile refs and/or inline objects).",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Named security profile reference."
+              },
+              {
+                "$ref": "#/$defs/SecurityConfig"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "TrafficConfig": {
+      "description": "Rate limiting / traffic shaping. Supports a policy name (string) or an inline object.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Named throttling policy reference."
+        },
+        {
+          "$ref": "#/$defs/TrafficConfigObject"
+        }
+      ]
+    },
+    "TrafficConfigObject": {
+      "type": "object",
+      "description": "Inline traffic shaping configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "use": {
+          "type": "string",
+          "description": "Reference to a throttling_policies entry. Inline fields override the policy's values."
+        },
+        "rps": {
+          "type": "number",
+          "description": "Allowed requests per second.",
+          "exclusiveMinimum": 0
+        },
+        "burst": {
+          "type": "integer",
+          "description": "Token bucket burst size.",
+          "minimum": 1
+        },
+        "max_wait": {
+          "$ref": "#/$defs/Duration",
+          "description": "Maximum time a request can wait in the queue."
+        },
+        "backend": {
+          "type": "string",
+          "description": "Rate limiting backend.",
+          "enum": ["local", "redis", "coordinator"],
+          "default": "local"
+        },
+        "key": {
+          "type": "string",
+          "description": "Dynamic throttle key template for per-entity rate limiting.",
+          "examples": ["seller:{query.seller_id}"]
+        },
+        "exclude_ips": {
+          "type": "array",
+          "description": "IPs/CIDRs that bypass this throttle entirely.",
+          "items": { "type": "string" }
+        },
+        "vip_overrides": {
+          "type": "array",
+          "description": "Header-based throttle policy switching for VIP clients.",
+          "items": { "$ref": "#/$defs/VIPOverride" }
+        },
+        "adaptive_backpressure": { "$ref": "#/$defs/AdaptiveBackpressureConfig" }
+      }
+    },
+    "AdaptiveBackpressureConfig": {
+      "type": "object",
+      "description": "Upstream backpressure awareness. Reads Retry-After / X-RateLimit-Reset from upstream 429 responses and suspends the token bucket.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Toggle adaptive backpressure."
+        },
+        "respect_headers": {
+          "type": "array",
+          "description": "Ordered list of response headers to check for wait time.",
+          "items": { "type": "string" },
+          "default": ["Retry-After", "X-RateLimit-Reset"]
+        },
+        "suspend_bucket": {
+          "type": "boolean",
+          "description": "Pause token generation for the route when backpressure is detected."
+        },
+        "max_body_buffer": {
+          "type": "integer",
+          "description": "Maximum request body size (bytes) buffered for transparent retry replay. Default: 10 MiB.",
+          "minimum": 0
+        }
+      }
+    },
+    "RetryConfig": {
+      "description": "Retry configuration. Supports a policy name (string) or an inline object.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Named retry policy reference."
+        },
+        {
+          "$ref": "#/$defs/RetryConfigObject"
+        }
+      ]
+    },
+    "RetryConfigObject": {
+      "type": "object",
+      "description": "Automatic retry with exponential backoff for upstream requests.",
+      "additionalProperties": false,
+      "properties": {
+        "use": {
+          "type": "string",
+          "description": "Reference to a retry_policies entry. Inline fields override the policy's values."
+        },
+        "max_attempts": {
+          "type": "integer",
+          "description": "Maximum total attempts (including the original).",
+          "minimum": 1
+        },
+        "backoff": {
+          "$ref": "#/$defs/Duration",
+          "description": "Base delay between retries (exponential backoff with jitter)."
+        },
+        "max_backoff": {
+          "$ref": "#/$defs/Duration",
+          "description": "Maximum delay between retries.",
+          "default": "10s"
+        },
+        "retryable_status_codes": {
+          "type": "array",
+          "description": "HTTP status codes that trigger a retry.",
+          "items": { "type": "integer" },
+          "default": [502, 503, 504]
+        },
+        "retryable_methods": {
+          "type": "array",
+          "description": "HTTP methods eligible for retry.",
+          "items": { "type": "string" },
+          "default": ["GET", "HEAD", "OPTIONS"]
+        },
+        "auto_retry_429": {
+          "type": "boolean",
+          "description": "Transparently retry upstream 429 responses using Retry-After delay. Client sees 200 instead of 429.",
+          "default": false
+        },
+        "max_internal_wait": {
+          "$ref": "#/$defs/Duration",
+          "description": "Maximum time to hold client connection while waiting for upstream backpressure to pass.",
+          "default": "30s"
+        }
+      }
+    },
+    "CORSConfig": {
+      "description": "CORS configuration. Supports a policy name (string) or an inline object.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Named CORS policy reference."
+        },
+        {
+          "$ref": "#/$defs/CORSConfigObject"
+        }
+      ]
+    },
+    "CORSConfigObject": {
+      "type": "object",
+      "description": "Cross-Origin Resource Sharing configuration with automatic preflight handling.",
+      "additionalProperties": false,
+      "properties": {
+        "use": {
+          "type": "string",
+          "description": "Reference to a cors_policies entry. Inline fields override the policy's values."
+        },
+        "allowed_origins": {
+          "type": "array",
+          "description": "Allowed origins. Use \"*\" to allow all (not recommended for production).",
+          "items": { "type": "string" }
+        },
+        "allowed_methods": {
+          "type": "array",
+          "description": "Allowed HTTP methods.",
+          "items": { "type": "string" },
+          "default": ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+        },
+        "allowed_headers": {
+          "type": "array",
+          "description": "Allowed request headers.",
+          "items": { "type": "string" },
+          "default": ["Content-Type", "Authorization"]
+        },
+        "exposed_headers": {
+          "type": "array",
+          "description": "Headers exposed to the browser.",
+          "items": { "type": "string" }
+        },
+        "allow_credentials": {
+          "type": "boolean",
+          "description": "Whether the request can include cookies.",
+          "default": false
+        },
+        "max_age": {
+          "type": "integer",
+          "description": "Max time (seconds) a preflight response can be cached.",
+          "default": 86400
+        }
+      }
+    },
+    "RedactConfig": {
+      "description": "Response payload redaction (DLP). Supports a policy name (string) or an inline object.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Named redact policy reference."
+        },
+        {
+          "$ref": "#/$defs/RedactConfigObject"
+        }
+      ]
+    },
+    "RedactConfigObject": {
+      "type": "object",
+      "description": "Masks specified JSON fields in upstream responses before returning to clients.",
+      "additionalProperties": false,
+      "properties": {
+        "use": {
+          "type": "string",
+          "description": "Reference to a redact_policies entry. Inline fields override the policy's values."
+        },
+        "fields": {
+          "type": "array",
+          "description": "JSON field paths to redact. Supports dot notation and wildcards.",
+          "items": { "type": "string" },
+          "examples": [["ssn", "user.email", "users.*.credit_card"]]
+        },
+        "mask": {
+          "type": "string",
+          "description": "Replacement string for redacted fields.",
+          "default": "***REDACTED***"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Toggle redaction without removing the config.",
+          "default": true
+        }
+      }
+    },
+    "AuthValidateConfig": {
+      "description": "Inbound JWT/JWKS validation. Supports a policy name (string) or an inline object.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Named auth validation policy reference."
+        },
+        {
+          "$ref": "#/$defs/AuthValidateConfigObject"
+        }
+      ]
+    },
+    "AuthValidateConfigObject": {
+      "type": "object",
+      "description": "Validates inbound bearer tokens against a JWKS endpoint before proxying.",
+      "additionalProperties": false,
+      "properties": {
+        "use": {
+          "type": "string",
+          "description": "Reference to an auth_validate_policies entry. Inline fields override the policy's values."
+        },
+        "jwks_url": {
+          "type": "string",
+          "description": "Endpoint serving the JSON Web Key Set.",
+          "examples": ["https://auth.example.com/.well-known/jwks.json"]
+        },
+        "issuer": {
+          "type": "string",
+          "description": "Validates the \"iss\" claim matches this value."
+        },
+        "audiences": {
+          "type": "array",
+          "description": "Validates the \"aud\" claim contains at least one of these entries.",
+          "items": { "type": "string" }
+        },
+        "header_name": {
+          "type": "string",
+          "description": "HTTP header carrying the token.",
+          "default": "Authorization"
+        },
+        "token_prefix": {
+          "type": "string",
+          "description": "Prefix stripped from the header value before parsing.",
+          "default": "Bearer "
+        },
+        "cache_ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long JWKS keys are cached.",
+          "default": "5m"
+        },
+        "required_claims": {
+          "type": "object",
+          "description": "Claim key=value pairs that must be present in the token.",
+          "additionalProperties": { "type": "string" }
+        },
+        "forward_claims": {
+          "type": "object",
+          "description": "Copy JWT claims into request headers. Map key = claim name, value = header name.",
+          "additionalProperties": { "type": "string" },
+          "examples": [{"sub": "X-User-ID", "email": "X-User-Email"}]
+        },
+        "cookie_name": {
+          "type": "string",
+          "description": "Read the JWT from a named cookie instead of a request header. When set, header_name and token_prefix are ignored."
+        }
+      }
+    },
+    "CacheConfig": {
+      "type": "object",
+      "description": "HTTP response caching for idempotent requests. Respects Cache-Control and ETag.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Toggle caching without removing the config.",
+          "default": true
+        },
+        "ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "Default cache TTL if no Cache-Control header is present.",
+          "default": "5m"
+        },
+        "max_entries": {
+          "type": "integer",
+          "description": "Maximum number of cached responses (LRU eviction).",
+          "default": 1000
+        },
+        "max_body_size": {
+          "type": "integer",
+          "description": "Maximum response body size to cache (bytes). Larger responses are not cached.",
+          "default": 1048576
+        },
+        "methods": {
+          "type": "array",
+          "description": "HTTP methods to cache.",
+          "items": { "type": "string" },
+          "default": ["GET", "HEAD"]
+        }
+      }
+    },
+    "TenantConfig": {
+      "type": "object",
+      "description": "Multi-tenant routing. Selects a backend based on a tenant identifier from headers.",
+      "additionalProperties": false,
+      "required": ["header", "backends"],
+      "properties": {
+        "header": {
+          "type": "string",
+          "description": "HTTP header used to identify the tenant.",
+          "examples": ["X-Tenant-ID", "Host"]
+        },
+        "backends": {
+          "type": "object",
+          "description": "Maps tenant identifiers to target URLs.",
+          "additionalProperties": { "type": "string" }
+        },
+        "default": {
+          "type": "string",
+          "description": "Fallback target URL when no tenant header matches. If empty, unmatched tenants receive 404."
+        }
+      }
+    },
+    "ResilienceConfig": {
+      "type": "object",
+      "description": "Circuit breaking configuration.",
+      "additionalProperties": false,
+      "required": ["circuit_breaker"],
+      "properties": {
+        "circuit_breaker": {
+          "type": "string",
+          "description": "Name of a circuit breaker profile defined in top-level circuit_breakers."
+        }
+      }
+    },
+    "BackendConfig": {
+      "type": "object",
+      "description": "Upstream target configuration.",
+      "additionalProperties": false,
+      "required": ["target_url"],
+      "properties": {
+        "target_url": {
+          "type": "string",
+          "description": "Upstream service URL (single target).",
+          "examples": ["https://upstream-api.example.com/v1/products"]
+        },
+        "targets": {
+          "type": "array",
+          "description": "Additional upstream URLs for load balancing. Combined with target_url.",
+          "items": { "type": "string" }
+        },
+        "load_balancer": {
+          "type": "string",
+          "description": "Load balancing strategy.",
+          "enum": ["round_robin", "random"],
+          "default": "round_robin"
+        },
+        "health_check": { "$ref": "#/$defs/HealthCheckConfig" },
+        "path_rewrite": {
+          "type": "string",
+          "description": "Replaces the matched path before proxying. Supports regex back-references ($1, $2).",
+          "examples": ["/users/$1"]
+        },
+        "path_mode": {
+          "type": "string",
+          "description": "How the upstream URL path is constructed. \"replace\": target_url path replaces incoming path. \"append\": incoming path appended to target_url path.",
+          "enum": ["replace", "append"],
+          "default": "replace"
+        },
+        "tls": { "$ref": "#/$defs/BackendTLSConfig" }
+      }
+    },
+    "HealthCheckConfig": {
+      "type": "object",
+      "description": "Active health checking for load-balanced targets.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Turn on active health checking."
+        },
+        "mode": {
+          "type": "string",
+          "description": "Health check protocol.",
+          "enum": ["http", "tcp"],
+          "default": "http"
+        },
+        "path": {
+          "type": "string",
+          "description": "HTTP endpoint to probe (for mode \"http\").",
+          "examples": ["/health"]
+        },
+        "interval": {
+          "$ref": "#/$defs/Duration",
+          "description": "Time between health check probes.",
+          "default": "10s"
+        },
+        "timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "Maximum time to wait for a health check response.",
+          "default": "3s"
+        },
+        "unhealthy_threshold": {
+          "type": "integer",
+          "description": "Consecutive failures before marking a target as unhealthy.",
+          "default": 3,
+          "minimum": 1
+        },
+        "healthy_threshold": {
+          "type": "integer",
+          "description": "Consecutive successes before marking a target as healthy again.",
+          "default": 2,
+          "minimum": 1
+        }
+      }
+    },
+    "BackendTLSConfig": {
+      "type": "object",
+      "description": "Outbound TLS to an upstream.",
+      "additionalProperties": false,
+      "properties": {
+        "insecure_skip_verify": {
+          "type": "boolean",
+          "description": "Disable certificate verification. Development only!",
+          "default": false
+        },
+        "ca_file": {
+          "type": "string",
+          "description": "Path to a custom CA bundle for verifying the upstream cert."
+        },
+        "cert_file": {
+          "type": "string",
+          "description": "Client certificate (PEM) for mTLS to the upstream."
+        },
+        "key_file": {
+          "type": "string",
+          "description": "Client private key (PEM) for mTLS to the upstream."
+        }
+      }
+    },
+    "RouteConfig": {
+      "type": "object",
+      "description": "Single route entry with x-csar-* extensions.",
+      "additionalProperties": false,
+      "required": ["x-csar-backend"],
+      "properties": {
+        "x-csar-backend": { "$ref": "#/$defs/BackendConfig" },
+        "x-csar-security": { "$ref": "#/$defs/SecurityConfigs" },
+        "x-csar-headers": {
+          "type": "object",
+          "description": "Static key-value pairs injected into every upstream request for this route.",
+          "additionalProperties": { "type": "string" }
+        },
+        "x-csar-auth-validate": { "$ref": "#/$defs/AuthValidateConfig" },
+        "x-csar-access": { "$ref": "#/$defs/AccessControlConfig" },
+        "x-csar-traffic": { "$ref": "#/$defs/TrafficConfig" },
+        "x-csar-resilience": { "$ref": "#/$defs/ResilienceConfig" },
+        "x-csar-retry": { "$ref": "#/$defs/RetryConfig" },
+        "x-csar-redact": { "$ref": "#/$defs/RedactConfig" },
+        "x-csar-tenant": { "$ref": "#/$defs/TenantConfig" },
+        "x-csar-cors": { "$ref": "#/$defs/CORSConfig" },
+        "x-csar-cache": { "$ref": "#/$defs/CacheConfig" },
+        "max_response_size": {
+          "type": "integer",
+          "description": "Maximum response body size (bytes) for DLP/retry buffering. Prevents DoS. Default: 0 (unlimited).",
+          "minimum": 0
+        }
+      }
+    },
+    "PathConfig": {
+      "type": "object",
+      "description": "Route definitions keyed by HTTP method (get, post, put, delete, patch, head, options).",
+      "additionalProperties": false,
+      "properties": {
+        "get": { "$ref": "#/$defs/RouteConfig" },
+        "post": { "$ref": "#/$defs/RouteConfig" },
+        "put": { "$ref": "#/$defs/RouteConfig" },
+        "delete": { "$ref": "#/$defs/RouteConfig" },
+        "patch": { "$ref": "#/$defs/RouteConfig" },
+        "head": { "$ref": "#/$defs/RouteConfig" },
+        "options": { "$ref": "#/$defs/RouteConfig" }
+      }
+    }
+  }
+}
