@@ -5,6 +5,8 @@
 /mockapi
 /csar-helper
 
+.gocache/
+
 *.exe
 *.exe~
 *.dll
@@ -43,4 +45,4 @@ docs/
 
 audit*
 
-.gocache/cmd/csar-mcp/schema.json
+**/csar-mcp/schema.json
