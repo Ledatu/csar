@@ -162,40 +162,40 @@ throttling_policies:
 #   max_wait: "0s"        # "0s" = reject immediately when exceeded
 
 # --- Named Auth Validation Policies ---
-# Define reusable JWT validation configurations referenced by x-csar-auth-validate.
+# Define reusable JWT validation configurations referenced by x-csar-authn-validate.
 #
 # STS / Service Account Pattern (Yandex-style):
-#   Internal services obtain short-lived scoped JWTs from csar-auth's /sts/token
+#   Internal services obtain short-lived scoped JWTs from csar-authn's /sts/token
 #   endpoint using their own private key as a credential. CSAR then validates the
 #   issued JWT and enforces audience scoping per route group, so a compromised
 #   balance-service cannot obtain or use bidding-scoped tokens.
 #
 #   Flow:
 #     1. balance-service signs assertion JWT with balance-sa.key
-#     2. POST https://csar-auth.internal/sts/token
+#     2. POST https://csar-authn.internal/sts/token
 #            assertion=<JWT>&audience=balance
-#     3. csar-auth validates, issues: { aud: ["balance"], exp: now+1h }
+#     3. csar-authn validates, issues: { aud: ["balance"], exp: now+1h }
 #     4. balance-service → CSAR with scoped JWT → CSAR injects master key → upstream
 #
 # auth_validate_policies:
 #   balance-consumer:
-#     jwks_url: "https://csar-auth.internal/.well-known/jwks.json"
-#     issuer:   "https://csar-auth.internal"
+#     jwks_url: "https://csar-authn.internal/.well-known/jwks.json"
+#     issuer:   "https://csar-authn.internal"
 #     audiences: ["balance"]     # only balance-sa STS tokens accepted
 #     forward_claims:
 #       sub: "X-Service-ID"      # forward service name to upstream for audit
 #
 #   bidding-consumer:
-#     jwks_url: "https://csar-auth.internal/.well-known/jwks.json"
-#     issuer:   "https://csar-auth.internal"
+#     jwks_url: "https://csar-authn.internal/.well-known/jwks.json"
+#     issuer:   "https://csar-authn.internal"
 #     audiences: ["bidding"]     # only bidding-sa STS tokens accepted; balance tokens rejected
 #     forward_claims:
 #       sub: "X-Service-ID"
 #
 # Routes then reference by name:
-#   x-csar-auth-validate: "balance-consumer"
+#   x-csar-authn-validate: "balance-consumer"
 #
-# See docs/csar-auth-sts.md for full setup guide and csar-auth configuration.
+# See docs/csar-authn-sts.md for full setup guide and csar-authn configuration.
 
 # --- Named Security Profiles ---
 # Define reusable security configurations here, then reference by name in routes.
@@ -266,7 +266,7 @@ paths:
 
       # --- Inbound JWT Validation ---
       # Ensures only YOUR authorized consumers can reach this route.
-      # x-csar-auth-validate:
+      # x-csar-authn-validate:
       #   jwks_url: "https://auth.example.com/.well-known/jwks.json"
       #   issuer: "https://auth.example.com/"
       #   audiences:
@@ -392,7 +392,7 @@ paths:
   #   get:
   #     x-csar-backend:
   #       target_url: "https://internal-service.local"
-  #     x-csar-auth-validate:
+  #     x-csar-authn-validate:
   #       jwks_url: "https://auth.example.com/.well-known/jwks.json"
   #       issuer: "https://auth.example.com/"
   #       audiences:
@@ -543,20 +543,20 @@ paths:
 
   # --- STS Service Account Pattern: Audience-Scoped Routes ---
   # Each internal service (balance-service, bidding-service) authenticates to
-  # csar-auth with its private key and receives a short-lived scoped JWT.
+  # csar-authn with its private key and receives a short-lived scoped JWT.
   # CSAR enforces audience per route group: balance tokens work only on
   # balance routes; bidding tokens only on bidding routes.
   # A compromised balance-service cannot pivot to bidding operations.
   #
-  # Requires: auth_validate_policies defined above + csar-auth STS enabled.
-  # See: docs/csar-auth-sts.md
+  # Requires: auth_validate_policies defined above + csar-authn STS enabled.
+  # See: docs/csar-authn-sts.md
   #
   # /balance/{rest:.*}:
   #   get:
   #     x-csar-backend:
   #       target_url: "https://upstream-api.example.com/balance"
   #       path_mode: "append"
-  #     x-csar-auth-validate: "balance-consumer"   # bidding JWT → 401
+  #     x-csar-authn-validate: "balance-consumer"   # bidding JWT → 401
   #     x-csar-security:
   #       kms_key_id: "master-key"
   #       token_ref:  "upstream_api_token"
@@ -572,7 +572,7 @@ paths:
   #     x-csar-backend:
   #       target_url: "https://upstream-api.example.com/bids"
   #       path_mode: "append"
-  #     x-csar-auth-validate: "bidding-consumer"   # balance JWT → 401
+  #     x-csar-authn-validate: "bidding-consumer"   # balance JWT → 401
   #     x-csar-security:
   #       kms_key_id: "master-key"                 # same KMS-managed upstream key
   #       token_ref:  "upstream_api_token"         # injected by CSAR, never held by service

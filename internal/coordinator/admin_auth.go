@@ -32,7 +32,7 @@ func AdminClaimsFromContext(ctx context.Context) *AdminClaims {
 }
 
 // AdminAuthMiddleware creates HTTP middleware that validates JWT tokens from
-// csar-auth using the existing authn.JWTValidator and extracts admin-specific
+// csar-authn using the existing authn.JWTValidator and extracts admin-specific
 // claims into the request context.
 func AdminAuthMiddleware(validator *authn.JWTValidator, cfg AdminAuthConfig, logger *slog.Logger) func(http.Handler) http.Handler {
 	authnCfg := authn.Config{

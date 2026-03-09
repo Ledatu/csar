@@ -176,7 +176,7 @@ optionally encrypts them, and inserts/upserts them into the target database.`,
 			if migrateS3Bucket == "" {
 				return fmt.Errorf("--s3-bucket is required for S3 source")
 			}
-			s3Client, err := s3store.NewClient(s3store.Config{
+			s3Client, err := s3store.NewClient(&s3store.Config{
 				Bucket:   migrateS3Bucket,
 				Endpoint: migrateS3Endpoint,
 				Region:   migrateS3Region,

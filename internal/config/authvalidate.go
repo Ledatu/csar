@@ -51,7 +51,7 @@ func (c *Config) ResolveAuthValidatePolicies() error {
 			}
 			merged.Use = ""
 			route.AuthValidate = &merged
-			annotatePolicy(&route, "x-csar-auth-validate", policyName)
+			annotatePolicy(&route, "x-csar-authn-validate", policyName)
 			methods[method] = route
 		}
 	}

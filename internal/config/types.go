@@ -139,7 +139,7 @@ type Config struct {
 	RedactPolicies map[string]RedactConfig `yaml:"redact_policies,omitempty" json:"redact_policies,omitempty"`
 
 	// AuthValidatePolicies defines named, reusable auth validation configurations.
-	// Routes reference them via x-csar-auth-validate: "policy_name".
+	// Routes reference them via x-csar-authn-validate: "policy_name".
 	AuthValidatePolicies map[string]AuthValidateConfig `yaml:"auth_validate_policies,omitempty" json:"auth_validate_policies,omitempty"`
 
 	// GlobalThrottle defines a global rate limit applied to ALL routes as a safety net.
@@ -239,7 +239,7 @@ type RouteConfig struct {
 
 	// AuthValidate configures inbound identity validation (JWT/JWKS).
 	// Requests are rejected if the token is missing, expired, or signature-invalid.
-	AuthValidate *AuthValidateConfig `yaml:"x-csar-auth-validate,omitempty" json:"x-csar-auth-validate,omitempty"`
+	AuthValidate *AuthValidateConfig `yaml:"x-csar-authn-validate,omitempty" json:"x-csar-authn-validate,omitempty"`
 
 	// Access control — per-route IP allowlist (optional).
 	// If set, overrides the global access_control for this route.
@@ -758,8 +758,8 @@ type AdaptiveBackpressureConfig struct {
 //
 // Supports bare string syntax for policy references:
 //
-//	x-csar-auth-validate: "jwt-internal"          # bare string → policy ref
-//	x-csar-auth-validate: { jwks_url: "...", ... } # inline object
+//	x-csar-authn-validate: "jwt-internal"          # bare string → policy ref
+//	x-csar-authn-validate: { jwks_url: "...", ... } # inline object
 type AuthValidateConfig struct {
 	// Use is an optional reference to a named auth_validate_policies entry.
 	Use string `yaml:"use,omitempty" json:"use,omitempty"`
@@ -795,7 +795,7 @@ type AuthValidateConfig struct {
 
 	// CookieName, if set, reads the JWT from the named cookie instead of
 	// a request header. When set, HeaderName and TokenPrefix are ignored.
-	// Useful for browser-based auth where csar-auth issues session cookies.
+	// Useful for browser-based auth where csar-authn issues session cookies.
 	CookieName string `yaml:"cookie_name,omitempty" json:"cookie_name,omitempty"`
 }
 

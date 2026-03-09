@@ -62,7 +62,7 @@
     },
     "auth_validate_policies": {
       "type": "object",
-      "description": "Named reusable auth validation configurations. Routes reference them via x-csar-auth-validate: \"policy_name\".",
+      "description": "Named reusable auth validation configurations. Routes reference them via x-csar-authn-validate: \"policy_name\".",
       "additionalProperties": { "$ref": "#/$defs/AuthValidateConfigObject" }
     },
     "global_throttle": { "$ref": "#/$defs/GlobalThrottleConfig" },
@@ -1034,7 +1034,7 @@
           "description": "Static key-value pairs injected into every upstream request for this route.",
           "additionalProperties": { "type": "string" }
         },
-        "x-csar-auth-validate": { "$ref": "#/$defs/AuthValidateConfig" },
+        "x-csar-authn-validate": { "$ref": "#/$defs/AuthValidateConfig" },
         "x-csar-access": { "$ref": "#/$defs/AccessControlConfig" },
         "x-csar-traffic": { "$ref": "#/$defs/TrafficConfig" },
         "x-csar-resilience": { "$ref": "#/$defs/ResilienceConfig" },

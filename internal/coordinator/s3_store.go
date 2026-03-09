@@ -109,7 +109,7 @@ func (s *S3TokenStore) UpsertToken(ctx context.Context, ref string, entry TokenE
 		return "", fmt.Errorf("s3 token store: unknown kms_mode %q", s.kmsMode)
 	}
 
-	body, err := s3store.MarshalTokenObject(obj)
+	body, err := s3store.MarshalTokenObject(&obj)
 	if err != nil {
 		return "", fmt.Errorf("s3 token store: marshal %q: %w", ref, err)
 	}

@@ -19,7 +19,7 @@ paths:
     get:
       x-csar-backend:
         target_url: "https://api.example.com/products"
-      x-csar-auth-validate: "jwt-internal"
+      x-csar-authn-validate: "jwt-internal"
 `
 	path := writeTemp(t, yaml)
 	cfg, err := Load(path)
@@ -56,7 +56,7 @@ paths:
     get:
       x-csar-backend:
         target_url: "https://api.example.com/products"
-      x-csar-auth-validate:
+      x-csar-authn-validate:
         use: "jwt-base"
         issuer: "custom-issuer"
 `
@@ -84,7 +84,7 @@ paths:
     get:
       x-csar-backend:
         target_url: "https://api.example.com/products"
-      x-csar-auth-validate: "nonexistent"
+      x-csar-authn-validate: "nonexistent"
 `
 	path := writeTemp(t, yaml)
 	_, err := Load(path)

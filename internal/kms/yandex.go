@@ -76,7 +76,7 @@ func NewYandexAPIProvider(cfg YandexAPIConfig) (*YandexAPIProvider, error) {
 
 	httpClient := &http.Client{Timeout: timeout}
 
-	resolver, err := ycloud.NewIAMTokenResolver(ycloud.AuthConfig{
+	resolver, err := ycloud.NewIAMTokenResolver(&ycloud.AuthConfig{
 		AuthMode:   cfg.AuthMode,
 		IAMToken:   cfg.IAMToken,
 		OAuthToken: cfg.OAuthToken,

@@ -3,16 +3,11 @@
 package crypto
 
 import (
-	"crypto/ed25519"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha256"
-	"crypto/x509"
-	"encoding/hex"
-	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/Ledatu/csar-core/jwtx"
 )
 
 // KeyAlgorithm represents the key type to generate.
@@ -52,18 +47,27 @@ func GenerateKeyPair(opts GenerateOptions) (*GeneratedKey, error) {
 		opts.Algorithm = AlgEd25519
 	}
 
-	var privPEM, pubPEM []byte
-	var kid string
-	var err error
-
+	var jwtxAlg string
 	switch opts.Algorithm {
 	case AlgEd25519:
-		privPEM, pubPEM, kid, err = generateEd25519()
+		jwtxAlg = "EdDSA"
 	case AlgRSA:
-		privPEM, pubPEM, kid, err = generateRSA(opts.RSABits)
+		jwtxAlg = "RS256"
 	default:
 		return nil, fmt.Errorf("unsupported algorithm %q; supported: ed25519, rsa", opts.Algorithm)
 	}
+
+	var genOpts []jwtx.GenerateOption
+	if opts.Algorithm == AlgRSA {
+		genOpts = append(genOpts, jwtx.WithRSABits(opts.RSABits))
+	}
+
+	kp, err := jwtx.GenerateKeyPair(jwtxAlg, genOpts...)
+	if err != nil {
+		return nil, err
+	}
+
+	privPEM, pubPEM, err := jwtx.MarshalKeyPairPEM(kp)
 	if err != nil {
 		return nil, err
 	}
@@ -85,60 +89,13 @@ func GenerateKeyPair(opts GenerateOptions) (*GeneratedKey, error) {
 	return &GeneratedKey{
 		PrivateKeyPath: privPath,
 		PublicKeyPath:  pubPath,
-		KID:            kid,
+		KID:            kp.KID,
 		Algorithm:      opts.Algorithm,
 	}, nil
-}
-
-func generateEd25519() (privPEM, pubPEM []byte, kid string, err error) {
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("generating Ed25519 key: %w", err)
-	}
-
-	privBytes, err := x509.MarshalPKCS8PrivateKey(priv)
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("marshaling private key: %w", err)
-	}
-
-	pubBytes, err := x509.MarshalPKIXPublicKey(pub)
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("marshaling public key: %w", err)
-	}
-
-	privPEM = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privBytes})
-	pubPEM = pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-	kid = ComputeKID(pubBytes)
-
-	return privPEM, pubPEM, kid, nil
-}
-
-func generateRSA(bits int) (privPEM, pubPEM []byte, kid string, err error) {
-	priv, err := rsa.GenerateKey(rand.Reader, bits)
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("generating RSA-%d key: %w", bits, err)
-	}
-
-	privBytes, err := x509.MarshalPKCS8PrivateKey(priv)
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("marshaling private key: %w", err)
-	}
-
-	pubBytes, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
-	if err != nil {
-		return nil, nil, "", fmt.Errorf("marshaling public key: %w", err)
-	}
-
-	privPEM = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privBytes})
-	pubPEM = pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
-	kid = ComputeKID(pubBytes)
-
-	return privPEM, pubPEM, kid, nil
 }
 
 // ComputeKID derives a key ID from the SHA-256 hash of the DER-encoded public key.
 // Returns the first 8 bytes as a 16-character hex string.
 func ComputeKID(pubDER []byte) string {
-	h := sha256.Sum256(pubDER)
-	return hex.EncodeToString(h[:8])
+	return jwtx.ComputeKID(pubDER)
 }

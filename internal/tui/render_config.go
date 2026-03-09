@@ -151,7 +151,7 @@ func renderConfigYAML(r *GenerateResult) string {
 
 		// JWT
 		if r.EnableJWT && r.JWKSURL != "" {
-			b.WriteString("      x-csar-auth-validate:\n")
+			b.WriteString("      x-csar-authn-validate:\n")
 			b.WriteString(fmt.Sprintf("        jwks_url: %q\n", r.JWKSURL))
 			b.WriteString("        # issuer: \"https://auth.example.com/\"\n")
 			b.WriteString("        # audiences:\n")

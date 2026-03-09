@@ -80,7 +80,7 @@ func TestMarshalParseTokenObject_KMS(t *testing.T) {
 		Tenant:         "balance",
 	}
 
-	data, err := s3store.MarshalTokenObject(obj)
+	data, err := s3store.MarshalTokenObject(&obj)
 	if err != nil {
 		t.Fatalf("MarshalTokenObject: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestMarshalParseTokenObject_Passthrough(t *testing.T) {
 		SchemaVersion: 1,
 	}
 
-	data, err := s3store.MarshalTokenObject(obj)
+	data, err := s3store.MarshalTokenObject(&obj)
 	if err != nil {
 		t.Fatalf("MarshalTokenObject: %v", err)
 	}
@@ -131,7 +131,7 @@ func TestMarshalTokenObject_Metadata(t *testing.T) {
 		SchemaVersion: 1,
 	}
 
-	data, err := s3store.MarshalTokenObject(obj)
+	data, err := s3store.MarshalTokenObject(&obj)
 	if err != nil {
 		t.Fatalf("MarshalTokenObject: %v", err)
 	}

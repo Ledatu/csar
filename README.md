@@ -331,7 +331,7 @@ Define reusable configurations at the top level, then reference them by name in 
 | `cors_policies` | `x-csar-cors` | CORS policies |
 | `retry_policies` | `x-csar-retry` | Retry policies |
 | `redact_policies` | `x-csar-redact` | DLP redaction policies |
-| `auth_validate_policies` | `x-csar-auth-validate` | JWT validation policies |
+| `auth_validate_policies` | `x-csar-authn-validate` | JWT validation policies |
 
 **Reference syntax** (all policy types support the same patterns):
 
@@ -395,7 +395,7 @@ paths:
         inject_header: "Authorization"
         inject_format: "Bearer {token}"
 
-      x-csar-auth-validate:
+      x-csar-authn-validate:
         jwks_url: "https://auth.example.com/.well-known/jwks.json"
         issuer: "https://auth.example.com/"
         audiences: ["my-api"]

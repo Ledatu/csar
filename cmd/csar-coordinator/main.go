@@ -108,7 +108,7 @@ func main() {
 	adminTLSCert := flag.String("admin-tls-cert", "", "path to TLS cert for admin API (PEM)")
 	adminTLSKey := flag.String("admin-tls-key", "", "path to TLS key for admin API (PEM)")
 	adminClientCA := flag.String("admin-client-ca", "", "path to client CA for admin API mTLS (PEM)")
-	adminJWKSUrl := flag.String("admin-jwks-url", "", "JWKS URL for admin JWT validation (from csar-auth)")
+	adminJWKSUrl := flag.String("admin-jwks-url", "", "JWKS URL for admin JWT validation (from csar-authn)")
 	adminIssuer := flag.String("admin-issuer", "", "expected JWT issuer for admin API")
 	adminAudience := flag.String("admin-audience", "csar-coordinator-admin", "expected JWT audience for admin API")
 	adminS3ManagesEncryptionStr := flag.String("admin-s3-manages-encryption", "", "REQUIRED: 'true' = S3 SSE handles encryption, 'false' = CSAR KMS encrypts before S3 write")
@@ -187,7 +187,7 @@ func main() {
 				logger.Error("--config-source=s3 requires --config-s3-bucket")
 				os.Exit(1)
 			}
-			cfgS3Client, err := s3store.NewClient(s3store.Config{
+			cfgS3Client, err := s3store.NewClient(&s3store.Config{
 				Bucket:   *configS3Bucket,
 				Endpoint: *configS3Endpoint,
 				Region:   *configS3Region,
@@ -337,7 +337,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		s3Client, err := s3store.NewClient(s3store.Config{
+		s3Client, err := s3store.NewClient(&s3store.Config{
 			Bucket:   *s3Bucket,
 			Endpoint: *s3Endpoint,
 			Region:   *s3Region,

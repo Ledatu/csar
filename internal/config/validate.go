@@ -124,7 +124,7 @@ func (c *Config) Validate() error {
 
 		// If no transport security is configured at all, that's an error
 		if coord.CAFile == "" && !coord.AllowInsecure {
-			return fmt.Errorf("coordinator: transport security is required — "+
+			return fmt.Errorf("coordinator: transport security is required — " +
 				"set coordinator.ca_file for TLS, or coordinator.allow_insecure: true for development")
 		}
 	} else {
@@ -181,34 +181,34 @@ func (c *Config) Validate() error {
 				}
 			}
 
-		// Validate security config: if x-csar-security is present,
-		// require the essential fields that the auth injection pipeline needs.
-		for i, sec := range route.Security {
-			idx := fmt.Sprintf("[%d]", i)
-			if len(route.Security) == 1 {
-				idx = "" // cleaner error messages for the common single-entry case
+			// Validate security config: if x-csar-security is present,
+			// require the essential fields that the auth injection pipeline needs.
+			for i, sec := range route.Security {
+				idx := fmt.Sprintf("[%d]", i)
+				if len(route.Security) == 1 {
+					idx = "" // cleaner error messages for the common single-entry case
+				}
+				// Belt-and-suspenders: catch unresolved profile references.
+				// ResolveSecurityProfiles() should have been called before Validate(),
+				// but if a caller built a Config programmatically and forgot to
+				// resolve, produce a clear diagnostic instead of a confusing field error.
+				if sec.Profile != "" {
+					return fmt.Errorf("path %s method %s: x-csar-security%s has unresolved profile reference %q — "+
+						"call ResolveSecurityProfiles() before Validate()", path, method, idx, sec.Profile)
+				}
+				if sec.TokenRef == "" {
+					return fmt.Errorf("path %s method %s: x-csar-security%s.token_ref is required when security config is present", path, method, idx)
+				}
+				if sec.InjectHeader == "" {
+					return fmt.Errorf("path %s method %s: x-csar-security%s.inject_header is required when security config is present", path, method, idx)
+				}
+				if sec.KMSKeyID == "" {
+					return fmt.Errorf("path %s method %s: x-csar-security%s.kms_key_id is required when security config is present", path, method, idx)
+				}
+				if oe := sec.OnKMSError; oe != "" && oe != "fail_closed" && oe != "serve_stale" {
+					return fmt.Errorf("path %s method %s: x-csar-security%s.on_kms_error must be \"fail_closed\" or \"serve_stale\", got %q", path, method, idx, oe)
+				}
 			}
-			// Belt-and-suspenders: catch unresolved profile references.
-			// ResolveSecurityProfiles() should have been called before Validate(),
-			// but if a caller built a Config programmatically and forgot to
-			// resolve, produce a clear diagnostic instead of a confusing field error.
-			if sec.Profile != "" {
-				return fmt.Errorf("path %s method %s: x-csar-security%s has unresolved profile reference %q — "+
-					"call ResolveSecurityProfiles() before Validate()", path, method, idx, sec.Profile)
-			}
-			if sec.TokenRef == "" {
-				return fmt.Errorf("path %s method %s: x-csar-security%s.token_ref is required when security config is present", path, method, idx)
-			}
-			if sec.InjectHeader == "" {
-				return fmt.Errorf("path %s method %s: x-csar-security%s.inject_header is required when security config is present", path, method, idx)
-			}
-			if sec.KMSKeyID == "" {
-				return fmt.Errorf("path %s method %s: x-csar-security%s.kms_key_id is required when security config is present", path, method, idx)
-			}
-			if oe := sec.OnKMSError; oe != "" && oe != "fail_closed" && oe != "serve_stale" {
-				return fmt.Errorf("path %s method %s: x-csar-security%s.on_kms_error must be \"fail_closed\" or \"serve_stale\", got %q", path, method, idx, oe)
-			}
-		}
 
 			// Validate retry config
 			if route.Retry != nil {
@@ -222,35 +222,35 @@ func (c *Config) Validate() error {
 				}
 			}
 
-		// Validate auth-validate (JWT/JWKS) config
-		if route.AuthValidate != nil {
-			if route.AuthValidate.JWKSURL == "" {
-				return fmt.Errorf("path %s method %s: x-csar-auth-validate.jwks_url is required", path, method)
+			// Validate auth-validate (JWT/JWKS) config
+			if route.AuthValidate != nil {
+				if route.AuthValidate.JWKSURL == "" {
+					return fmt.Errorf("path %s method %s: x-csar-authn-validate.jwks_url is required", path, method)
+				}
+				if !strings.HasPrefix(route.AuthValidate.JWKSURL, "https://") && !strings.HasPrefix(route.AuthValidate.JWKSURL, "http://") {
+					return fmt.Errorf("path %s method %s: x-csar-authn-validate.jwks_url must start with http:// or https://", path, method)
+				}
 			}
-			if !strings.HasPrefix(route.AuthValidate.JWKSURL, "https://") && !strings.HasPrefix(route.AuthValidate.JWKSURL, "http://") {
-				return fmt.Errorf("path %s method %s: x-csar-auth-validate.jwks_url must start with http:// or https://", path, method)
-			}
-		}
 
-		// Validate redact (DLP) config
-		if route.Redact != nil && route.Redact.IsEnabled() {
-			if len(route.Redact.Fields) == 0 {
-				return fmt.Errorf("path %s method %s: x-csar-redact.fields must contain at least one field path", path, method)
+			// Validate redact (DLP) config
+			if route.Redact != nil && route.Redact.IsEnabled() {
+				if len(route.Redact.Fields) == 0 {
+					return fmt.Errorf("path %s method %s: x-csar-redact.fields must contain at least one field path", path, method)
+				}
 			}
-		}
 
-		// Validate tenant config
-		if route.Tenant != nil {
-			if route.Tenant.Header == "" {
-				return fmt.Errorf("path %s method %s: x-csar-tenant.header is required", path, method)
+			// Validate tenant config
+			if route.Tenant != nil {
+				if route.Tenant.Header == "" {
+					return fmt.Errorf("path %s method %s: x-csar-tenant.header is required", path, method)
+				}
+				if len(route.Tenant.Backends) == 0 {
+					return fmt.Errorf("path %s method %s: x-csar-tenant.backends must contain at least one entry", path, method)
+				}
 			}
-			if len(route.Tenant.Backends) == 0 {
-				return fmt.Errorf("path %s method %s: x-csar-tenant.backends must contain at least one entry", path, method)
-			}
-		}
 
-		// Validate per-route access control
-		if route.Access != nil {
+			// Validate per-route access control
+			if route.Access != nil {
 				for _, cidr := range route.Access.AllowCIDRs {
 					if err := validateCIDROrIP(cidr); err != nil {
 						return fmt.Errorf("path %s method %s: x-csar-access.allow_cidrs: %w", path, method, err)
@@ -258,135 +258,135 @@ func (c *Config) Validate() error {
 				}
 			}
 
-		// Validate CORS config
-		if route.CORS != nil {
-			if len(route.CORS.AllowedOrigins) == 0 {
-				return fmt.Errorf("path %s method %s: x-csar-cors.allowed_origins must contain at least one entry", path, method)
-			}
-		}
-
-		// Validate cache config
-		if route.Cache != nil && route.Cache.IsEnabled() {
-			if route.Cache.MaxEntries < 0 {
-				return fmt.Errorf("path %s method %s: x-csar-cache.max_entries must be >= 0", path, method)
-			}
-		}
-
-		// Validate load balancer config
-		if lb := route.Backend.LoadBalancer; lb != "" && lb != "round_robin" && lb != "random" {
-			return fmt.Errorf("path %s method %s: x-csar-backend.load_balancer must be \"round_robin\" or \"random\", got %q", path, method, lb)
-		}
-
-		// Validate health check config
-		if hc := route.Backend.HealthCheck; hc != nil && hc.Enabled {
-			if hc.Mode != "" && hc.Mode != "http" && hc.Mode != "tcp" {
-				return fmt.Errorf("path %s method %s: health_check.mode must be \"http\" or \"tcp\", got %q", path, method, hc.Mode)
-			}
-			if hc.Mode == "http" && hc.Path == "" {
-				return fmt.Errorf("path %s method %s: health_check.path is required when mode is \"http\"", path, method)
-			}
-			if len(route.Backend.AllTargets()) < 2 && route.Backend.LoadBalancer == "" {
-				warnings = append(warnings,
-					fmt.Sprintf("path %s method %s: health_check is enabled but there is only one target — consider adding multiple targets with load balancing",
-						path, method))
-			}
-		}
-
-		// Validate traffic backend
-		if route.Traffic != nil && route.Traffic.Backend != "" {
-			switch route.Traffic.Backend {
-			case "local", "redis", "coordinator":
-				// valid
-			default:
-				return fmt.Errorf("path %s method %s: x-csar-traffic.backend must be \"local\", \"redis\", or \"coordinator\", got %q",
-					path, method, route.Traffic.Backend)
-			}
-			if route.Traffic.Backend == "redis" && c.Redis == nil {
-				return fmt.Errorf("path %s method %s: x-csar-traffic.backend is \"redis\" but no top-level redis config is provided",
-					path, method)
-			}
-			if route.Traffic.Backend == "redis" && c.Redis != nil && c.Redis.Address == "" {
-				return fmt.Errorf("path %s method %s: x-csar-traffic.backend is \"redis\" but redis.address is empty",
-					path, method)
-			}
-		}
-
-		// Validate unresolved throttle policy references.
-		if route.Traffic != nil && route.Traffic.Use != "" {
-			return fmt.Errorf("path %s method %s: x-csar-traffic has unresolved policy reference %q — "+
-				"call ResolveThrottlePolicies() before Validate()", path, method, route.Traffic.Use)
-		}
-
-		// Validate unresolved CORS policy references.
-		if route.CORS != nil && route.CORS.Use != "" {
-			return fmt.Errorf("path %s method %s: x-csar-cors has unresolved policy reference %q — "+
-				"call ResolveCORSPolicies() before Validate()", path, method, route.CORS.Use)
-		}
-
-		// Validate unresolved retry policy references.
-		if route.Retry != nil && route.Retry.Use != "" {
-			return fmt.Errorf("path %s method %s: x-csar-retry has unresolved policy reference %q — "+
-				"call ResolveRetryPolicies() before Validate()", path, method, route.Retry.Use)
-		}
-
-		// Validate unresolved redact policy references.
-		if route.Redact != nil && route.Redact.Use != "" {
-			return fmt.Errorf("path %s method %s: x-csar-redact has unresolved policy reference %q — "+
-				"call ResolveRedactPolicies() before Validate()", path, method, route.Redact.Use)
-		}
-
-		// Validate unresolved auth-validate policy references.
-		if route.AuthValidate != nil && route.AuthValidate.Use != "" {
-			return fmt.Errorf("path %s method %s: x-csar-auth-validate has unresolved policy reference %q — "+
-				"call ResolveAuthValidatePolicies() before Validate()", path, method, route.AuthValidate.Use)
-		}
-
-		// Validate dynamic key requires redis backend.
-		if route.Traffic != nil && route.Traffic.Key != "" {
-			if route.Traffic.Backend != "redis" {
-				return fmt.Errorf("path %s method %s: x-csar-traffic.key requires backend \"redis\" (dynamic keys are distributed by nature)",
-					path, method)
-			}
-		}
-
-		// Validate exclude_ips entries.
-		if route.Traffic != nil {
-			for _, cidr := range route.Traffic.ExcludeIPs {
-				if err := validateCIDROrIP(cidr); err != nil {
-					return fmt.Errorf("path %s method %s: x-csar-traffic.exclude_ips: %w", path, method, err)
+			// Validate CORS config
+			if route.CORS != nil {
+				if len(route.CORS.AllowedOrigins) == 0 {
+					return fmt.Errorf("path %s method %s: x-csar-cors.allowed_origins must contain at least one entry", path, method)
 				}
 			}
-		}
 
-		// Validate VIP overrides reference existing policies.
-		if route.Traffic != nil {
-			for _, vip := range route.Traffic.VIPOverrides {
-				if vip.Header == "" {
-					return fmt.Errorf("path %s method %s: x-csar-traffic.vip_overrides[].header is required", path, method)
+			// Validate cache config
+			if route.Cache != nil && route.Cache.IsEnabled() {
+				if route.Cache.MaxEntries < 0 {
+					return fmt.Errorf("path %s method %s: x-csar-cache.max_entries must be >= 0", path, method)
 				}
-				for val, policyName := range vip.Values {
-					if _, ok := c.ThrottlingPolicies[policyName]; !ok {
-						return fmt.Errorf("path %s method %s: vip_override header %q value %q references unknown policy %q",
-							path, method, vip.Header, val, policyName)
+			}
+
+			// Validate load balancer config
+			if lb := route.Backend.LoadBalancer; lb != "" && lb != "round_robin" && lb != "random" {
+				return fmt.Errorf("path %s method %s: x-csar-backend.load_balancer must be \"round_robin\" or \"random\", got %q", path, method, lb)
+			}
+
+			// Validate health check config
+			if hc := route.Backend.HealthCheck; hc != nil && hc.Enabled {
+				if hc.Mode != "" && hc.Mode != "http" && hc.Mode != "tcp" {
+					return fmt.Errorf("path %s method %s: health_check.mode must be \"http\" or \"tcp\", got %q", path, method, hc.Mode)
+				}
+				if hc.Mode == "http" && hc.Path == "" {
+					return fmt.Errorf("path %s method %s: health_check.path is required when mode is \"http\"", path, method)
+				}
+				if len(route.Backend.AllTargets()) < 2 && route.Backend.LoadBalancer == "" {
+					warnings = append(warnings,
+						fmt.Sprintf("path %s method %s: health_check is enabled but there is only one target — consider adding multiple targets with load balancing",
+							path, method))
+				}
+			}
+
+			// Validate traffic backend
+			if route.Traffic != nil && route.Traffic.Backend != "" {
+				switch route.Traffic.Backend {
+				case "local", "redis", "coordinator":
+					// valid
+				default:
+					return fmt.Errorf("path %s method %s: x-csar-traffic.backend must be \"local\", \"redis\", or \"coordinator\", got %q",
+						path, method, route.Traffic.Backend)
+				}
+				if route.Traffic.Backend == "redis" && c.Redis == nil {
+					return fmt.Errorf("path %s method %s: x-csar-traffic.backend is \"redis\" but no top-level redis config is provided",
+						path, method)
+				}
+				if route.Traffic.Backend == "redis" && c.Redis != nil && c.Redis.Address == "" {
+					return fmt.Errorf("path %s method %s: x-csar-traffic.backend is \"redis\" but redis.address is empty",
+						path, method)
+				}
+			}
+
+			// Validate unresolved throttle policy references.
+			if route.Traffic != nil && route.Traffic.Use != "" {
+				return fmt.Errorf("path %s method %s: x-csar-traffic has unresolved policy reference %q — "+
+					"call ResolveThrottlePolicies() before Validate()", path, method, route.Traffic.Use)
+			}
+
+			// Validate unresolved CORS policy references.
+			if route.CORS != nil && route.CORS.Use != "" {
+				return fmt.Errorf("path %s method %s: x-csar-cors has unresolved policy reference %q — "+
+					"call ResolveCORSPolicies() before Validate()", path, method, route.CORS.Use)
+			}
+
+			// Validate unresolved retry policy references.
+			if route.Retry != nil && route.Retry.Use != "" {
+				return fmt.Errorf("path %s method %s: x-csar-retry has unresolved policy reference %q — "+
+					"call ResolveRetryPolicies() before Validate()", path, method, route.Retry.Use)
+			}
+
+			// Validate unresolved redact policy references.
+			if route.Redact != nil && route.Redact.Use != "" {
+				return fmt.Errorf("path %s method %s: x-csar-redact has unresolved policy reference %q — "+
+					"call ResolveRedactPolicies() before Validate()", path, method, route.Redact.Use)
+			}
+
+			// Validate unresolved auth-validate policy references.
+			if route.AuthValidate != nil && route.AuthValidate.Use != "" {
+				return fmt.Errorf("path %s method %s: x-csar-authn-validate has unresolved policy reference %q — "+
+					"call ResolveAuthValidatePolicies() before Validate()", path, method, route.AuthValidate.Use)
+			}
+
+			// Validate dynamic key requires redis backend.
+			if route.Traffic != nil && route.Traffic.Key != "" {
+				if route.Traffic.Backend != "redis" {
+					return fmt.Errorf("path %s method %s: x-csar-traffic.key requires backend \"redis\" (dynamic keys are distributed by nature)",
+						path, method)
+				}
+			}
+
+			// Validate exclude_ips entries.
+			if route.Traffic != nil {
+				for _, cidr := range route.Traffic.ExcludeIPs {
+					if err := validateCIDROrIP(cidr); err != nil {
+						return fmt.Errorf("path %s method %s: x-csar-traffic.exclude_ips: %w", path, method, err)
 					}
 				}
 			}
-		}
 
-		// Validate max_response_size
-		if route.MaxResponseSize < 0 {
-			return fmt.Errorf("path %s method %s: max_response_size must be >= 0", path, method)
-		}
-
-		// Warn if credentials are sent over non-TLS upstream.
-		// insecure_skip_verify is irrelevant for http:// — always warn.
-		for _, sec := range route.Security {
-			if sec.TokenRef != "" && !strings.HasPrefix(route.Backend.TargetURL, "https://") {
-				warnings = append(warnings,
-					fmt.Sprintf("SECURITY WARNING: path %s method %s injects credentials (%s) over non-TLS upstream %q",
-						path, method, sec.InjectHeader, route.Backend.TargetURL))
+			// Validate VIP overrides reference existing policies.
+			if route.Traffic != nil {
+				for _, vip := range route.Traffic.VIPOverrides {
+					if vip.Header == "" {
+						return fmt.Errorf("path %s method %s: x-csar-traffic.vip_overrides[].header is required", path, method)
+					}
+					for val, policyName := range vip.Values {
+						if _, ok := c.ThrottlingPolicies[policyName]; !ok {
+							return fmt.Errorf("path %s method %s: vip_override header %q value %q references unknown policy %q",
+								path, method, vip.Header, val, policyName)
+						}
+					}
+				}
 			}
-		}
+
+			// Validate max_response_size
+			if route.MaxResponseSize < 0 {
+				return fmt.Errorf("path %s method %s: max_response_size must be >= 0", path, method)
+			}
+
+			// Warn if credentials are sent over non-TLS upstream.
+			// insecure_skip_verify is irrelevant for http:// — always warn.
+			for _, sec := range route.Security {
+				if sec.TokenRef != "" && !strings.HasPrefix(route.Backend.TargetURL, "https://") {
+					warnings = append(warnings,
+						fmt.Sprintf("SECURITY WARNING: path %s method %s injects credentials (%s) over non-TLS upstream %q",
+							path, method, sec.InjectHeader, route.Backend.TargetURL))
+				}
+			}
 
 			// Warn separately if insecure_skip_verify is set on an https:// upstream
 			if route.Backend.TLS != nil && route.Backend.TLS.InsecureSkipVerify {
