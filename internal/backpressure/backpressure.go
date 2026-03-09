@@ -21,7 +21,6 @@ package backpressure
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -29,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledatu/csar/internal/apierror"
 	"github.com/ledatu/csar/internal/throttle"
 )
 
@@ -278,7 +278,7 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			// Client disconnected during wait.
 			m.logger.Debug("backpressure: client disconnected during wait")
-			writeThrottledResponse(w, waitDur, m.throttler)
+			writeThrottledResponse(w, r, waitDur, m.throttler)
 			return
 		}
 
@@ -301,7 +301,7 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			// Convert the 429 into a csar-ts-compatible 503.
-			writeThrottledResponse(w, retryWait, m.throttler)
+			writeThrottledResponse(w, r, retryWait, m.throttler)
 			return
 		}
 
@@ -318,7 +318,7 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"route", r.URL.Path,
 		)
 	}
-	writeThrottledResponse(w, waitDur, m.throttler)
+	writeThrottledResponse(w, r, waitDur, m.throttler)
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -373,9 +373,10 @@ func (m *Middleware) extractWaitTime(headers http.Header) time.Duration {
 // that the csar-ts client SDK understands.
 // throttler may be nil; when non-nil and no upstream wait was provided,
 // we compute Retry-After from the real bucket state.
-func writeThrottledResponse(w http.ResponseWriter, waitDur time.Duration, t throttle.Waiter) {
-	w.Header().Set("Content-Type", "application/json")
+func writeThrottledResponse(w http.ResponseWriter, r *http.Request, waitDur time.Duration, t throttle.Waiter) {
 	w.Header().Set("X-CSAR-Status", "throttled")
+
+	var retryAfterMS int64
 	if waitDur > 0 {
 		secs := int(waitDur.Seconds())
 		if secs < 1 {
@@ -383,14 +384,20 @@ func writeThrottledResponse(w http.ResponseWriter, waitDur time.Duration, t thro
 		}
 		w.Header().Set("Retry-After", strconv.Itoa(secs))
 		w.Header().Set("X-CSAR-Wait-MS", strconv.FormatInt(waitDur.Milliseconds(), 10))
+		retryAfterMS = waitDur.Milliseconds()
 	} else if est, ok := t.(throttle.RetryEstimator); ok {
-		// No upstream wait info — estimate from the real bucket state
-		// (rate, queue depth, suspension).
-		w.Header().Set("Retry-After", strconv.Itoa(est.EstimateRetryAfter()))
+		retryAfter := est.EstimateRetryAfter()
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+		retryAfterMS = int64(retryAfter) * 1000
 	} else {
-		// Last resort: no throttler info available, tell the client to retry soon.
 		w.Header().Set("Retry-After", "1")
+		retryAfterMS = 1000
 	}
-	w.WriteHeader(http.StatusServiceUnavailable)
-	fmt.Fprint(w, `{"error":"upstream rate limit exceeded","status":"throttled"}`)
+
+	resp := apierror.New(apierror.CodeBackpressure, http.StatusServiceUnavailable,
+		"upstream rate limit exceeded").WithRetryAfterMS(retryAfterMS)
+	if r != nil {
+		resp.WithRequestID(r.Header.Get("X-Request-ID"))
+	}
+	resp.Write(w)
 }

@@ -61,6 +61,31 @@ func (m *Metrics) RecordCircuitBreakerTrip(breakerName string) {
 	m.CircuitBreakerTrips.WithLabelValues(breakerName).Inc()
 }
 
+// RecordSDKThrottled records a throttled response for SDK metrics.
+func (m *Metrics) RecordSDKThrottled(route, statusValue string) {
+	m.SDKThrottledResponses.WithLabelValues(route, statusValue).Inc()
+}
+
+// RecordSDKWaitEmitted records an emitted X-CSAR-Wait-MS value.
+func (m *Metrics) RecordSDKWaitEmitted(route string, waitMS float64) {
+	m.SDKWaitEmitted.WithLabelValues(route).Observe(waitMS)
+}
+
+// RecordSDKBackpressureRetry records a transparent backpressure retry.
+func (m *Metrics) RecordSDKBackpressureRetry(route string) {
+	m.SDKBackpressureRetries.WithLabelValues(route).Inc()
+}
+
+// RecordSDKCircuitOpen records a circuit-open 503 response.
+func (m *Metrics) RecordSDKCircuitOpen(route string) {
+	m.SDKCircuitOpenResponses.WithLabelValues(route).Inc()
+}
+
+// RecordSDKClientLimitPresence records a request with X-CSAR-Client-Limit.
+func (m *Metrics) RecordSDKClientLimitPresence(route string) {
+	m.SDKClientLimitPresence.WithLabelValues(route).Inc()
+}
+
 // RecordKMSDecrypt records a KMS decrypt operation.
 func (m *Metrics) RecordKMSDecrypt(keyID string, duration time.Duration, cacheHit bool) {
 	m.KMSDecryptDuration.WithLabelValues(keyID).Observe(duration.Seconds())

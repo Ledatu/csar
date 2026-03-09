@@ -107,7 +107,7 @@ func (rd *Redactor) Wrap(cfg Config, next http.Handler) http.Handler {
 			w.WriteHeader(capture.statusCode)
 			// Body was already partially written if overflow happened mid-stream,
 			// but since we buffer before writing headers, we return an error instead.
-			fmt.Fprintf(w, `{"error":"response too large for DLP processing","max_bytes":%d}`, maxSize)
+			fmt.Fprintf(w, `{"code":"response_too_large","status":502,"message":"response too large for DLP processing","detail":"max_bytes: %d"}`, maxSize)
 			return
 		}
 

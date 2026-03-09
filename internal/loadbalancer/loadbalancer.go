@@ -344,7 +344,7 @@ func (p *Pool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.logger.Error("load balancer: no healthy targets available")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprint(w, `{"error":"no healthy upstream targets"}`)
+		fmt.Fprint(w, `{"code":"no_healthy_upstream","status":503,"message":"no healthy upstream targets"}`)
 		return
 	}
 	p.logger.Debug("load balancer routing",

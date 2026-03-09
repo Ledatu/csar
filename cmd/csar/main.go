@@ -246,6 +246,20 @@ func run() error {
 	// Build the HTTP mux
 	mux := http.NewServeMux()
 	mux.Handle("/health", health.Handler(Version))
+
+	// Mount readiness endpoint when configured.
+	var readinessChecker *health.ReadinessChecker
+	if cfg.Readiness != nil && cfg.Readiness.Enabled {
+		includeDetails := cfg.Readiness.IncludeDetails == nil || *cfg.Readiness.IncludeDetails
+		readinessChecker = health.NewReadinessChecker(Version, includeDetails)
+		readinessPath := cfg.Readiness.Path
+		if readinessPath == "" {
+			readinessPath = "/readiness"
+		}
+		mux.Handle(readinessPath, readinessChecker.Handler())
+		logger.Info("readiness endpoint mounted", "path", readinessPath)
+	}
+
 	mux.Handle("/", rh)
 
 	// Create HTTP server
@@ -297,6 +311,13 @@ func run() error {
 		metricsMux := http.NewServeMux()
 		metricsMux.Handle("/metrics", m.Handler())
 		metricsMux.Handle("/health", health.Handler(Version))
+		if readinessChecker != nil {
+			readinessPath := "/readiness"
+			if cfg.Readiness != nil && cfg.Readiness.Path != "" {
+				readinessPath = cfg.Readiness.Path
+			}
+			metricsMux.Handle(readinessPath, readinessChecker.Handler())
+		}
 
 		metricsSrv := &http.Server{
 			Addr:           *metricsAddr,

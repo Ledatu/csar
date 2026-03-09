@@ -45,6 +45,15 @@ type RetryEstimator interface {
 var _ Waiter = (*Throttler)(nil)
 var _ Suspendable = (*Throttler)(nil)
 var _ RetryEstimator = (*Throttler)(nil)
+var _ ClientHintReceiver = (*Throttler)(nil)
+
+// ClientHintReceiver is an optional interface for throttlers that accept
+// client-reported RPS hints (X-CSAR-Client-Limit). When the aggregate
+// client-reported load exceeds route capacity, the throttler can begin
+// pre-emptive shaping.
+type ClientHintReceiver interface {
+	ApplyClientHint(clientRPS float64)
+}
 
 // Throttler manages per-route rate limiting with wait-based smoothing.
 // Instead of rejecting requests with 429, it queues them up to max_wait.
@@ -52,8 +61,17 @@ type Throttler struct {
 	limiter *rate.Limiter
 	maxWait time.Duration
 
+	// configuredBurst is the original burst value from construction.
+	// Used to restore burst after a client hint reduction clears.
+	configuredBurst int
+
 	// Observability: number of requests currently waiting in the queue.
 	waiting atomic.Int64
+
+	// clientHintRPS tracks the latest client-reported RPS hint.
+	// Used when client_limit_mode is "enforce" to pre-emptively shape traffic.
+	clientHintMu  sync.Mutex
+	clientHintRPS float64
 
 	// Backpressure suspension: when suspendUntil is in the future, Wait()
 	// blocks until the suspension expires before attempting token acquisition.
@@ -67,8 +85,9 @@ type Throttler struct {
 // maxWait: maximum time a request can wait in the queue (0 = no waiting, reject immediately)
 func New(rps float64, burst int, maxWait time.Duration) *Throttler {
 	return &Throttler{
-		limiter: rate.NewLimiter(rate.Limit(rps), burst),
-		maxWait: maxWait,
+		limiter:         rate.NewLimiter(rate.Limit(rps), burst),
+		maxWait:         maxWait,
+		configuredBurst: burst,
 	}
 }
 
@@ -193,6 +212,23 @@ func (t *Throttler) EstimateRetryAfter() int {
 func (t *Throttler) UpdateLimit(rps float64, burst int) {
 	t.limiter.SetLimit(rate.Limit(rps))
 	t.limiter.SetBurst(burst)
+}
+
+// ApplyClientHint records a client-reported RPS hint. When the aggregate
+// client demand exceeds the configured rate, this serves as a signal for
+// earlier pre-emptive shaping (e.g., reducing burst allowance).
+func (t *Throttler) ApplyClientHint(clientRPS float64) {
+	t.clientHintMu.Lock()
+	t.clientHintRPS = clientRPS
+	configured := float64(t.limiter.Limit())
+	t.clientHintMu.Unlock()
+
+	if clientRPS > configured && configured > 0 {
+		reducedBurst := int(math.Max(1, float64(t.configuredBurst)*configured/clientRPS))
+		t.limiter.SetBurst(reducedBurst)
+	} else {
+		t.limiter.SetBurst(t.configuredBurst)
+	}
 }
 
 // ThrottleManager manages throttlers for multiple routes.

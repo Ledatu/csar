@@ -33,6 +33,12 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 		opt(r)
 	}
 
+	// Resolve the request ID header name once at construction time.
+	r.reqIDHeader = "X-Request-ID"
+	if cfg.DebugHeaders != nil && cfg.DebugHeaders.RequestIDHeader != "" {
+		r.reqIDHeader = cfg.DebugHeaders.RequestIDHeader
+	}
+
 	// Create a ThrottleManager if one was not injected via WithThrottleManager.
 	if r.throttleManager == nil {
 		r.throttleManager = throttle.NewManager()
@@ -490,6 +496,11 @@ func (r *Router) setupBackpressure(rt *route, fr config.FlatRoute, key string, l
 		fr.Route.Traffic.AdaptiveBackpressure != nil &&
 		fr.Route.Traffic.AdaptiveBackpressure.Enabled
 	hasAutoRetry := fr.Route.Retry != nil && fr.Route.Retry.AutoRetry429
+
+	// ProtocolPolicy.TransparentRetry overrides auto_retry_429 when explicitly set.
+	if fr.Route.Protocol != nil && fr.Route.Protocol.TransparentRetry != nil {
+		hasAutoRetry = *fr.Route.Protocol.TransparentRetry
+	}
 
 	if !hasAdaptive && !hasAutoRetry {
 		return

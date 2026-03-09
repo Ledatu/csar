@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/ledatu/csar/internal/apierror"
 	"github.com/ledatu/csar/internal/cors"
 	"github.com/ledatu/csar/internal/proxy"
 	"github.com/ledatu/csar/internal/resilience"
@@ -17,15 +19,44 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// ProtocolVersion is the CSAR wire protocol version.
+// Bump when breaking changes are made to header semantics.
+const ProtocolVersion = "1"
+
+// requestID extracts the request ID from the request using the configured header.
+func (r *Router) requestID(req *http.Request) string {
+	return req.Header.Get(r.reqIDHeader)
+}
+
 // ServeHTTP implements the http.Handler interface.
 // Pipeline: match route -> strip sensitive headers -> security inject -> throttle.Wait -> circuit_breaker -> proxy.Forward
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	// Emit protocol version on every response so SDK clients can detect compatibility.
+	w.Header().Set("X-CSAR-Protocol-Version", ProtocolVersion)
+
+	// Debug/traceability headers: generate X-Request-ID if not present.
+	reqIDHeader := r.reqIDHeader
+	requestID := req.Header.Get(reqIDHeader)
+	if requestID == "" {
+		requestID = uuid.New().String()
+		req.Header.Set(reqIDHeader, requestID)
+	}
+	w.Header().Set(reqIDHeader, requestID)
+
 	rt, captures := r.matchRoute(req.Method, req.URL.Path)
 	if rt == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprintf(w, `{"error":"no route matched","path":%q,"method":%q}`, req.URL.Path, req.Method)
+		apierror.New(apierror.CodeRouteNotFound, http.StatusNotFound,
+			"no route matched").WithDetail(req.Method+" "+req.URL.Path).
+			WithRequestID(requestID).Write(w)
 		return
+	}
+
+	// Emit route ID debug header when enabled.
+	if r.cfg.DebugHeaders != nil && r.cfg.DebugHeaders.Enabled {
+		emitRouteID := r.cfg.DebugHeaders.EmitRouteID == nil || *r.cfg.DebugHeaders.EmitRouteID
+		if emitRouteID {
+			w.Header().Set("X-CSAR-Route-ID", rt.routeKey)
+		}
 	}
 
 	// Apply path rewriting for regex routes (audit §3.2).
@@ -47,6 +78,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			ExposedHeaders:   rt.corsConfig.ExposedHeaders,
 			AllowCredentials: rt.corsConfig.AllowCredentials,
 			MaxAge:           rt.corsConfig.MaxAge,
+			RequestIDHeader:  r.reqIDHeader,
 		}
 
 		// For OPTIONS preflight, handle immediately without further pipeline.
@@ -76,9 +108,9 @@ func (r *Router) serveWithIPCheck(w http.ResponseWriter, req *http.Request, rt *
 			"client_ip", clientIP,
 			"route", rt.routeKey,
 		)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		fmt.Fprintf(w, `{"error":"access denied","client_ip":%q}`, clientIP)
+		apierror.New(apierror.CodeAccessDenied, http.StatusForbidden,
+			"access denied").WithDetail("client_ip: "+clientIP).
+			WithRequestID(r.requestID(req)).Write(w)
 		return
 	}
 
@@ -126,10 +158,9 @@ func (r *Router) serveAfterAuth(w http.ResponseWriter, req *http.Request, rt *ro
 		}
 
 		if r.authInjector == nil {
-			// Fail closed: should never happen (caught at init), but don't proxy without creds.
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprint(w, `{"error":"security injection required but not configured"}`)
+			apierror.New(apierror.CodeSecurityError, http.StatusInternalServerError,
+				"security injection required but not configured").
+				WithRequestID(r.requestID(req)).Write(w)
 			return
 		}
 
@@ -194,12 +225,37 @@ func (r *Router) serveAfterAuth(w http.ResponseWriter, req *http.Request, rt *ro
 func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *route) {
 	var totalWait time.Duration
 
-	// ── csar-ts observability: log client-reported RPS hint ──────────
+	// ── csar-ts observability: handle client-reported RPS hint ──────────
 	if clientLimit := req.Header.Get("X-CSAR-Client-Limit"); clientLimit != "" {
-		r.logger.Debug("client RPS hint received",
-			"X-CSAR-Client-Limit", clientLimit,
-			"route", rt.routeKey,
-		)
+		if r.metrics != nil {
+			r.metrics.RecordSDKClientLimitPresence(rt.routeKey)
+		}
+		clientLimitMode := ""
+		if rt.config.Traffic != nil {
+			clientLimitMode = rt.config.Traffic.ClientLimitMode
+		}
+		switch clientLimitMode {
+		case "enforce":
+			if rps, err := strconv.ParseFloat(clientLimit, 64); err == nil && rps > 0 {
+				if recv, ok := rt.throttler.(throttle.ClientHintReceiver); ok {
+					recv.ApplyClientHint(rps)
+				}
+			}
+			r.logger.Debug("client RPS hint enforced",
+				"X-CSAR-Client-Limit", clientLimit,
+				"route", rt.routeKey,
+			)
+		case "advisory":
+			r.logger.Info("client RPS hint (advisory)",
+				"X-CSAR-Client-Limit", clientLimit,
+				"route", rt.routeKey,
+			)
+		default:
+			r.logger.Debug("client RPS hint received",
+				"X-CSAR-Client-Limit", clientLimit,
+				"route", rt.routeKey,
+			)
+		}
 	}
 
 	// Step 0: Global throttle (fast in-memory counter, checked first)
@@ -211,12 +267,16 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 				"method", req.Method,
 				"error", err,
 			)
-			w.Header().Set("Content-Type", "application/json")
+			retryAfterSec := globalT.EstimateRetryAfter()
 			w.Header().Set("X-CSAR-Status", "throttled")
-			w.Header().Set("Retry-After", strconv.Itoa(globalT.EstimateRetryAfter()))
+			w.Header().Set("Retry-After", strconv.Itoa(retryAfterSec))
 			w.Header().Set("X-CSAR-Wait-MS", strconv.FormatInt(time.Since(waitStart).Milliseconds(), 10))
-			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprintf(w, `{"error":"global rate limit exceeded","detail":%q}`, err.Error())
+			if r.metrics != nil {
+				r.metrics.RecordSDKThrottled(rt.routeKey, "throttled")
+			}
+			apierror.New(apierror.CodeThrottled, http.StatusServiceUnavailable,
+				"global rate limit exceeded").WithRetryAfterMS(int64(retryAfterSec)*1000).
+				WithDetail(err.Error()).WithRequestID(r.requestID(req)).Write(w)
 			return
 		}
 		totalWait += time.Since(waitStart)
@@ -290,12 +350,15 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 						retryAfter = 1
 					}
 				}
-				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("X-CSAR-Status", "throttled")
 				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 				w.Header().Set("X-CSAR-Wait-MS", strconv.FormatInt(waitDur.Milliseconds(), 10))
-				w.WriteHeader(http.StatusServiceUnavailable)
-				fmt.Fprintf(w, `{"error":"service temporarily unavailable","detail":%q}`, err.Error())
+				if r.metrics != nil {
+					r.metrics.RecordSDKThrottled(rt.routeKey, "throttled")
+				}
+				apierror.New(apierror.CodeThrottled, http.StatusServiceUnavailable,
+					"service temporarily unavailable").WithRetryAfterMS(int64(retryAfter)*1000).
+					WithDetail(err.Error()).WithRequestID(r.requestID(req)).Write(w)
 				return
 			}
 
@@ -308,10 +371,25 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 	// Set X-CSAR-Wait-MS response header with actual wait duration.
 	// Also inject into the request context so the value survives through
 	// httputil.ReverseProxy (which replaces the ResponseWriter's header map).
-	if totalWait > 0 {
-		waitMS := strconv.FormatInt(totalWait.Milliseconds(), 10)
-		w.Header().Set("X-CSAR-Wait-MS", waitMS)
-		ctx := proxy.WithCSARHeaders(req.Context(), waitMS, "", "")
+	// Always inject protocol version into context for proxy passthrough.
+	// Always inject protocol version into context for proxy passthrough.
+	{
+		ctx := proxy.WithProtocolVersion(req.Context(), ProtocolVersion)
+		if totalWait > 0 {
+			// Honor per-route protocol policy for wait-MS emission.
+			emitWaitMS := true
+			if rt.config.Protocol != nil && rt.config.Protocol.EmitWaitMS != nil {
+				emitWaitMS = *rt.config.Protocol.EmitWaitMS
+			}
+			if emitWaitMS {
+				waitMS := strconv.FormatInt(totalWait.Milliseconds(), 10)
+				w.Header().Set("X-CSAR-Wait-MS", waitMS)
+				ctx = proxy.WithCSARHeaders(ctx, waitMS, "", "")
+				if r.metrics != nil {
+					r.metrics.RecordSDKWaitEmitted(rt.routeKey, float64(totalWait.Milliseconds()))
+				}
+			}
+		}
 		req = req.WithContext(ctx)
 	}
 
@@ -351,7 +429,6 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 			// (circuit was already open). If the proxy was called and
 			// returned 5xx, the response is already written to the client.
 			if !proxyCalled {
-				// csar-ts protocol: X-CSAR-Status with circuit breaker state.
 				cbState := rt.circuitBreaker.State()
 				csarStatus := "circuit_open"
 				if cbState == resilience.StateHalfOpen {
@@ -360,14 +437,16 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 				cbTimeout := rt.circuitBreaker.TimeoutDuration()
 				retryAfterSecs := int(cbTimeout.Seconds())
 				if retryAfterSecs < 1 {
-					retryAfterSecs = 1 // minimum: 1s (CB timeout was sub-second or zero)
+					retryAfterSecs = 1
 				}
-				retryAfter := strconv.Itoa(retryAfterSecs)
-				w.Header().Set("Content-Type", "application/json")
 				w.Header().Set("X-CSAR-Status", csarStatus)
-				w.Header().Set("Retry-After", retryAfter)
-				w.WriteHeader(http.StatusServiceUnavailable)
-				fmt.Fprintf(w, `{"error":"circuit breaker open","route":%q,"state":%q}`, rt.routeKey, csarStatus)
+				w.Header().Set("Retry-After", strconv.Itoa(retryAfterSecs))
+				if r.metrics != nil {
+					r.metrics.RecordSDKCircuitOpen(rt.routeKey)
+				}
+				apierror.New(apierror.CodeCircuitOpen, http.StatusServiceUnavailable,
+					"circuit breaker open").WithRetryAfterMS(int64(retryAfterSecs)*1000).
+					WithDetail(csarStatus).WithRequestID(r.requestID(req)).Write(w)
 			}
 		}
 		return

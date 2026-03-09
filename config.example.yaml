@@ -92,6 +92,27 @@ coordinator:
   # key_file: "/etc/csar/tls/router-client-key.pem"
   # # For dev only — allows plaintext gRPC (NEVER use in production):
   # allow_insecure: false
+  #
+  # --- Durable Invalidation Replay ---
+  # Number of token invalidation events buffered for replay on router reconnect.
+  # Prevents missed invalidations when a router temporarily disconnects.
+  # invalidation_buffer_size: 1000     # default: 1000, minimum: 100
+
+# --- Readiness Probes ---
+# Dependency-aware readiness endpoint for Kubernetes/orchestrator probes.
+# Checks coordinator stream, config source, and KMS reachability.
+# readiness:
+#   enabled: true                      # default: true
+#   path: "/readiness"                 # default: /readiness
+#   include_details: true              # include per-check status in JSON response
+
+# --- Debug & Traceability Headers ---
+# Emits X-Request-ID (generated/propagated) and X-CSAR-Route-ID for debugging.
+# Automatically disabled in security_policy.environment: "prod" unless explicitly enabled.
+# debug_headers:
+#   enabled: true                      # default: false
+#   emit_route_id: true                # emit X-CSAR-Route-ID with matched route key
+#   request_id_header: "X-Request-ID"  # header name for request correlation
 
 circuit_breakers:
   standard:
@@ -121,6 +142,8 @@ throttling_policies:
     max_wait: "30s"
     backend: "redis"      # distributed GCRA via Redis
     key: "seller:{query.seller_id}"   # per-entity dynamic key
+    # client_limit_mode: "advisory"   # "ignore" (default), "advisory", or "enforce"
+    #                                 # Controls X-CSAR-Client-Limit header handling
   vip-unlimited:
     rate: 100
     burst: 200
@@ -262,6 +285,12 @@ paths:
         max_attempts: 3
         backoff: "1s"
         max_backoff: "10s"
+      # --- Per-Route Protocol Policy ---
+      # Controls SDK protocol behavior for this specific route.
+      # x-csar-protocol:
+      #   emit_wait_ms: true           # emit X-CSAR-Wait-MS on success (default: true)
+      #   transparent_retry: true      # enable transparent 429 retry (default: from x-csar-retry)
+      #   emit_client_hint: false      # emit X-CSAR-Client-Limit guidance (default: global)
 
   # --- Single Credential (backward-compatible syntax) ---
   # x-csar-security as a single object still works — it is automatically

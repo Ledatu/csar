@@ -26,6 +26,9 @@ type Client struct {
 	throttleMgr  *throttle.ThrottleManager
 	authInjector *middleware.AuthInjector // may be nil if no auth is configured
 
+	// lastSeenVersion tracks the watermark for durable invalidation replay.
+	lastSeenVersion uint64
+
 	// Backoff config
 	initialBackoff time.Duration
 	maxBackoff     time.Duration
@@ -102,8 +105,9 @@ func (c *Client) Run(ctx context.Context) {
 // subscribe opens a single subscription stream and processes messages until error.
 func (c *Client) subscribe(ctx context.Context) error {
 	stream, err := c.coordClient.Subscribe(ctx, &csarv1.SubscribeRequest{
-		RouterId:      c.routerID,
-		RouterAddress: c.routerAddr,
+		RouterId:        c.routerID,
+		RouterAddress:   c.routerAddr,
+		LastSeenVersion: c.lastSeenVersion,
 	})
 	if err != nil {
 		return err
@@ -111,6 +115,7 @@ func (c *Client) subscribe(ctx context.Context) error {
 
 	c.logger.Info("subscribed to coordinator",
 		"router_id", c.routerID,
+		"last_seen_version", c.lastSeenVersion,
 	)
 
 	// Reset backoff on successful connection
@@ -118,6 +123,11 @@ func (c *Client) subscribe(ctx context.Context) error {
 		msg, err := stream.Recv()
 		if err != nil {
 			return err
+		}
+
+		// Track watermark for replay on reconnect.
+		if msg.Version > c.lastSeenVersion {
+			c.lastSeenVersion = msg.Version
 		}
 
 		c.logger.Debug("received coordinator update",

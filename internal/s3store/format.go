@@ -25,6 +25,12 @@ type TokenObject struct {
 
 	// Plaintext is the raw token value (passthrough mode).
 	Plaintext string `json:"plaintext,omitempty"`
+
+	// Metadata fields (optional, written by admin API).
+	UpdatedAt     string `json:"updated_at,omitempty"`
+	UpdatedBy     string `json:"updated_by,omitempty"`
+	Tenant        string `json:"tenant,omitempty"`
+	SchemaVersion int    `json:"schema_version,omitempty"`
 }
 
 // ParseTokenObject parses an S3 object body into a TokenObject.
@@ -45,4 +51,13 @@ func ParseTokenObject(data []byte) (TokenObject, error) {
 	}
 
 	return obj, nil
+}
+
+// MarshalTokenObject serializes a TokenObject to JSON suitable for S3 storage.
+func MarshalTokenObject(obj TokenObject) ([]byte, error) {
+	data, err := json.Marshal(obj)
+	if err != nil {
+		return nil, fmt.Errorf("s3store: marshal token object: %w", err)
+	}
+	return data, nil
 }

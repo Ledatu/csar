@@ -1,5 +1,5 @@
-// Package s3store provides a client for reading token objects from
-// S3-compatible object storage (e.g. Yandex Cloud Object Storage).
+// Package s3store provides a client for reading and writing token objects
+// in S3-compatible object storage (e.g. Yandex Cloud Object Storage).
 //
 // Two authentication modes are supported:
 //   - "static": AWS Signature V4 via access_key_id + secret_access_key.
@@ -8,6 +8,7 @@
 package s3store
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"fmt"
@@ -137,6 +138,25 @@ func (c *Client) GetObject(ctx context.Context, tokenRef string) (ObjectEntry, e
 	return c.getObjectSDK(ctx, key, tokenRef)
 }
 
+// PutObject writes an object to S3 under the configured prefix.
+// Returns the ETag of the written object.
+func (c *Client) PutObject(ctx context.Context, tokenRef string, body []byte) (string, error) {
+	key := c.cfg.Prefix + tokenRef
+	if c.iamAuth {
+		return c.putObjectIAM(ctx, key, body)
+	}
+	return c.putObjectSDK(ctx, key, body)
+}
+
+// DeleteObject removes an object from S3 by token_ref.
+func (c *Client) DeleteObject(ctx context.Context, tokenRef string) error {
+	key := c.cfg.Prefix + tokenRef
+	if c.iamAuth {
+		return c.deleteObjectIAM(ctx, key)
+	}
+	return c.deleteObjectSDK(ctx, key)
+}
+
 // Close releases resources.
 func (c *Client) Close() error {
 	if c.httpClient != nil {
@@ -215,6 +235,35 @@ func (c *Client) getObjectSDK(ctx context.Context, key, tokenRef string) (Object
 		Body:     body,
 		ETag:     etag,
 	}, nil
+}
+
+func (c *Client) putObjectSDK(ctx context.Context, key string, body []byte) (string, error) {
+	resp, err := c.s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(c.cfg.Bucket),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(body),
+		ContentType: aws.String("application/json"),
+	})
+	if err != nil {
+		return "", fmt.Errorf("s3store: put object %q: %w", key, err)
+	}
+
+	etag := ""
+	if resp.ETag != nil {
+		etag = *resp.ETag
+	}
+	return etag, nil
+}
+
+func (c *Client) deleteObjectSDK(ctx context.Context, key string) error {
+	_, err := c.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(c.cfg.Bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("s3store: delete object %q: %w", key, err)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -375,6 +424,73 @@ func (c *Client) getObjectIAM(ctx context.Context, key, tokenRef string) (Object
 		Body:     body,
 		ETag:     etag,
 	}, nil
+}
+
+// putObjectIAM uploads an object via raw HTTP with IAM auth.
+func (c *Client) putObjectIAM(ctx context.Context, key string, body []byte) (string, error) {
+	token, err := c.resolver.ResolveToken(ctx)
+	if err != nil {
+		return "", fmt.Errorf("s3store: auth: %w", err)
+	}
+
+	reqURL, err := c.objectURL(key)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, reqURL, bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("s3store: build put request: %w", err)
+	}
+	req.Header.Set("X-YaCloud-SubjectToken", token)
+	req.Header.Set("Content-Type", "application/json")
+	req.ContentLength = int64(len(body))
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("s3store: put %q HTTP: %w", key, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", fmt.Errorf("s3store: put %q: HTTP %d: %s", key, resp.StatusCode, string(b))
+	}
+
+	return resp.Header.Get("ETag"), nil
+}
+
+// deleteObjectIAM deletes an object via raw HTTP with IAM auth.
+func (c *Client) deleteObjectIAM(ctx context.Context, key string) error {
+	token, err := c.resolver.ResolveToken(ctx)
+	if err != nil {
+		return fmt.Errorf("s3store: auth: %w", err)
+	}
+
+	reqURL, err := c.objectURL(key)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, reqURL, nil)
+	if err != nil {
+		return fmt.Errorf("s3store: build delete request: %w", err)
+	}
+	req.Header.Set("X-YaCloud-SubjectToken", token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("s3store: delete %q HTTP: %w", key, err)
+	}
+	defer resp.Body.Close()
+
+	// S3 returns 204 No Content on successful delete.
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return fmt.Errorf("s3store: delete %q: HTTP %d: %s", key, resp.StatusCode, string(b))
+	}
+
+	return nil
 }
 
 // ---------------------------------------------------------------------------

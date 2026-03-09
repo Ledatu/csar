@@ -367,7 +367,7 @@ func (v *JWTValidator) getJWKS(jwksURL string, cacheTTL time.Duration) ([]JSONWe
 func (v *JWTValidator) reject(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	fmt.Fprintf(w, `{"error":%q}`, message)
+	fmt.Fprintf(w, `{"code":"auth_failed","status":%d,"message":%q}`, status, message)
 }
 
 // validateAudience checks if the token audience matches any of the expected audiences.

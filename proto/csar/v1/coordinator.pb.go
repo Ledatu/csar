@@ -30,9 +30,14 @@ type SubscribeRequest struct {
 	// router_address is the router's network address for peer discovery.
 	RouterAddress string `protobuf:"bytes,2,opt,name=router_address,json=routerAddress,proto3" json:"router_address,omitempty"`
 	// metadata contains arbitrary key-value pairs (e.g. version, region).
-	Metadata      map[string]string `protobuf:"bytes,3,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Metadata map[string]string `protobuf:"bytes,3,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// last_seen_version is the watermark of the last ConfigUpdate version
+	// processed by this router. On reconnect, the coordinator replays any
+	// token invalidation events with version > last_seen_version.
+	// Zero means the router has no prior state (fresh start).
+	LastSeenVersion uint64 `protobuf:"varint,4,opt,name=last_seen_version,json=lastSeenVersion,proto3" json:"last_seen_version,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *SubscribeRequest) Reset() {
@@ -84,6 +89,13 @@ func (x *SubscribeRequest) GetMetadata() map[string]string {
 		return x.Metadata
 	}
 	return nil
+}
+
+func (x *SubscribeRequest) GetLastSeenVersion() uint64 {
+	if x != nil {
+		return x.LastSeenVersion
+	}
+	return 0
 }
 
 // ConfigUpdate is a streamed message from Coordinator to Router.
@@ -205,9 +217,12 @@ type TokenInvalidation struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// token_refs lists the token reference names to invalidate.
 	// If empty, all tokens should be invalidated.
-	TokenRefs     []string `protobuf:"bytes,1,rep,name=token_refs,json=tokenRefs,proto3" json:"token_refs,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	TokenRefs []string `protobuf:"bytes,1,rep,name=token_refs,json=tokenRefs,proto3" json:"token_refs,omitempty"`
+	// invalidation_version is a monotonic version for this invalidation event.
+	// Routers track this to detect missed invalidations on reconnect.
+	InvalidationVersion uint64 `protobuf:"varint,2,opt,name=invalidation_version,json=invalidationVersion,proto3" json:"invalidation_version,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *TokenInvalidation) Reset() {
@@ -245,6 +260,13 @@ func (x *TokenInvalidation) GetTokenRefs() []string {
 		return x.TokenRefs
 	}
 	return nil
+}
+
+func (x *TokenInvalidation) GetInvalidationVersion() uint64 {
+	if x != nil {
+		return x.InvalidationVersion
+	}
+	return 0
 }
 
 // RouteSnapshot contains the full set of routes.
@@ -730,11 +752,12 @@ var File_proto_csar_v1_coordinator_proto protoreflect.FileDescriptor
 
 const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\n" +
-	"\x1fproto/csar/v1/coordinator.proto\x12\acsar.v1\x1a\x1egoogle/protobuf/duration.proto\"\xd8\x01\n" +
+	"\x1fproto/csar/v1/coordinator.proto\x12\acsar.v1\x1a\x1egoogle/protobuf/duration.proto\"\x84\x02\n" +
 	"\x10SubscribeRequest\x12\x1b\n" +
 	"\trouter_id\x18\x01 \x01(\tR\brouterId\x12%\n" +
 	"\x0erouter_address\x18\x02 \x01(\tR\rrouterAddress\x12C\n" +
-	"\bmetadata\x18\x03 \x03(\v2'.csar.v1.SubscribeRequest.MetadataEntryR\bmetadata\x1a;\n" +
+	"\bmetadata\x18\x03 \x03(\v2'.csar.v1.SubscribeRequest.MetadataEntryR\bmetadata\x12*\n" +
+	"\x11last_seen_version\x18\x04 \x01(\x04R\x0flastSeenVersion\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xa2\x02\n" +
@@ -743,10 +766,11 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x0eroute_snapshot\x18\x02 \x01(\v2\x16.csar.v1.RouteSnapshotH\x00R\rrouteSnapshot\x12E\n" +
 	"\x10quota_assignment\x18\x04 \x01(\v2\x18.csar.v1.QuotaAssignmentH\x00R\x0fquotaAssignment\x12K\n" +
 	"\x12token_invalidation\x18\x05 \x01(\v2\x1a.csar.v1.TokenInvalidationH\x00R\x11tokenInvalidationB\b\n" +
-	"\x06updateJ\x04\b\x03\x10\x04R\x13secret_distribution\"2\n" +
+	"\x06updateJ\x04\b\x03\x10\x04R\x13secret_distribution\"e\n" +
 	"\x11TokenInvalidation\x12\x1d\n" +
 	"\n" +
-	"token_refs\x18\x01 \x03(\tR\ttokenRefs\"=\n" +
+	"token_refs\x18\x01 \x03(\tR\ttokenRefs\x121\n" +
+	"\x14invalidation_version\x18\x02 \x01(\x04R\x13invalidationVersion\"=\n" +
 	"\rRouteSnapshot\x12,\n" +
 	"\x06routes\x18\x01 \x03(\v2\x14.csar.v1.RouteConfigR\x06routes\"\x89\x02\n" +
 	"\vRouteConfig\x12\x19\n" +

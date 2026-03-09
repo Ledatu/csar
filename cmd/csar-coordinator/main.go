@@ -28,6 +28,7 @@ import (
 
 	"github.com/ledatu/csar/internal/configsource"
 	"github.com/ledatu/csar/internal/coordinator"
+	"github.com/ledatu/csar/internal/kms"
 	"github.com/ledatu/csar/internal/logging"
 	"github.com/ledatu/csar/internal/s3store"
 	"github.com/ledatu/csar/internal/statestore"
@@ -99,6 +100,32 @@ func main() {
 	configS3IAMToken := flag.String("config-s3-iam-token", "", "IAM token for config S3 (iam_token auth)")
 	configS3OAuthToken := flag.String("config-s3-oauth-token", "", "OAuth token for config S3 (oauth_token auth)")
 	configS3SAKeyFile := flag.String("config-s3-sa-key-file", "", "SA key JSON file for config S3 (service_account auth)")
+
+	// Admin API flags
+	adminEnabled := flag.Bool("admin-enabled", false, "enable the admin HTTP API for token lifecycle management")
+	adminListen := flag.String("admin-listen", ":9443", "admin API listen address")
+	adminTLSCert := flag.String("admin-tls-cert", "", "path to TLS cert for admin API (PEM)")
+	adminTLSKey := flag.String("admin-tls-key", "", "path to TLS key for admin API (PEM)")
+	adminClientCA := flag.String("admin-client-ca", "", "path to client CA for admin API mTLS (PEM)")
+	adminJWKSUrl := flag.String("admin-jwks-url", "", "JWKS URL for admin JWT validation (from csar-auth)")
+	adminIssuer := flag.String("admin-issuer", "", "expected JWT issuer for admin API")
+	adminAudience := flag.String("admin-audience", "csar-coordinator-admin", "expected JWT audience for admin API")
+	adminS3ManagesEncryptionStr := flag.String("admin-s3-manages-encryption", "", "REQUIRED: 'true' = S3 SSE handles encryption, 'false' = CSAR KMS encrypts before S3 write")
+	adminMaxTokenSize := flag.Int64("admin-max-token-size", 16384, "maximum token value size in bytes")
+	adminRequestTimeout := flag.Duration("admin-request-timeout", 5*time.Second, "per-request timeout for admin API")
+	adminEnforceTokenPrefix := flag.Bool("admin-enforce-token-prefix", true, "enforce token_prefix claim in JWT for namespace RBAC")
+	adminEnforceAllowedKMSKeys := flag.Bool("admin-enforce-allowed-kms-keys", true, "enforce allowed_kms_keys claim in JWT")
+	adminAllowedKMSKeys := flag.String("admin-allowed-kms-keys", "", "server-side allowed KMS key IDs (comma-separated)")
+	adminAllowInsecure := flag.Bool("admin-allow-insecure", false, "allow admin API to start without TLS (local development only)")
+
+	// KMS flags for coordinator (used when admin API encrypts tokens)
+	adminKMSProvider := flag.String("admin-kms-provider", "local", "KMS provider for admin API encryption: local, yandexapi")
+	adminKMSLocalKeys := flag.String("admin-kms-local-keys", "", "local KMS keys (keyID=passphrase,keyID2=passphrase2)")
+	adminKMSYandexEndpoint := flag.String("admin-kms-yandex-endpoint", "", "Yandex KMS API endpoint")
+	adminKMSYandexAuthMode := flag.String("admin-kms-yandex-auth-mode", "metadata", "Yandex KMS auth mode")
+	adminKMSYandexIAMToken := flag.String("admin-kms-yandex-iam-token", "", "Yandex KMS IAM token")
+	adminKMSYandexOAuthToken := flag.String("admin-kms-yandex-oauth-token", "", "Yandex KMS OAuth token")
+	adminKMSYandexSAKeyFile := flag.String("admin-kms-yandex-sa-key-file", "", "Yandex KMS service account key file")
 
 	flag.Parse()
 
@@ -442,6 +469,109 @@ func main() {
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	defer ctxCancel()
 
+	// Start admin API server (if enabled).
+	var adminSrv *coordinator.AdminServer
+	if *adminEnabled {
+		var s3ManagesEncryption *bool
+		switch strings.ToLower(strings.TrimSpace(*adminS3ManagesEncryptionStr)) {
+		case "true":
+			v := true
+			s3ManagesEncryption = &v
+		case "false":
+			v := false
+			s3ManagesEncryption = &v
+		case "":
+			logger.Error("--admin-s3-manages-encryption is REQUIRED when admin API is enabled. " +
+				"Set to 'true' (S3 SSE handles encryption) or 'false' (CSAR KMS encrypts before S3 write).")
+			os.Exit(1)
+		default:
+			logger.Error("--admin-s3-manages-encryption must be 'true' or 'false'",
+				"value", *adminS3ManagesEncryptionStr)
+			os.Exit(1)
+		}
+
+		var allowedKeys []string
+		if *adminAllowedKMSKeys != "" {
+			for _, k := range strings.Split(*adminAllowedKMSKeys, ",") {
+				k = strings.TrimSpace(k)
+				if k != "" {
+					allowedKeys = append(allowedKeys, k)
+				}
+			}
+		}
+
+		adminCfg := coordinator.AdminAPIConfig{
+			Enabled:             true,
+			ListenAddr:          *adminListen,
+			S3ManagesEncryption: s3ManagesEncryption,
+			AllowInsecure:       *adminAllowInsecure,
+			TLS: coordinator.AdminTLSConfig{
+				CertFile:     *adminTLSCert,
+				KeyFile:      *adminTLSKey,
+				ClientCAFile: *adminClientCA,
+			},
+			Auth: coordinator.AdminAuthConfig{
+				JWKSUrl:   *adminJWKSUrl,
+				Issuer:    *adminIssuer,
+				Audiences: strings.Split(*adminAudience, ","),
+			},
+			Authorization: coordinator.AdminAuthzConfig{
+				EnforceTokenPrefixClaim: *adminEnforceTokenPrefix,
+				EnforceAllowedKMSKeys:   *adminEnforceAllowedKMSKeys,
+				AllowedKMSKeys:          allowedKeys,
+			},
+			Limits: coordinator.AdminLimitsConfig{
+				MaxTokenSize:   *adminMaxTokenSize,
+				RequestTimeout: *adminRequestTimeout,
+			},
+		}
+
+		if err := adminCfg.Validate(); err != nil {
+			logger.Error("admin API configuration invalid", "error", err)
+			os.Exit(1)
+		}
+
+		// Ensure we have a mutable token store.
+		mutableStore, ok := tokenStore.(coordinator.MutableTokenStore)
+		if !ok || tokenStore == nil {
+			logger.Error("admin API requires a mutable token store backend (currently only S3 is supported). " +
+				"Use --token-source=s3 with --s3-bucket.")
+			os.Exit(1)
+		}
+
+		// Initialize KMS provider for admin API (only needed when S3 doesn't manage encryption).
+		var kmsProvider kms.Provider
+		if !*s3ManagesEncryption {
+			var err error
+			kmsProvider, err = initCoordinatorKMS(*adminKMSProvider, *adminKMSLocalKeys,
+				*adminKMSYandexEndpoint, *adminKMSYandexAuthMode,
+				*adminKMSYandexIAMToken, *adminKMSYandexOAuthToken,
+				*adminKMSYandexSAKeyFile)
+			if err != nil {
+				logger.Error("failed to initialize KMS provider for admin API", "error", err)
+				os.Exit(1)
+			}
+			defer kmsProvider.Close()
+			logger.Info("KMS provider initialized for admin API", "provider", kmsProvider.Name())
+		}
+
+		adminSrv = coordinator.NewAdminServer(
+			adminCfg, authSvc, coord, mutableStore, kmsProvider,
+			logger.With("component", "admin_api"),
+		)
+
+		go func() {
+			if err := adminSrv.ListenAndServe(); err != nil {
+				logger.Error("admin API server error", "error", err)
+			}
+		}()
+
+		logger.Info("admin API server started",
+			"listen", *adminListen,
+			"s3_manages_encryption", *s3ManagesEncryption,
+		)
+	}
+
 	if refresher != nil {
 		go refresher.RunPeriodicRefresh(ctx, refreshInterval, authSvc, coord)
 		logger.Info("token store refresh loop started", "interval", refreshInterval)
@@ -461,6 +591,9 @@ func main() {
 
 		logger.Info("received signal, shutting down", "signal", sig)
 		ctxCancel() // stop refresh loop
+		if adminSrv != nil {
+			adminSrv.Shutdown() //nolint:errcheck
+		}
 		if tokenStore != nil {
 			tokenStore.Close()
 		}
@@ -665,4 +798,55 @@ func loadCoordinatorTokenFile(path string) (map[string]coordinator.TokenEntry, e
 	}
 
 	return entries, nil
+}
+
+// initCoordinatorKMS creates a KMS provider for the coordinator admin API.
+func initCoordinatorKMS(
+	provider, localKeys string,
+	yandexEndpoint, yandexAuthMode, yandexIAMToken, yandexOAuthToken, yandexSAKeyFile string,
+) (kms.Provider, error) {
+	switch provider {
+	case "local":
+		if localKeys == "" {
+			return nil, fmt.Errorf("--admin-kms-local-keys is required when --admin-kms-provider=local")
+		}
+		passphrases, err := parseLocalKeys(localKeys)
+		if err != nil {
+			return nil, err
+		}
+		return kms.NewLocalProvider(passphrases)
+
+	case "yandexapi":
+		yCfg := kms.YandexAPIConfig{
+			Endpoint:   yandexEndpoint,
+			AuthMode:   yandexAuthMode,
+			IAMToken:   logging.NewSecret(yandexIAMToken),
+			OAuthToken: logging.NewSecret(yandexOAuthToken),
+			SAKeyFile:  yandexSAKeyFile,
+		}
+		return kms.NewYandexAPIProvider(yCfg)
+
+	default:
+		return nil, fmt.Errorf("unknown admin KMS provider %q; supported: \"local\", \"yandexapi\"", provider)
+	}
+}
+
+// parseLocalKeys parses "key1=pass1,key2=pass2" into a map.
+func parseLocalKeys(raw string) (map[string]string, error) {
+	result := make(map[string]string)
+	for _, pair := range strings.Split(raw, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return nil, fmt.Errorf("invalid key=passphrase pair: %q", pair)
+		}
+		result[parts[0]] = parts[1]
+	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("no valid key=passphrase pairs found in %q", raw)
+	}
+	return result, nil
 }

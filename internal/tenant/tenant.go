@@ -100,7 +100,7 @@ func (tr *Router) Proxy(cfg Config, fallbackHandler http.Handler) http.Handler {
 			)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
-			fmt.Fprintf(w, `{"error":"no backend for tenant","tenant":%q}`, tenantID)
+			fmt.Fprintf(w, `{"code":"tenant_not_found","status":404,"message":"no backend for tenant","detail":%q}`, tenantID)
 			return
 		}
 
@@ -151,7 +151,7 @@ func (tr *Router) getOrCreateProxy(targetURL string) (*httputil.ReverseProxy, er
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadGateway)
-			fmt.Fprintf(w, `{"error":"tenant upstream error","detail":%q}`, err.Error())
+			fmt.Fprintf(w, `{"code":"upstream_error","status":502,"message":"tenant upstream error","detail":%q}`, err.Error())
 		},
 	}
 

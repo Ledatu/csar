@@ -66,6 +66,8 @@
       "additionalProperties": { "$ref": "#/$defs/AuthValidateConfigObject" }
     },
     "global_throttle": { "$ref": "#/$defs/GlobalThrottleConfig" },
+    "readiness": { "$ref": "#/$defs/ReadinessConfig" },
+    "debug_headers": { "$ref": "#/$defs/DebugHeadersConfig" },
     "paths": {
       "type": "object",
       "description": "Route definitions using OpenAPI-style x-csar-* extensions. Keys are URL path patterns.",
@@ -141,6 +143,12 @@
           "type": "boolean",
           "description": "Permit plaintext gRPC to the coordinator. Development only.",
           "default": false
+        },
+        "invalidation_buffer_size": {
+          "type": "integer",
+          "description": "Number of token invalidation events to buffer for replay on router reconnect.",
+          "default": 1000,
+          "minimum": 100
         }
       }
     },
@@ -409,6 +417,12 @@
           "type": "array",
           "description": "Header-based throttle policy switching for VIP clients.",
           "items": { "$ref": "#/$defs/VIPOverride" }
+        },
+        "client_limit_mode": {
+          "type": "string",
+          "description": "How to handle X-CSAR-Client-Limit header from SDK clients.",
+          "enum": ["ignore", "advisory", "enforce"],
+          "default": "ignore"
         }
       }
     },
@@ -580,7 +594,13 @@
           "description": "Header-based throttle policy switching for VIP clients.",
           "items": { "$ref": "#/$defs/VIPOverride" }
         },
-        "adaptive_backpressure": { "$ref": "#/$defs/AdaptiveBackpressureConfig" }
+        "adaptive_backpressure": { "$ref": "#/$defs/AdaptiveBackpressureConfig" },
+        "client_limit_mode": {
+          "type": "string",
+          "description": "How to handle X-CSAR-Client-Limit header from SDK clients.",
+          "enum": ["ignore", "advisory", "enforce"],
+          "default": "ignore"
+        }
       }
     },
     "AdaptiveBackpressureConfig": {
@@ -1027,7 +1047,8 @@
           "type": "integer",
           "description": "Maximum response body size (bytes) for DLP/retry buffering. Prevents DoS. Default: 0 (unlimited).",
           "minimum": 0
-        }
+        },
+        "x-csar-protocol": { "$ref": "#/$defs/ProtocolPolicyConfig" }
       }
     },
     "PathConfig": {
@@ -1042,6 +1063,69 @@
         "patch": { "$ref": "#/$defs/RouteConfig" },
         "head": { "$ref": "#/$defs/RouteConfig" },
         "options": { "$ref": "#/$defs/RouteConfig" }
+      }
+    },
+    "ReadinessConfig": {
+      "type": "object",
+      "description": "Readiness probe configuration with dependency health checks.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable the readiness endpoint.",
+          "default": true
+        },
+        "path": {
+          "type": "string",
+          "description": "HTTP path for the readiness probe.",
+          "default": "/readiness"
+        },
+        "include_details": {
+          "type": "boolean",
+          "description": "Include per-check details in the response body.",
+          "default": true
+        }
+      }
+    },
+    "DebugHeadersConfig": {
+      "type": "object",
+      "description": "Debug and traceability headers. Automatically disabled in prod unless explicitly enabled.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable debug headers.",
+          "default": false
+        },
+        "emit_route_id": {
+          "type": "boolean",
+          "description": "Emit X-CSAR-Route-ID header on responses.",
+          "default": true
+        },
+        "request_id_header": {
+          "type": "string",
+          "description": "Header name for request ID propagation.",
+          "default": "X-Request-ID"
+        }
+      }
+    },
+    "ProtocolPolicyConfig": {
+      "type": "object",
+      "description": "Per-route SDK protocol behavior policy.",
+      "additionalProperties": false,
+      "properties": {
+        "emit_wait_ms": {
+          "type": "boolean",
+          "description": "Emit X-CSAR-Wait-MS on successful responses for this route."
+        },
+        "transparent_retry": {
+          "type": "boolean",
+          "description": "Enable transparent upstream 429 retry for this route."
+        },
+        "emit_client_hint": {
+          "type": "boolean",
+          "description": "Reserved for future use; not yet implemented. Whether the server should emit X-CSAR-Client-Limit guidance."
+        }
       }
     }
   }

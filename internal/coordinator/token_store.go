@@ -37,6 +37,26 @@ type TokenStore interface {
 	Close() error
 }
 
+// TokenMetadata holds optional metadata written alongside a token object.
+type TokenMetadata struct {
+	UpdatedBy string
+	Tenant    string
+}
+
+// MutableTokenStore extends TokenStore with write operations for the
+// admin API. Not all backends need to support mutations — only those
+// used with the coordinator admin token lifecycle API.
+type MutableTokenStore interface {
+	TokenStore
+
+	// UpsertToken creates or replaces a token in the backing store.
+	// Returns the new version (e.g. S3 ETag) on success.
+	UpsertToken(ctx context.Context, ref string, entry TokenEntry, meta TokenMetadata) (version string, err error)
+
+	// DeleteToken removes a token from the backing store.
+	DeleteToken(ctx context.Context, ref string) error
+}
+
 // ---------------------------------------------------------------------------
 // TokenRefresher — backend-agnostic periodic poll + diff
 // ---------------------------------------------------------------------------

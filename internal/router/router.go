@@ -80,6 +80,7 @@ type Router struct {
 	globalCIDRs      []*net.IPNet            // parsed global access_control.allow_cidrs
 	hasGlobalACL     bool                    // true if global access_control is configured
 	globalTrustProxy bool                    // global default for trust_proxy (from access_control)
+	reqIDHeader      string                  // resolved request ID header name (default: "X-Request-ID")
 }
 
 // GetThrottler returns the throttler for a given route key (for observability).

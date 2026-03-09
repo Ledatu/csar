@@ -80,6 +80,83 @@ Each request passes through these stages in order:
 | **csar-helper CLI** | Companion tool: `init` (config scaffolding), `validate`, `inspect` (resolved config with source tracing), `simulate` (dry-run route matching), `bench` (HTTP load testing with live TUI), `dev-jwks` (local JWKS server), `keys` (key generation, JWKS conversion, JWT issuing), `db init`/`migrate`, `token encrypt`. |
 | **Hardened Defaults** | Non-root Docker image, server timeouts, `MaxHeaderBytes`, TLS 1.3 for coordinator, fail-closed auth, ReDoS-safe route patterns. |
 
+## Wire Protocol
+
+CSAR implements a versioned wire protocol for SDK clients. Every response includes:
+
+- `X-CSAR-Protocol-Version: 1` — protocol version for SDK compatibility detection
+- `X-CSAR-Status` — present only on CSAR-originated errors (`throttled`, `circuit_open`, `circuit_half_open`, `backpressure`)
+- `X-CSAR-Wait-MS` — milliseconds spent in CSAR's internal queue
+- `Retry-After` — standard HTTP retry hint (seconds)
+
+See [`docs/PROTOCOL_SPEC.md`](docs/PROTOCOL_SPEC.md) for the complete specification, error codes, and SDK compatibility matrix.
+
+## Health & Readiness
+
+CSAR exposes two probe endpoints:
+
+| Endpoint | Purpose | Response |
+|---|---|---|
+| `/health` | Liveness probe | `{"status":"ok","version":"..."}` — always returns 200 |
+| `/readiness` | Readiness probe | `{"status":"ready\|degraded\|not_ready","version":"...","checks":{...}}` — returns 503 when not ready |
+
+Readiness checks verify:
+- **Router**: coordinator stream, config source, KMS reachability
+- **Coordinator**: token backend, state store, admin API TLS
+
+Configure via:
+
+```yaml
+readiness:
+  enabled: true
+  path: "/readiness"
+  include_details: true
+```
+
+## Debug Headers & Traceability
+
+When `debug_headers` is enabled, CSAR generates/propagates request IDs and emits route identifiers for debugging:
+
+- `X-Request-ID` — generated (UUID) if not present in the inbound request; propagated to upstream and response
+- `X-CSAR-Route-ID` — matched route key (e.g. `GET:/api/v1/products`)
+
+```yaml
+debug_headers:
+  enabled: true
+  emit_route_id: true
+  request_id_header: "X-Request-ID"
+```
+
+Both headers are automatically added to the CORS `Access-Control-Expose-Headers` list.
+
+## Error Response Format
+
+All CSAR-originated error responses use a stable JSON schema:
+
+```json
+{
+  "code": "throttled",
+  "status": 503,
+  "message": "service temporarily unavailable",
+  "retry_after_ms": 5000,
+  "request_id": "abc-123-def"
+}
+```
+
+Standard error codes: `route_not_found`, `access_denied`, `auth_failed`, `throttled`, `circuit_open`, `backpressure`, `upstream_error`, `no_healthy_upstream`, `tenant_not_found`, `response_too_large`. See [`docs/PROTOCOL_SPEC.md`](docs/PROTOCOL_SPEC.md) for details.
+
+## SDK Metrics
+
+CSAR exposes SDK-oriented Prometheus metrics for monitoring protocol behavior:
+
+| Metric | Type | Labels | Description |
+|---|---|---|---|
+| `csar_sdk_throttled_responses_total` | counter | route, status_value | CSAR-originated 503 responses |
+| `csar_sdk_wait_emitted_ms` | histogram | route | X-CSAR-Wait-MS values on success |
+| `csar_sdk_backpressure_retries_total` | counter | route | Transparent upstream 429 retries |
+| `csar_sdk_circuit_open_responses_total` | counter | route | Circuit-breaker 503 responses |
+| `csar_sdk_client_limit_presence_total` | counter | route | Requests with X-CSAR-Client-Limit |
+
 ## Quick Start
 
 ### Prerequisites

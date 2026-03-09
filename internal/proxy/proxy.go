@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/ledatu/csar/internal/apierror"
 )
 
 // ── Context-based header passthrough ─────────────────────────────────
@@ -23,14 +25,15 @@ import (
 type csarCtxKey struct{ name string }
 
 var (
-	ctxKeyWaitMS    = csarCtxKey{"X-CSAR-Wait-MS"}
-	ctxKeyStatus    = csarCtxKey{"X-CSAR-Status"}
-	ctxKeyRetryAftr = csarCtxKey{"Retry-After"}
+	ctxKeyWaitMS      = csarCtxKey{"X-CSAR-Wait-MS"}
+	ctxKeyStatus      = csarCtxKey{"X-CSAR-Status"}
+	ctxKeyRetryAftr   = csarCtxKey{"Retry-After"}
+	ctxKeyProtoVer    = csarCtxKey{"X-CSAR-Protocol-Version"}
 )
 
-// WithCSARHeaders stores X-CSAR-Wait-MS, X-CSAR-Status, and Retry-After
-// values in the request context so they survive the ReverseProxy round-trip.
-// Empty values are ignored.
+// WithCSARHeaders stores X-CSAR-Wait-MS, X-CSAR-Status, Retry-After, and
+// X-CSAR-Protocol-Version values in the request context so they survive
+// the ReverseProxy round-trip. Empty values are ignored.
 func WithCSARHeaders(ctx context.Context, waitMS, status, retryAfter string) context.Context {
 	if waitMS != "" {
 		ctx = context.WithValue(ctx, ctxKeyWaitMS, waitMS)
@@ -40,6 +43,14 @@ func WithCSARHeaders(ctx context.Context, waitMS, status, retryAfter string) con
 	}
 	if retryAfter != "" {
 		ctx = context.WithValue(ctx, ctxKeyRetryAftr, retryAfter)
+	}
+	return ctx
+}
+
+// WithProtocolVersion stores the protocol version in context for proxy passthrough.
+func WithProtocolVersion(ctx context.Context, version string) context.Context {
+	if version != "" {
+		ctx = context.WithValue(ctx, ctxKeyProtoVer, version)
 	}
 	return ctx
 }
@@ -208,14 +219,18 @@ func (rp *ReverseProxy) modifyResponse(resp *http.Response) error {
 	if v, ok := ctx.Value(ctxKeyRetryAftr).(string); ok && v != "" {
 		resp.Header.Set("Retry-After", v)
 	}
+	if v, ok := ctx.Value(ctxKeyProtoVer).(string); ok && v != "" {
+		resp.Header.Set("X-CSAR-Protocol-Version", v)
+	}
 	return nil
 }
 
 // errorHandler handles errors from the upstream.
 func (rp *ReverseProxy) errorHandler(w http.ResponseWriter, r *http.Request, err error) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusBadGateway)
-	fmt.Fprintf(w, `{"error":"upstream error","detail":%q}`, err.Error())
+	requestID := r.Header.Get("X-Request-ID")
+	apierror.New(apierror.CodeUpstreamError, http.StatusBadGateway,
+		"upstream error").WithDetail(err.Error()).
+		WithRequestID(requestID).Write(w)
 }
 
 // Target returns the upstream target URL.

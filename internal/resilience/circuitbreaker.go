@@ -102,7 +102,7 @@ func (cb *CircuitBreaker) Wrap(next http.Handler) http.Handler {
 		if err := cb.beforeRequest(); err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			fmt.Fprintf(w, `{"error":"circuit breaker open","breaker":%q,"state":%q}`, cb.name, cb.State())
+			fmt.Fprintf(w, `{"code":"circuit_open","status":503,"message":"circuit breaker open","detail":%q}`, cb.State())
 			return
 		}
 

@@ -28,6 +28,12 @@ message SubscribeRequest {
 
   // metadata contains arbitrary key-value pairs (e.g. version, region).
   map<string, string> metadata = 3;
+
+  // last_seen_version is the watermark of the last ConfigUpdate version
+  // processed by this router. On reconnect, the coordinator replays any
+  // token invalidation events with version > last_seen_version.
+  // Zero means the router has no prior state (fresh start).
+  uint64 last_seen_version = 4;
 }
 
 // ConfigUpdate is a streamed message from Coordinator to Router.
@@ -60,6 +66,10 @@ message TokenInvalidation {
   // token_refs lists the token reference names to invalidate.
   // If empty, all tokens should be invalidated.
   repeated string token_refs = 1;
+
+  // invalidation_version is a monotonic version for this invalidation event.
+  // Routers track this to detect missed invalidations on reconnect.
+  uint64 invalidation_version = 2;
 }
 
 // RouteSnapshot contains the full set of routes.

@@ -33,6 +33,10 @@ type Config struct {
 
 	// MaxAge is the time (in seconds) a preflight response can be cached.
 	MaxAge int
+
+	// RequestIDHeader is the header name used for request ID tracing.
+	// Defaults to "X-Request-ID" when empty.
+	RequestIDHeader string
 }
 
 // Middleware handles CORS headers and preflight requests.
@@ -58,7 +62,11 @@ func (m *Middleware) Wrap(cfg Config, next http.Handler) http.Handler {
 
 	// Always expose CSAR backpressure headers so browser-based clients
 	// (csar-ts SDK) can read them from cross-origin responses.
-	csarHeaders := []string{"X-CSAR-Wait-MS", "X-CSAR-Status", "Retry-After"}
+	reqIDHeader := cfg.RequestIDHeader
+	if reqIDHeader == "" {
+		reqIDHeader = "X-Request-ID"
+	}
+	csarHeaders := []string{"X-CSAR-Wait-MS", "X-CSAR-Status", "Retry-After", "X-CSAR-Protocol-Version", reqIDHeader, "X-CSAR-Route-ID"}
 	exposed := dedupHeaders(append(cfg.ExposedHeaders, csarHeaders...))
 
 	// Pre-compute header values.

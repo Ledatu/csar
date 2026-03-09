@@ -68,6 +68,23 @@ type Metrics struct {
 	// ConfigPushes counts config updates pushed to routers.
 	ConfigPushes *prometheus.CounterVec
 
+	// --- SDK protocol metrics ---
+
+	// SDKThrottledResponses counts CSAR-originated throttled responses by route and status value.
+	SDKThrottledResponses *prometheus.CounterVec
+
+	// SDKWaitEmitted observes the X-CSAR-Wait-MS values emitted on successful responses.
+	SDKWaitEmitted *prometheus.HistogramVec
+
+	// SDKBackpressureRetries counts transparent backpressure retries by route.
+	SDKBackpressureRetries *prometheus.CounterVec
+
+	// SDKCircuitOpenResponses counts circuit-breaker-originated 503 responses by route.
+	SDKCircuitOpenResponses *prometheus.CounterVec
+
+	// SDKClientLimitPresence counts requests with X-CSAR-Client-Limit header by route.
+	SDKClientLimitPresence *prometheus.CounterVec
+
 	// Registry for testing.
 	registry *prometheus.Registry
 }
@@ -198,6 +215,43 @@ func New(registry *prometheus.Registry) *Metrics {
 			Name:      "config_pushes_total",
 			Help:      "Number of configuration updates pushed to routers.",
 		}, []string{"type"}),
+
+		// --- SDK protocol ---
+		SDKThrottledResponses: factory.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "csar",
+			Subsystem: "sdk",
+			Name:      "throttled_responses_total",
+			Help:      "CSAR-originated throttled responses by route and X-CSAR-Status value.",
+		}, []string{"route", "status_value"}),
+
+		SDKWaitEmitted: factory.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "csar",
+			Subsystem: "sdk",
+			Name:      "wait_emitted_ms",
+			Help:      "X-CSAR-Wait-MS values emitted on successful responses.",
+			Buckets:   []float64{1, 5, 10, 50, 100, 500, 1000, 5000, 10000},
+		}, []string{"route"}),
+
+		SDKBackpressureRetries: factory.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "csar",
+			Subsystem: "sdk",
+			Name:      "backpressure_retries_total",
+			Help:      "Transparent backpressure retries triggered by route.",
+		}, []string{"route"}),
+
+		SDKCircuitOpenResponses: factory.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "csar",
+			Subsystem: "sdk",
+			Name:      "circuit_open_responses_total",
+			Help:      "Circuit-breaker-originated 503 responses by route.",
+		}, []string{"route"}),
+
+		SDKClientLimitPresence: factory.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "csar",
+			Subsystem: "sdk",
+			Name:      "client_limit_presence_total",
+			Help:      "Requests with X-CSAR-Client-Limit header by route.",
+		}, []string{"route"}),
 	}
 
 	return m

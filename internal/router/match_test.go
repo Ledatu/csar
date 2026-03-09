@@ -101,10 +101,13 @@ func TestRouter_NoMatch_Returns404(t *testing.T) {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
 
-	var resp map[string]string
+	var resp map[string]interface{}
 	json.NewDecoder(rec.Result().Body).Decode(&resp)
-	if resp["error"] != "no route matched" {
-		t.Errorf("error = %q, want %q", resp["error"], "no route matched")
+	if resp["message"] != "no route matched" {
+		t.Errorf("message = %q, want %q", resp["message"], "no route matched")
+	}
+	if resp["code"] != "route_not_found" {
+		t.Errorf("code = %q, want %q", resp["code"], "route_not_found")
 	}
 }
 

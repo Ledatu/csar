@@ -25,6 +25,60 @@ type Coordinator struct {
 	mu          sync.RWMutex
 	subscribers map[string]*subscriber // routerID -> subscriber
 	version     uint64
+
+	// invalidationOutbox is a ring buffer of recent token invalidation events.
+	// On router reconnect, missed events (version > last_seen_version) are replayed.
+	invalidationOutbox *InvalidationOutbox
+}
+
+// InvalidationOutbox is a bounded ring buffer of token invalidation events
+// for durable replay on router reconnect.
+type InvalidationOutbox struct {
+	mu      sync.RWMutex
+	entries []invalidationEntry
+	size    int
+	head    int // next write position
+}
+
+type invalidationEntry struct {
+	version   uint64
+	tokenRefs []string
+}
+
+// NewInvalidationOutbox creates an outbox with the given capacity.
+func NewInvalidationOutbox(size int) *InvalidationOutbox {
+	if size < 100 {
+		size = 100
+	}
+	return &InvalidationOutbox{
+		entries: make([]invalidationEntry, size),
+		size:    size,
+	}
+}
+
+// Append records an invalidation event.
+func (o *InvalidationOutbox) Append(version uint64, tokenRefs []string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.entries[o.head] = invalidationEntry{version: version, tokenRefs: tokenRefs}
+	o.head = (o.head + 1) % o.size
+}
+
+// ReplaySince returns all invalidation events with version > sinceVersion,
+// ordered from oldest to newest.
+func (o *InvalidationOutbox) ReplaySince(sinceVersion uint64) []invalidationEntry {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	var result []invalidationEntry
+	for i := 0; i < o.size; i++ {
+		idx := (o.head + i) % o.size
+		e := o.entries[idx]
+		if e.version > sinceVersion && e.version != 0 {
+			result = append(result, e)
+		}
+	}
+	return result
 }
 
 // subscriber tracks a connected router and its gRPC stream.
@@ -38,10 +92,17 @@ type subscriber struct {
 // New creates a new Coordinator with the given state store.
 func New(store statestore.StateStore, logger *slog.Logger) *Coordinator {
 	return &Coordinator{
-		store:       store,
-		logger:      logger,
-		subscribers: make(map[string]*subscriber),
+		store:              store,
+		logger:             logger,
+		subscribers:        make(map[string]*subscriber),
+		invalidationOutbox: NewInvalidationOutbox(1000),
 	}
+}
+
+// SetInvalidationBufferSize replaces the outbox with a new one of the given size.
+// Must be called before any subscribers connect.
+func (c *Coordinator) SetInvalidationBufferSize(size int) {
+	c.invalidationOutbox = NewInvalidationOutbox(size)
 }
 
 // Subscribe implements the gRPC Subscribe stream.
@@ -105,6 +166,37 @@ func (c *Coordinator) Subscribe(req *csarv1.SubscribeRequest, stream csarv1.Coor
 	// Send initial quota assignment
 	if err := c.sendQuotaAssignment(req.RouterId, stream); err != nil {
 		return err
+	}
+
+	// Replay missed invalidation events since the router's last watermark.
+	if req.LastSeenVersion > 0 {
+		missed := c.invalidationOutbox.ReplaySince(req.LastSeenVersion)
+		for _, entry := range missed {
+			msg := &csarv1.ConfigUpdate{
+				Version: entry.version,
+				Update: &csarv1.ConfigUpdate_TokenInvalidation{
+					TokenInvalidation: &csarv1.TokenInvalidation{
+						TokenRefs:           entry.tokenRefs,
+						InvalidationVersion: entry.version,
+					},
+				},
+			}
+			if err := stream.Send(msg); err != nil {
+				c.logger.Error("failed to replay invalidation",
+					"router_id", req.RouterId,
+					"version", entry.version,
+					"error", err,
+				)
+				return err
+			}
+		}
+		if len(missed) > 0 {
+			c.logger.Info("replayed missed invalidations",
+				"router_id", req.RouterId,
+				"last_seen_version", req.LastSeenVersion,
+				"replayed", len(missed),
+			)
+		}
 	}
 
 	// Redistribute quotas now that a new router joined
@@ -181,11 +273,15 @@ func (c *Coordinator) BroadcastTokenInvalidation(tokenRefs []string) {
 	}
 	c.mu.Unlock()
 
+	// Record in durable outbox for replay on reconnect.
+	c.invalidationOutbox.Append(version, tokenRefs)
+
 	msg := &csarv1.ConfigUpdate{
 		Version: version,
 		Update: &csarv1.ConfigUpdate_TokenInvalidation{
 			TokenInvalidation: &csarv1.TokenInvalidation{
-				TokenRefs: tokenRefs,
+				TokenRefs:           tokenRefs,
+				InvalidationVersion: version,
 			},
 		},
 	}

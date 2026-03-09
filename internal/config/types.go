@@ -146,6 +146,12 @@ type Config struct {
 	// Checked before per-route throttle. Uses a fast in-memory atomic counter.
 	GlobalThrottle *GlobalThrottleConfig `yaml:"global_throttle,omitempty" json:"global_throttle,omitempty"`
 
+	// Readiness configures the dependency-aware readiness probe endpoint.
+	Readiness *ReadinessConfig `yaml:"readiness,omitempty" json:"readiness,omitempty"`
+
+	// DebugHeaders configures traceability headers (X-Request-ID, X-CSAR-Route-ID).
+	DebugHeaders *DebugHeadersConfig `yaml:"debug_headers,omitempty" json:"debug_headers,omitempty"`
+
 	// Paths holds the OpenAPI-style route definitions with x-csar-* extensions.
 	Paths map[string]PathConfig `yaml:"paths" json:"paths"`
 
@@ -268,6 +274,9 @@ type RouteConfig struct {
 	// If the upstream response exceeds this, it is truncated and an error is returned.
 	// Applies to DLP and Retry middleware buffering. Default: 0 (unlimited).
 	MaxResponseSize int64 `yaml:"max_response_size,omitempty" json:"max_response_size,omitempty"`
+
+	// Protocol configures per-route SDK protocol behavior.
+	Protocol *ProtocolPolicy `yaml:"x-csar-protocol,omitempty" json:"x-csar-protocol,omitempty"`
 
 	// SourceInfo records which file and line each field was declared in.
 	// Populated during multi-file loading for diagnostics. Not serialized.
@@ -530,6 +539,12 @@ type TrafficConfig struct {
 	// When enabled, the router reads Retry-After / X-RateLimit-Reset headers
 	// from upstream 429 responses and suspends the token bucket accordingly.
 	AdaptiveBackpressure *AdaptiveBackpressureConfig `yaml:"adaptive_backpressure,omitempty" json:"adaptive_backpressure,omitempty"`
+
+	// ClientLimitMode controls how the X-CSAR-Client-Limit header is handled.
+	// "ignore" (default): header is logged at debug level only.
+	// "advisory": header is logged and counted in metrics.
+	// "enforce": header is used as an input signal for adaptive throttling.
+	ClientLimitMode string `yaml:"client_limit_mode,omitempty" json:"client_limit_mode,omitempty"`
 }
 
 // UnmarshalYAML handles bare string (policy reference) and inline object syntax.
@@ -580,6 +595,10 @@ type ThrottlingPolicy struct {
 
 	// VIPOverrides allows header-based policy switching for VIP clients.
 	VIPOverrides []VIPOverride `yaml:"vip_overrides,omitempty" json:"vip_overrides,omitempty"`
+
+	// ClientLimitMode controls how the X-CSAR-Client-Limit header is handled.
+	// "ignore" (default), "advisory", or "enforce".
+	ClientLimitMode string `yaml:"client_limit_mode,omitempty" json:"client_limit_mode,omitempty"`
 }
 
 // GlobalThrottleConfig defines a global rate limit applied to all routes as a fallback.
@@ -610,6 +629,45 @@ type VIPOverride struct {
 type ResilienceConfig struct {
 	// CircuitBreaker is the name of a circuit breaker profile.
 	CircuitBreaker string `yaml:"circuit_breaker" json:"circuit_breaker"`
+}
+
+// ReadinessConfig configures the dependency-aware readiness probe.
+type ReadinessConfig struct {
+	// Enabled toggles the readiness endpoint. Default: true.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// Path is the HTTP path for the readiness probe. Default: "/readiness".
+	Path string `yaml:"path,omitempty" json:"path,omitempty"`
+
+	// IncludeDetails includes per-check details in the response. Default: true.
+	IncludeDetails *bool `yaml:"include_details,omitempty" json:"include_details,omitempty"`
+}
+
+// DebugHeadersConfig configures traceability and debug headers.
+type DebugHeadersConfig struct {
+	// Enabled toggles debug headers. Automatically disabled in prod unless explicitly set.
+	Enabled bool `yaml:"enabled" json:"enabled"`
+
+	// EmitRouteID emits X-CSAR-Route-ID with the matched route key. Default: true.
+	EmitRouteID *bool `yaml:"emit_route_id,omitempty" json:"emit_route_id,omitempty"`
+
+	// RequestIDHeader is the header name for request ID propagation. Default: "X-Request-ID".
+	RequestIDHeader string `yaml:"request_id_header,omitempty" json:"request_id_header,omitempty"`
+}
+
+// ProtocolPolicy configures per-route SDK protocol behavior.
+type ProtocolPolicy struct {
+	// EmitWaitMS controls whether X-CSAR-Wait-MS is emitted on successful responses.
+	// nil = global default (true).
+	EmitWaitMS *bool `yaml:"emit_wait_ms,omitempty" json:"emit_wait_ms,omitempty"`
+
+	// TransparentRetry controls whether transparent upstream 429 retry is enabled.
+	// nil = use x-csar-retry.auto_retry_429.
+	TransparentRetry *bool `yaml:"transparent_retry,omitempty" json:"transparent_retry,omitempty"`
+
+	// EmitClientHint controls whether the server emits X-CSAR-Client-Limit guidance.
+	// nil = global default.
+	EmitClientHint *bool `yaml:"emit_client_hint,omitempty" json:"emit_client_hint,omitempty"`
 }
 
 // RetryConfig configures automatic retry for upstream requests.
