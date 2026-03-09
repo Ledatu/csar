@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/ledatu/csar/internal/s3store"
+	"github.com/Ledatu/csar-core/s3store"
 )
 
 // mockS3Client implements the subset of s3store.Client needed for testing.

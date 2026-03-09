@@ -10,7 +10,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
-	"github.com/ledatu/csar/internal/s3store"
+	"github.com/Ledatu/csar-core/s3store"
 )
 
 // S3TokenStore implements TokenStore backed by S3-compatible object storage
@@ -155,7 +155,8 @@ func (s *S3TokenStore) parseObject(obj s3store.ObjectEntry) (TokenEntry, error) 
 		}
 		return TokenEntry{
 			EncryptedToken: []byte(tokenObj.Plaintext),
-			KMSKeyID:       "", // empty = router skips KMS decrypt
+			KMSKeyID:       "",
+			Passthrough:    true,
 			Version:        obj.ETag,
 		}, nil
 

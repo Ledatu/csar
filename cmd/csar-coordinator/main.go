@@ -26,13 +26,14 @@ import (
 	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
 
+	"github.com/Ledatu/csar-core/s3store"
+	"github.com/Ledatu/csar-core/ycloud"
+
 	"github.com/ledatu/csar/internal/configsource"
 	"github.com/ledatu/csar/internal/coordinator"
 	"github.com/ledatu/csar/internal/kms"
 	"github.com/ledatu/csar/internal/logging"
-	"github.com/ledatu/csar/internal/s3store"
 	"github.com/ledatu/csar/internal/statestore"
-	"github.com/ledatu/csar/internal/ycloud"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
 )
 
@@ -426,8 +427,8 @@ func main() {
 		}
 
 		serverOpts = append(serverOpts,
-			grpc.UnaryInterceptor(authUnaryInterceptor(logger, allowlist)),
-			grpc.StreamInterceptor(authStreamInterceptor(logger, allowlist)),
+			grpc.UnaryInterceptor(authUnaryInterceptor(logger, allowlist, true)),
+			grpc.StreamInterceptor(authStreamInterceptor(logger, allowlist, true)),
 		)
 	} else {
 		if !*allowInsecureDev {
@@ -673,22 +674,28 @@ func extractPeerIdentity(ctx context.Context) (cn string, sans []string, ok bool
 }
 
 // checkIdentity verifies the peer identity against the allowlist.
-// If allowlist is empty, any authenticated peer is accepted.
-// If allowlist is non-empty and no verified identity is present, access is denied.
-func checkIdentity(ctx context.Context, allowlist []string) error {
+//
+// When requirePeerCert is true (TLS enabled), a verified client certificate
+// is always required — even when no allowlist is configured. This prevents
+// the TLS-only path from silently accepting unauthenticated callers.
+//
+// When requirePeerCert is false (insecure dev mode), any caller is accepted.
+func checkIdentity(ctx context.Context, allowlist []string, requirePeerCert bool) error {
 	cn, sans, ok := extractPeerIdentity(ctx)
 
-	if len(allowlist) == 0 {
-		// No allowlist configured — accept any peer (including unauthenticated in dev mode).
+	if !requirePeerCert && len(allowlist) == 0 {
 		return nil
 	}
 
-	// Allowlist is set — verified identity is mandatory.
 	if !ok {
-		return status.Error(codes.Unauthenticated, "allowlist is configured but no verified client certificate was presented")
+		return status.Error(codes.Unauthenticated, "no verified client certificate was presented")
 	}
 
-	// Check CN and SANs against allowlist
+	if len(allowlist) == 0 {
+		// TLS with mTLS enforced but no allowlist — accept any authenticated peer.
+		return nil
+	}
+
 	for _, allowed := range allowlist {
 		if cn == allowed {
 			return nil
@@ -704,9 +711,9 @@ func checkIdentity(ctx context.Context, allowlist []string) error {
 }
 
 // authUnaryInterceptor checks peer identity on unary RPCs.
-func authUnaryInterceptor(logger *slog.Logger, allowlist []string) grpc.UnaryServerInterceptor {
+func authUnaryInterceptor(logger *slog.Logger, allowlist []string, requirePeerCert bool) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		if err := checkIdentity(ctx, allowlist); err != nil {
+		if err := checkIdentity(ctx, allowlist, requirePeerCert); err != nil {
 			logger.Warn("rejected unary RPC: identity check failed",
 				"method", info.FullMethod,
 				"error", err,
@@ -718,9 +725,9 @@ func authUnaryInterceptor(logger *slog.Logger, allowlist []string) grpc.UnarySer
 }
 
 // authStreamInterceptor checks peer identity on streaming RPCs.
-func authStreamInterceptor(logger *slog.Logger, allowlist []string) grpc.StreamServerInterceptor {
+func authStreamInterceptor(logger *slog.Logger, allowlist []string, requirePeerCert bool) grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		if err := checkIdentity(ss.Context(), allowlist); err != nil {
+		if err := checkIdentity(ss.Context(), allowlist, requirePeerCert); err != nil {
 			logger.Warn("rejected stream RPC: identity check failed",
 				"method", info.FullMethod,
 				"error", err,

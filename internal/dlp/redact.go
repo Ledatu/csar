@@ -98,15 +98,11 @@ func (rd *Redactor) Wrap(cfg Config, next http.Handler) http.Handler {
 
 		// Check if the response was too large to buffer.
 		if capture.overflowed {
-			rd.logger.Warn("DLP: response exceeded max_response_size, passed through un-redacted",
+			rd.logger.Warn("DLP: response too large for redaction; returning error to client",
 				"max_response_size", maxSize,
 			)
-			// The data has already been discarded by captureWriter.
-			// Write original headers and a warning.
 			w.Header().Set("X-CSAR-DLP-Warning", "response too large for redaction")
-			w.WriteHeader(capture.statusCode)
-			// Body was already partially written if overflow happened mid-stream,
-			// but since we buffer before writing headers, we return an error instead.
+			w.WriteHeader(http.StatusBadGateway)
 			fmt.Fprintf(w, `{"code":"response_too_large","status":502,"message":"response too large for DLP processing","detail":"max_bytes: %d"}`, maxSize)
 			return
 		}

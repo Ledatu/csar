@@ -222,6 +222,51 @@ func TestRedactor_JSONArray_TopLevel(t *testing.T) {
 	}
 }
 
+func TestRedactor_Overflow_Returns502(t *testing.T) {
+	bigBody := make([]byte, 200)
+	for i := range bigBody {
+		bigBody[i] = 'x'
+	}
+
+	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(bigBody)
+	})
+
+	rd := NewRedactor(newTestLogger())
+	handler := rd.Wrap(Config{
+		Fields:          []string{"email"},
+		MaxResponseSize: 100,
+	}, upstream)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	resp := rec.Result()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if len(body) == 0 {
+		t.Fatal("expected error body, got empty")
+	}
+
+	var errResp map[string]interface{}
+	if err := json.Unmarshal(body, &errResp); err != nil {
+		t.Fatalf("error body is not JSON: %v", err)
+	}
+	if errResp["code"] != "response_too_large" {
+		t.Errorf("code = %v, want response_too_large", errResp["code"])
+	}
+
+	if resp.Header.Get("X-CSAR-DLP-Warning") == "" {
+		t.Error("expected X-CSAR-DLP-Warning header")
+	}
+}
+
 func TestRedactPath(t *testing.T) {
 	tests := []struct {
 		name string

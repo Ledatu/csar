@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/ledatu/csar/internal/s3store"
+	"github.com/Ledatu/csar-core/s3store"
 )
 
 // S3SourceConfig configures the S3 source adapter.

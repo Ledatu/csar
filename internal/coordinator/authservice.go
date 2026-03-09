@@ -23,6 +23,9 @@ const defaultFetchTimeout = 5 * time.Second
 type TokenEntry struct {
 	EncryptedToken []byte
 	KMSKeyID       string
+	// Passthrough indicates the token is already plaintext (e.g. S3 SSE
+	// handles encryption at rest). Routers skip KMS decryption when true.
+	Passthrough bool
 	// Version is an opaque string bumped on each token rotation.
 	// Routers use it for cache invalidation.
 	Version string
@@ -260,8 +263,8 @@ func (s *AuthServiceImpl) isValid(ref string, entry TokenEntry) bool {
 		s.logger.Warn("skipping token with empty encrypted_token", "token_ref", ref)
 		return false
 	}
-	if entry.KMSKeyID == "" {
-		s.logger.Warn("skipping token with empty kms_key_id", "token_ref", ref)
+	if entry.KMSKeyID == "" && !entry.Passthrough {
+		s.logger.Warn("skipping token with empty kms_key_id (not passthrough)", "token_ref", ref)
 		return false
 	}
 	return true

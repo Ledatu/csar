@@ -34,17 +34,36 @@ func TestParseAllowlist(t *testing.T) {
 	}
 }
 
-func TestCheckIdentity_NoAllowlist_AllowsAnyone(t *testing.T) {
-	// No allowlist configured — should allow even without TLS identity (dev mode).
+func TestCheckIdentity_NoAllowlist_DevMode_AllowsAnyone(t *testing.T) {
+	// Insecure dev mode (requirePeerCert=false) — should allow without identity.
 	ctx := context.Background()
-	err := checkIdentity(ctx, nil)
+	err := checkIdentity(ctx, nil, false)
 	if err != nil {
-		t.Errorf("checkIdentity with nil allowlist should allow, got: %v", err)
+		t.Errorf("checkIdentity in dev mode with nil allowlist should allow, got: %v", err)
 	}
 
-	err = checkIdentity(ctx, []string{})
+	err = checkIdentity(ctx, []string{}, false)
 	if err != nil {
-		t.Errorf("checkIdentity with empty allowlist should allow, got: %v", err)
+		t.Errorf("checkIdentity in dev mode with empty allowlist should allow, got: %v", err)
+	}
+}
+
+func TestCheckIdentity_NoAllowlist_TLSMode_RequiresCert(t *testing.T) {
+	// TLS mode (requirePeerCert=true) — must reject callers without a cert
+	// even when no allowlist is configured.
+	ctx := context.Background()
+	err := checkIdentity(ctx, nil, true)
+	if err == nil {
+		t.Fatal("checkIdentity in TLS mode with no peer cert should deny, got nil error")
+	}
+	errMsg := err.Error()
+	if !contains(errMsg, "no verified client certificate") {
+		t.Errorf("error should mention missing certificate, got: %v", err)
+	}
+
+	err = checkIdentity(ctx, []string{}, true)
+	if err == nil {
+		t.Fatal("checkIdentity in TLS mode with empty allowlist and no peer cert should deny, got nil error")
 	}
 }
 
@@ -53,7 +72,7 @@ func TestCheckIdentity_AllowlistSet_DeniesWithoutIdentity(t *testing.T) {
 	ctx := context.Background()
 	allowlist := []string{"router-1", "router-2"}
 
-	err := checkIdentity(ctx, allowlist)
+	err := checkIdentity(ctx, allowlist, true)
 	if err == nil {
 		t.Fatal("checkIdentity with allowlist but no peer identity should deny, got nil error")
 	}
@@ -70,7 +89,7 @@ func TestCheckIdentity_AllowlistSet_DeniesUnknownIdentity(t *testing.T) {
 	ctx := context.Background()
 	allowlist := []string{"router-1"}
 
-	err := checkIdentity(ctx, allowlist)
+	err := checkIdentity(ctx, allowlist, true)
 	if err == nil {
 		t.Fatal("checkIdentity should deny unknown identity")
 	}

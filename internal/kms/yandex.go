@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledatu/csar/internal/logging"
-	"github.com/ledatu/csar/internal/ycloud"
+	"github.com/Ledatu/csar-core/secret"
+	"github.com/Ledatu/csar-core/ycloud"
 )
 
 // Default Yandex Cloud KMS base endpoint for the SymmetricCrypto REST API.
@@ -45,11 +45,11 @@ type YandexAPIConfig struct {
 
 	// IAMToken is a static IAM bearer token (for dev/testing).
 	// Uses logging.Secret to prevent accidental logging of the plaintext value.
-	IAMToken logging.Secret
+	IAMToken secret.Secret
 
 	// OAuthToken is a Yandex OAuth token exchanged for IAM tokens at runtime.
 	// Uses logging.Secret to prevent accidental logging of the plaintext value.
-	OAuthToken logging.Secret
+	OAuthToken secret.Secret
 
 	// SAKeyFile is the path to a service-account key JSON file.
 	// Required when AuthMode == "service_account".
