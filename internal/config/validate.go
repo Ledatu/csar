@@ -127,6 +127,11 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("coordinator: transport security is required — " +
 				"set coordinator.ca_file for TLS, or coordinator.allow_insecure: true for development")
 		}
+
+		// Validate invalidation buffer size if explicitly set.
+		if coord.InvalidationBufferSize != 0 && coord.InvalidationBufferSize < 100 {
+			return fmt.Errorf("coordinator.invalidation_buffer_size must be >= 100, got %d", coord.InvalidationBufferSize)
+		}
 	} else {
 		// Coordinator is disabled — warn if TLS fields are set (dead config)
 		if coord.CAFile != "" || coord.CertFile != "" || coord.KeyFile != "" {

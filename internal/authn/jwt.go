@@ -179,7 +179,7 @@ func (v *JWTValidator) Wrap(cfg Config, next http.Handler) http.Handler {
 				v.reject(w, http.StatusForbidden, fmt.Sprintf("missing required claim %q", key))
 				return
 			}
-			if fmt.Sprint(val) != expected {
+			if claimToString(val) != expected {
 				v.reject(w, http.StatusForbidden, fmt.Sprintf("claim %q value mismatch", key))
 				return
 			}
@@ -188,7 +188,7 @@ func (v *JWTValidator) Wrap(cfg Config, next http.Handler) http.Handler {
 		// Forward claims to request headers.
 		for claimName, headerName := range cfg.ForwardClaims {
 			if val, ok := vt.Claims[claimName]; ok {
-				r.Header.Set(headerName, fmt.Sprint(val))
+				r.Header.Set(headerName, claimToString(val))
 			}
 		}
 
@@ -351,6 +351,25 @@ func (v *JWTValidator) reject(w http.ResponseWriter, status int, message string)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	fmt.Fprintf(w, `{"code":"auth_failed","status":%d,"message":%q}`, status, message)
+}
+
+// claimToString converts a JWT claim value to a canonical string representation.
+// Strings are returned as-is. Structured types (slices, maps) are JSON-encoded
+// so that downstream parsers (e.g. parseKMSKeysClaim) receive valid JSON instead
+// of Go's default fmt.Sprint format like "[key1 key2]".
+func claimToString(val interface{}) string {
+	switch v := val.(type) {
+	case string:
+		return v
+	case []interface{}, map[string]interface{}:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return fmt.Sprint(val)
+		}
+		return string(b)
+	default:
+		return fmt.Sprint(val)
+	}
 }
 
 func validateAudience(aud interface{}, expected []string) bool {

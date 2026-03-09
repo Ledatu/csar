@@ -96,6 +96,30 @@ func TestValidateAudience(t *testing.T) {
 	}
 }
 
+func TestClaimToString(t *testing.T) {
+	tests := []struct {
+		name string
+		val  interface{}
+		want string
+	}{
+		{"string", "hello", "hello"},
+		{"int", float64(42), "42"},
+		{"bool", true, "true"},
+		{"string_slice", []interface{}{"key1", "key2"}, `["key1","key2"]`},
+		{"mixed_slice", []interface{}{"a", float64(1)}, `["a",1]`},
+		{"map", map[string]interface{}{"k": "v"}, `{"k":"v"}`},
+		{"nil", nil, "<nil>"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := claimToString(tt.val)
+			if got != tt.want {
+				t.Errorf("claimToString(%v) = %q, want %q", tt.val, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCompilePathPattern(t *testing.T) {
 	tests := []struct {
 		path    string

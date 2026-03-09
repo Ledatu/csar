@@ -76,6 +76,7 @@ func main() {
 	etcdEndpoints := flag.String("etcd-endpoints", "localhost:2379", "comma-separated etcd endpoints")
 	etcdPrefix := flag.String("etcd-prefix", "/csar", "etcd key prefix")
 	etcdRouterTTL := flag.Int64("etcd-router-ttl", 30, "etcd lease TTL in seconds for router entries")
+	invalidationBufferSize := flag.Int("invalidation-buffer-size", 1000, "number of token invalidation events to buffer for replay on router reconnect (minimum: 100)")
 
 	// Config source flags — load route configuration from file, S3, or HTTP.
 	configSource := flag.String("config-source", "", "config source: file, s3, http (empty = no config loading)")
@@ -255,6 +256,7 @@ func main() {
 
 	// Create coordinator
 	coord := coordinator.New(store, logger)
+	coord.SetInvalidationBufferSize(*invalidationBufferSize)
 
 	// Create AuthService for token delivery to routers
 	authSvc := coordinator.NewAuthService(logger)

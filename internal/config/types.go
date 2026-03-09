@@ -1,10 +1,9 @@
 package config
 
 import (
-	"fmt"
 	"strings"
-	"time"
 
+	"github.com/Ledatu/csar-core/configutil"
 	"github.com/ledatu/csar/internal/logging"
 	"gopkg.in/yaml.v3"
 )
@@ -199,6 +198,10 @@ type CoordinatorConfig struct {
 	// AllowInsecure, if true, permits plaintext gRPC to the coordinator.
 	// For development only — requires explicit opt-in.
 	AllowInsecure bool `yaml:"allow_insecure,omitempty" json:"allow_insecure,omitempty"`
+
+	// InvalidationBufferSize is the number of token invalidation events
+	// buffered for replay on router reconnect. Default: 1000, minimum: 100.
+	InvalidationBufferSize int `yaml:"invalidation_buffer_size,omitempty" json:"invalidation_buffer_size,omitempty"`
 }
 
 // PathConfig holds per-path route definitions keyed by HTTP method.
@@ -1044,29 +1047,8 @@ type CircuitBreakerProfile struct {
 	FailureThreshold uint32 `yaml:"failure_threshold" json:"failure_threshold"`
 }
 
-// Duration is a time.Duration that supports YAML string unmarshalling (e.g. "30s").
-type Duration struct {
-	time.Duration
-}
-
-// UnmarshalYAML parses a duration string like "30s", "5m", "1h".
-func (d *Duration) UnmarshalYAML(value *yaml.Node) error {
-	var s string
-	if err := value.Decode(&s); err != nil {
-		return err
-	}
-	dur, err := time.ParseDuration(s)
-	if err != nil {
-		return fmt.Errorf("invalid duration %q: %w", s, err)
-	}
-	d.Duration = dur
-	return nil
-}
-
-// MarshalYAML writes the duration as a string.
-func (d Duration) MarshalYAML() (interface{}, error) {
-	return d.Duration.String(), nil
-}
+// Duration is a type alias for the shared configutil.Duration.
+type Duration = configutil.Duration
 
 // RouteKey uniquely identifies a route by path and method.
 type RouteKey struct {

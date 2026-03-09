@@ -3,12 +3,12 @@ package coordinator
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/ledatu/csar/internal/apierror"
 	"github.com/ledatu/csar/internal/authn"
 )
 
@@ -100,9 +100,21 @@ func parseKMSKeysClaim(raw string) []string {
 	return keys
 }
 
-// adminRejectJSON writes a JSON error response.
+// adminRejectJSON writes a standardized JSON error response using the shared
+// apierror envelope. The error code is inferred from the HTTP status.
 func adminRejectJSON(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	fmt.Fprintf(w, `{"error":%q}`, message)
+	code := apierror.CodeAccessDenied
+	switch {
+	case status == http.StatusUnauthorized:
+		code = apierror.CodeAuthFailed
+	case status == http.StatusForbidden:
+		code = apierror.CodeAccessDenied
+	case status == http.StatusNotFound:
+		code = apierror.CodeRouteNotFound
+	case status == http.StatusBadRequest:
+		code = "bad_request"
+	case status >= 500:
+		code = apierror.CodeUpstreamError
+	}
+	apierror.New(code, status, message).Write(w)
 }
