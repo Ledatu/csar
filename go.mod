@@ -3,7 +3,6 @@ module github.com/ledatu/csar
 go 1.25.0
 
 require (
-	github.com/Ledatu/csar-core v0.1.2
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.4
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
@@ -12,6 +11,7 @@ require (
 	github.com/go-sql-driver/mysql v1.9.3
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
+	github.com/ledatu/csar-core v0.1.2
 	github.com/lib/pq v1.11.2
 	github.com/modelcontextprotocol/go-sdk v1.4.0
 	github.com/prometheus/client_golang v1.23.2
@@ -25,7 +25,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.41.0
 	golang.org/x/sync v0.19.0
 	golang.org/x/time v0.14.0
-	google.golang.org/grpc v1.79.1
+	google.golang.org/grpc v1.79.2
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
@@ -115,4 +115,4 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 )
 
-replace github.com/Ledatu/csar-core => ../csar-core
+replace github.com/ledatu/csar-core => ../csar-core

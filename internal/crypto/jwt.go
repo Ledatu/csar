@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Ledatu/csar-core/jwtx"
+	"github.com/ledatu/csar-core/jwtx"
 	"github.com/golang-jwt/jwt/v5"
 )
 

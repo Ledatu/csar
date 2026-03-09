@@ -221,7 +221,7 @@ func (r *Router) serveAfterAuth(w http.ResponseWriter, req *http.Request, rt *ro
 //
 // csar-ts protocol: The router emits X-CSAR-Status and X-CSAR-Wait-MS headers
 // so the csar-ts client SDK can distinguish throttle vs circuit-breaker vs success.
-// See: https://github.com/Ledatu/csar-ts
+// See: https://github.com/ledatu/csar-ts
 func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *route) {
 	var totalWait time.Duration
 

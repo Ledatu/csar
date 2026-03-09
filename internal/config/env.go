@@ -4,7 +4,7 @@ import (
 	"encoding"
 	"reflect"
 
-	"github.com/Ledatu/csar-core/configutil"
+	"github.com/ledatu/csar-core/configutil"
 	"github.com/ledatu/csar/internal/logging"
 )
 

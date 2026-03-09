@@ -3,7 +3,7 @@
 package apierror
 
 import (
-	core "github.com/Ledatu/csar-core/apierror"
+	core "github.com/ledatu/csar-core/apierror"
 )
 
 // Re-export types.

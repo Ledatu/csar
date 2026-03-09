@@ -9,7 +9,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 
-	"github.com/Ledatu/csar-core/s3store"
+	"github.com/ledatu/csar-core/s3store"
 )
 
 // S3TokenStore implements TokenStore backed by S3-compatible object storage

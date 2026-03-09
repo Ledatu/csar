@@ -26,9 +26,9 @@ import (
 	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
 
-	"github.com/Ledatu/csar-core/configsource"
-	"github.com/Ledatu/csar-core/s3store"
-	"github.com/Ledatu/csar-core/ycloud"
+	"github.com/ledatu/csar-core/configsource"
+	"github.com/ledatu/csar-core/s3store"
+	"github.com/ledatu/csar-core/ycloud"
 
 	csarcsrc "github.com/ledatu/csar/internal/configsource"
 	"github.com/ledatu/csar/internal/coordinator"

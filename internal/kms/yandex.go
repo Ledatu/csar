@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Ledatu/csar-core/secret"
-	"github.com/Ledatu/csar-core/ycloud"
+	"github.com/ledatu/csar-core/secret"
+	"github.com/ledatu/csar-core/ycloud"
 )
 
 // Default Yandex Cloud KMS base endpoint for the SymmetricCrypto REST API.

@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"reflect"
 
-	coresrc "github.com/Ledatu/csar-core/configsource"
+	coresrc "github.com/ledatu/csar-core/configsource"
 
 	"github.com/ledatu/csar/internal/config"
 	"github.com/ledatu/csar/internal/statestore"

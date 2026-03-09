@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Ledatu/csar-core/jwtx"
+	"github.com/ledatu/csar-core/jwtx"
 )
 
 // Config configures JWT validation for a route.

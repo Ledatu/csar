@@ -5,8 +5,8 @@ package logging
 import (
 	"log/slog"
 
-	"github.com/Ledatu/csar-core/logutil"
-	"github.com/Ledatu/csar-core/secret"
+	"github.com/ledatu/csar-core/logutil"
+	"github.com/ledatu/csar-core/secret"
 )
 
 // Secret is a type alias for secret.Secret from csar-core. This preserves

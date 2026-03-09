@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Ledatu/csar-core/s3store"
-	"github.com/Ledatu/csar-core/ycloud"
+	"github.com/ledatu/csar-core/s3store"
+	"github.com/ledatu/csar-core/ycloud"
 
 	"github.com/ledatu/csar/internal/helper"
 	"github.com/ledatu/csar/internal/logging"

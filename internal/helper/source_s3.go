@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/Ledatu/csar-core/s3store"
+	"github.com/ledatu/csar-core/s3store"
 )
 
 // S3SourceConfig configures the S3 source adapter.

@@ -3,7 +3,7 @@ package config
 import (
 	"strings"
 
-	"github.com/Ledatu/csar-core/configutil"
+	"github.com/ledatu/csar-core/configutil"
 	"github.com/ledatu/csar/internal/logging"
 	"gopkg.in/yaml.v3"
 )

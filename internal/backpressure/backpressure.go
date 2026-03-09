@@ -16,7 +16,7 @@
 //   - On unrecoverable 429 (wait too long): returns 503 + X-CSAR-Status: throttled
 //     so csar-ts can handle it with its own retry/circuit-breaker logic
 //
-// See: https://github.com/Ledatu/csar-ts
+// See: https://github.com/ledatu/csar-ts
 package backpressure
 
 import (

@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Ledatu/csar-core/jwtx"
+	"github.com/ledatu/csar-core/jwtx"
 )
 
 // JWK represents a single JSON Web Key (RFC 7517 / RFC 8037).

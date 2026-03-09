@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Ledatu/csar-core/jwtx"
+	"github.com/ledatu/csar-core/jwtx"
 )
 
 // KeyAlgorithm represents the key type to generate.

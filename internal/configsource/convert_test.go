@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Ledatu/csar-core/configutil"
+	"github.com/ledatu/csar-core/configutil"
 	"github.com/ledatu/csar/internal/config"
 	"github.com/ledatu/csar/internal/statestore"
 )
