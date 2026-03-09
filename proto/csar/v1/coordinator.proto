@@ -100,6 +100,10 @@ message SecurityConfig {
   string token_ref = 1;
   string inject_header = 2;
   string inject_format = 3;
+
+  // kms_key_id is the KMS key used to decrypt the token.
+  // Required for routers to perform KMS decryption when fetching tokens.
+  string kms_key_id = 4;
 }
 
 // TrafficConfig describes rate limiting parameters.

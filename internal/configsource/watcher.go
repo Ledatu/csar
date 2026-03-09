@@ -12,35 +12,6 @@ import (
 	"github.com/ledatu/csar/internal/statestore"
 )
 
-// Re-export core types so that callers of this package (e.g. csar-coordinator)
-// can use them without an extra import.
-type (
-	ConfigSource  = coresrc.ConfigSource
-	FetchedConfig = coresrc.FetchedConfig
-	HashPolicy    = coresrc.HashPolicy
-
-	ConfigWatcher = coresrc.ConfigWatcher
-	WatcherOption = coresrc.WatcherOption
-	ApplyFunc     = coresrc.ApplyFunc
-)
-
-var (
-	NewFileSource = coresrc.NewFileSource
-	NewS3Source   = coresrc.NewS3Source
-	NewHTTPSource = coresrc.NewHTTPSource
-	ComputeSHA256 = coresrc.ComputeSHA256
-	ValidateHash  = coresrc.ValidateHash
-
-	WithHashPolicy = coresrc.WithHashPolicy
-	WithPinnedHash = coresrc.WithPinnedHash
-)
-
-const (
-	HashDisabled = coresrc.HashDisabled
-	HashTOFU     = coresrc.HashTOFU
-	HashPinned   = coresrc.HashPinned
-)
-
 // NewConfigWatcher creates a ConfigWatcher that applies csar-coordinator's
 // route-diff logic inside the ApplyFunc closure. The generic polling,
 // ETag, and hash-checking mechanics are handled by csar-core.

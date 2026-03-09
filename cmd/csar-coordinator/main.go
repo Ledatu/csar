@@ -26,10 +26,11 @@ import (
 	"google.golang.org/grpc/status"
 	"gopkg.in/yaml.v3"
 
+	"github.com/Ledatu/csar-core/configsource"
 	"github.com/Ledatu/csar-core/s3store"
 	"github.com/Ledatu/csar-core/ycloud"
 
-	"github.com/ledatu/csar/internal/configsource"
+	csarcsrc "github.com/ledatu/csar/internal/configsource"
 	"github.com/ledatu/csar/internal/coordinator"
 	"github.com/ledatu/csar/internal/kms"
 	"github.com/ledatu/csar/internal/logging"
@@ -173,55 +174,26 @@ func main() {
 	// Initialize config source watcher (loads route configuration into StateStore).
 	var configWatcher *configsource.ConfigWatcher
 	if *configSource != "" {
-		var src configsource.ConfigSource
-		switch *configSource {
-		case "file":
-			if *configFile == "" {
-				logger.Error("--config-source=file requires --config-file")
-				os.Exit(1)
-			}
-			src = configsource.NewFileSource(*configFile)
-			logger.Info("config source: file", "path", *configFile)
+		srcParams := configsource.SourceParams{
+			Source:        *configSource,
+			File:          *configFile,
+			S3Bucket:      *configS3Bucket,
+			S3Key:         *configS3Key,
+			S3Endpoint:    *configS3Endpoint,
+			S3Region:      *configS3Region,
+			S3AuthMode:    *configS3AuthMode,
+			S3AccessKeyID: *configS3AccessKeyID,
+			S3SecretKey:   *configS3SecretAccessKey,
+			S3IAMToken:    *configS3IAMToken,
+			S3OAuthToken:  *configS3OAuthToken,
+			S3SAKeyFile:   *configS3SAKeyFile,
+			HTTPURL:       *configURL,
+			HTTPHeaders:   parseConfigHTTPHeaders(*configHTTPHeader, *configHTTPBearer),
+		}
 
-		case "s3":
-			if *configS3Bucket == "" {
-				logger.Error("--config-source=s3 requires --config-s3-bucket")
-				os.Exit(1)
-			}
-			cfgS3Client, err := s3store.NewClient(&s3store.Config{
-				Bucket:   *configS3Bucket,
-				Endpoint: *configS3Endpoint,
-				Region:   *configS3Region,
-				Prefix:   "", // S3Source uses full key, not prefix
-				Auth: ycloud.AuthConfig{
-					AuthMode:        *configS3AuthMode,
-					IAMToken:        logging.NewSecret(*configS3IAMToken),
-					OAuthToken:      logging.NewSecret(*configS3OAuthToken),
-					SAKeyFile:       *configS3SAKeyFile,
-					AccessKeyID:     logging.NewSecret(*configS3AccessKeyID),
-					SecretAccessKey: logging.NewSecret(*configS3SecretAccessKey),
-				},
-			}, logger)
-			if err != nil {
-				logger.Error("failed to create config S3 client", "error", err)
-				os.Exit(1)
-			}
-			src = configsource.NewS3Source(cfgS3Client, *configS3Key)
-			logger.Info("config source: s3", "bucket", *configS3Bucket, "key", *configS3Key)
-
-		case "http":
-			if *configURL == "" {
-				logger.Error("--config-source=http requires --config-url")
-				os.Exit(1)
-			}
-			headers := parseConfigHTTPHeaders(*configHTTPHeader, *configHTTPBearer)
-			src = configsource.NewHTTPSource(*configURL, headers, nil)
-			logger.Info("config source: http", "url", *configURL)
-
-		default:
-			logger.Error("unknown --config-source value; supported: \"file\", \"s3\", \"http\"",
-				"config_source", *configSource,
-			)
+		src, err := configsource.BuildSource(&srcParams, logger)
+		if err != nil {
+			logger.Error("failed to build config source", "error", err)
 			os.Exit(1)
 		}
 
@@ -237,7 +209,7 @@ func main() {
 			logger.Info("config hash policy: TOFU (Trust On First Use)")
 		}
 
-		configWatcher = configsource.NewConfigWatcher(
+		configWatcher = csarcsrc.NewConfigWatcher(
 			src, store,
 			logger.With("component", "config_watcher"),
 			opts...,

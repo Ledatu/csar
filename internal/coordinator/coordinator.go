@@ -323,6 +323,7 @@ func (c *Coordinator) sendRouteSnapshot(stream csarv1.CoordinatorService_Subscri
 				TokenRef:     r.Security.TokenRef,
 				InjectHeader: r.Security.InjectHeader,
 				InjectFormat: r.Security.InjectFormat,
+				KmsKeyId:     r.Security.KMSKeyID,
 			}
 		}
 

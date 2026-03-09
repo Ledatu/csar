@@ -13,9 +13,27 @@ import (
 // Each (path, method) pair produces a separate RouteEntry. The route ID
 // format is "METHOD:PATH" (e.g., "GET:/api/v1/users").
 //
-// Only fields supported by RouteEntry are mapped; richer config features
-// (CORS, retry, redact, cache, auth-validate, etc.) are handled locally
-// by the router and are not part of the distributed route snapshot.
+// Distributed-path contract — the following RouteConfig fields ARE propagated:
+//   - Backend.TargetURL (or first Backend.Targets entry as fallback)
+//   - Security[0]: KMSKeyID, TokenRef, InjectHeader, InjectFormat
+//   - Traffic: RPS, Burst, MaxWait
+//   - Resilience: CircuitBreaker profile name
+//
+// The following RouteConfig fields are intentionally NOT propagated and
+// remain handled locally by each router via file/SIGHUP-based config reload:
+//   - Backend: Targets (2+), LoadBalancer, HealthCheck, PathRewrite, PathMode, TLS
+//   - Security: entries beyond the first; Profile, TokenVersion, OnKMSError, StripTokenParams
+//   - Headers (static header injection)
+//   - AuthValidate (inbound JWT/JWKS validation)
+//   - Access (per-route IP allowlist)
+//   - Traffic: Use, Backend, Key, ExcludeIPs, VIPOverrides, AdaptiveBackpressure, ClientLimitMode
+//   - Retry
+//   - Redact (DLP)
+//   - Tenant (multi-tenant routing)
+//   - CORS
+//   - Cache
+//   - MaxResponseSize
+//   - Protocol
 func ConfigToRouteEntries(cfg *config.Config) map[string]statestore.RouteEntry {
 	entries := make(map[string]statestore.RouteEntry)
 

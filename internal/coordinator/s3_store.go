@@ -2,7 +2,6 @@ package coordinator
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -93,21 +92,13 @@ func (s *S3TokenStore) FetchOne(ctx context.Context, tokenRef string) (TokenEntr
 // appropriate JSON format based on kmsMode and written via PutObject.
 // Returns the S3 ETag as the version string.
 func (s *S3TokenStore) UpsertToken(ctx context.Context, ref string, entry TokenEntry, meta TokenMetadata) (string, error) {
-	obj := s3store.TokenObject{
-		SchemaVersion: 1,
-		UpdatedBy:     meta.UpdatedBy,
-		Tenant:        meta.Tenant,
+	obj, err := s3store.EncodeToken(entry.EncryptedToken, entry.KMSKeyID, s.kmsMode)
+	if err != nil {
+		return "", fmt.Errorf("s3 token store: encode %q: %w", ref, err)
 	}
-
-	switch s.kmsMode {
-	case "passthrough":
-		obj.Plaintext = string(entry.EncryptedToken)
-	case "kms":
-		obj.EncryptedToken = base64.StdEncoding.EncodeToString(entry.EncryptedToken)
-		obj.KMSKeyID = entry.KMSKeyID
-	default:
-		return "", fmt.Errorf("s3 token store: unknown kms_mode %q", s.kmsMode)
-	}
+	obj.SchemaVersion = 1
+	obj.UpdatedBy = meta.UpdatedBy
+	obj.Tenant = meta.Tenant
 
 	body, err := s3store.MarshalTokenObject(&obj)
 	if err != nil {
@@ -148,33 +139,20 @@ func (s *S3TokenStore) parseObject(obj s3store.ObjectEntry) (TokenEntry, error) 
 		return TokenEntry{}, err
 	}
 
-	switch s.kmsMode {
-	case "passthrough":
-		if tokenObj.Plaintext == "" {
-			return TokenEntry{}, fmt.Errorf("passthrough mode requires \"plaintext\" field")
-		}
-		return TokenEntry{
-			EncryptedToken: []byte(tokenObj.Plaintext),
-			KMSKeyID:       "",
-			Passthrough:    true,
-			Version:        obj.ETag,
-		}, nil
-
-	case "kms":
-		if tokenObj.EncryptedToken == "" {
-			return TokenEntry{}, fmt.Errorf("kms mode requires \"enc_token\" field")
-		}
-		decoded, err := base64.StdEncoding.DecodeString(tokenObj.EncryptedToken)
-		if err != nil {
-			return TokenEntry{}, fmt.Errorf("invalid base64 in enc_token: %w", err)
-		}
-		return TokenEntry{
-			EncryptedToken: decoded,
-			KMSKeyID:       tokenObj.KMSKeyID,
-			Version:        obj.ETag,
-		}, nil
-
-	default:
-		return TokenEntry{}, fmt.Errorf("unknown kms_mode %q", s.kmsMode)
+	decoded, err := s3store.DecodeToken(&tokenObj, s.kmsMode)
+	if err != nil {
+		return TokenEntry{}, err
 	}
+
+	entry := TokenEntry{
+		KMSKeyID:    decoded.KMSKeyID,
+		Passthrough: decoded.Passthrough,
+		Version:     obj.ETag,
+	}
+	if decoded.Passthrough {
+		entry.EncryptedToken = []byte(decoded.Plaintext)
+	} else {
+		entry.EncryptedToken = decoded.EncryptedToken
+	}
+	return entry, nil
 }
