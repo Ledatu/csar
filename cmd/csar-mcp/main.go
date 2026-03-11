@@ -171,7 +171,7 @@ func handleScaffold(_ context.Context, _ *mcp.CallToolRequest, in ScaffoldInput)
 			return nil
 		}
 		rel, _ := filepath.Rel(tmpDir, path)
-		content, readErr := os.ReadFile(path)
+		content, readErr := os.ReadFile(path) //nolint:gosec // G122: path is from trusted WalkDir, not user input
 		if readErr != nil {
 			return readErr
 		}

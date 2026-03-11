@@ -286,8 +286,8 @@ func TestJWTValidator_ECDSA(t *testing.T) {
 		Alg: "ES256",
 		Use: "sig",
 		Crv: "P-256",
-		X:   base64.RawURLEncoding.EncodeToString(key.PublicKey.X.Bytes()),
-		Y:   base64.RawURLEncoding.EncodeToString(key.PublicKey.Y.Bytes()),
+		X:   base64.RawURLEncoding.EncodeToString(key.X.Bytes()),
+		Y:   base64.RawURLEncoding.EncodeToString(key.Y.Bytes()),
 	}
 
 	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

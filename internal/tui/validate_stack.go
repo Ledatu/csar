@@ -40,8 +40,7 @@ func RenderStackValidation(result *helper.StackCheckResult) {
 			Width(70)
 
 		var infoLines []string
-		infoLines = append(infoLines, SuccessStyle.Render(fmt.Sprintf("\n  %s  %d check(s) passed", IconCheck, len(infos))))
-		infoLines = append(infoLines, "")
+		infoLines = append(infoLines, SuccessStyle.Render(fmt.Sprintf("\n  %s  %d check(s) passed", IconCheck, len(infos))), "")
 		for _, c := range infos {
 			infoLines = append(infoLines, fmt.Sprintf("  %s %s",
 				SuccessStyle.Render(IconCheck),
@@ -62,8 +61,7 @@ func RenderStackValidation(result *helper.StackCheckResult) {
 			Width(70)
 
 		var errLines []string
-		errLines = append(errLines, ErrorStyle.Render(fmt.Sprintf("\n  %s  %d error(s)", IconCross, len(errors))))
-		errLines = append(errLines, "")
+		errLines = append(errLines, ErrorStyle.Render(fmt.Sprintf("\n  %s  %d error(s)", IconCross, len(errors))), "")
 		for _, c := range errors {
 			errLines = append(errLines, fmt.Sprintf("  %s %s",
 				ErrorStyle.Render(IconDot),
@@ -84,8 +82,7 @@ func RenderStackValidation(result *helper.StackCheckResult) {
 			Width(70)
 
 		var warnLines []string
-		warnLines = append(warnLines, WarningStyle.Render(fmt.Sprintf("\n  %s  %d warning(s)", IconWarning, len(warnings))))
-		warnLines = append(warnLines, "")
+		warnLines = append(warnLines, WarningStyle.Render(fmt.Sprintf("\n  %s  %d warning(s)", IconWarning, len(warnings))), "")
 		for _, c := range warnings {
 			warnLines = append(warnLines, fmt.Sprintf("  %s %s",
 				WarningStyle.Render(IconDot),
@@ -98,11 +95,12 @@ func RenderStackValidation(result *helper.StackCheckResult) {
 
 	// Summary
 	fmt.Println()
-	if !result.HasError && len(warnings) == 0 {
+	switch {
+	case !result.HasError && len(warnings) == 0:
 		fmt.Println(SuccessStyle.Render(fmt.Sprintf("  %s All checks passed! Your stack looks ready to deploy.", IconCheck)))
-	} else if !result.HasError {
+	case !result.HasError:
 		fmt.Println(WarningStyle.Render(fmt.Sprintf("  %s Stack has %d warning(s) but no blocking errors.", IconWarning, len(warnings))))
-	} else {
+	default:
 		fmt.Println(ErrorStyle.Render(fmt.Sprintf("  %s Stack has %d error(s) that must be fixed before deploying.", IconCross, len(errors))))
 	}
 }

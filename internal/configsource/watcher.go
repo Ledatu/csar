@@ -89,9 +89,9 @@ func NewConfigWatcher(
 
 // diffRoutes computes the difference between old and new route maps.
 func diffRoutes(
-	old, new map[string]statestore.RouteEntry,
+	old, newMap map[string]statestore.RouteEntry,
 ) (added, updated, deleted []statestore.RouteEntry) {
-	for id, newEntry := range new {
+	for id, newEntry := range newMap {
 		oldEntry, exists := old[id]
 		if !exists {
 			added = append(added, newEntry)
@@ -101,7 +101,7 @@ func diffRoutes(
 	}
 
 	for id, oldEntry := range old {
-		if _, exists := new[id]; !exists {
+		if _, exists := newMap[id]; !exists {
 			deleted = append(deleted, oldEntry)
 		}
 	}

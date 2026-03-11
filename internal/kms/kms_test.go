@@ -161,7 +161,7 @@ type countingProvider struct {
 	inner        Provider
 }
 
-func (c *countingProvider) Name() string                    { return "counting(" + c.inner.Name() + ")" }
+func (c *countingProvider) Name() string                     { return "counting(" + c.inner.Name() + ")" }
 func (c *countingProvider) Health(ctx context.Context) error { return c.inner.Health(ctx) }
 
 func (c *countingProvider) Encrypt(ctx context.Context, keyID string, plaintext []byte) ([]byte, error) {
@@ -287,7 +287,7 @@ type slowProvider struct {
 	delay time.Duration
 }
 
-func (s *slowProvider) Name() string                    { return "slow(" + s.inner.Name() + ")" }
+func (s *slowProvider) Name() string                     { return "slow(" + s.inner.Name() + ")" }
 func (s *slowProvider) Health(ctx context.Context) error { return s.inner.Health(ctx) }
 
 func (s *slowProvider) Encrypt(ctx context.Context, keyID string, plaintext []byte) ([]byte, error) {

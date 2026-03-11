@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -15,6 +13,10 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/ledatu/csar-core/health"
+	"github.com/ledatu/csar-core/httpserver"
+	"github.com/ledatu/csar-core/tlsx"
+
 	"github.com/ledatu/csar/internal/config"
 	"github.com/ledatu/csar/internal/coordclient"
 	"github.com/ledatu/csar/internal/kms"
@@ -24,7 +26,6 @@ import (
 	"github.com/ledatu/csar/internal/router"
 	"github.com/ledatu/csar/internal/telemetry"
 	"github.com/ledatu/csar/internal/throttle"
-	"github.com/ledatu/csar/pkg/health"
 	"github.com/ledatu/csar/pkg/middleware"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
 )
@@ -274,31 +275,19 @@ func run() error {
 
 	// Configure inbound TLS if specified
 	if cfg.TLS != nil {
-		tlsCfg := &tls.Config{
-			MinVersion: tls.VersionTLS12,
+		tc, err := tlsx.NewServerTLSConfig(tlsx.ServerConfig{
+			CertFile:     cfg.TLS.CertFile,
+			KeyFile:      cfg.TLS.KeyFile,
+			ClientCAFile: cfg.TLS.ClientCAFile,
+			MinVersion:   cfg.TLS.MinVersion,
+		})
+		if err != nil {
+			return fmt.Errorf("TLS config: %w", err)
 		}
-
-		// Set minimum TLS version
-		if cfg.TLS.MinVersion == "1.3" {
-			tlsCfg.MinVersion = tls.VersionTLS13
-		}
-
-		// Mutual TLS: require and verify client certificates
+		srv.TLSConfig = tc
 		if cfg.TLS.ClientCAFile != "" {
-			caCert, err := os.ReadFile(cfg.TLS.ClientCAFile)
-			if err != nil {
-				return fmt.Errorf("reading client CA file: %w", err)
-			}
-			pool := x509.NewCertPool()
-			if !pool.AppendCertsFromPEM(caCert) {
-				return fmt.Errorf("client CA file contains no valid certificates")
-			}
-			tlsCfg.ClientCAs = pool
-			tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
 			logger.Info("mTLS enabled for inbound connections", "client_ca", cfg.TLS.ClientCAFile)
 		}
-
-		srv.TLSConfig = tlsCfg
 	}
 
 	// Log security warnings from config validation
@@ -319,17 +308,17 @@ func run() error {
 			metricsMux.Handle(readinessPath, readinessChecker.Handler())
 		}
 
-		metricsSrv := &http.Server{
-			Addr:           *metricsAddr,
-			Handler:        metricsMux,
-			ReadTimeout:    10 * time.Second,
-			WriteTimeout:   10 * time.Second,
-			IdleTimeout:    60 * time.Second,
-			MaxHeaderBytes: 1 << 20, // 1 MB
+		metricsSrv, err := httpserver.New(&httpserver.Config{
+			Addr:         *metricsAddr,
+			Handler:      metricsMux,
+			ReadTimeout:  10 * time.Second,
+			WriteTimeout: 10 * time.Second,
+		}, logger.With("component", "metrics"))
+		if err != nil {
+			return fmt.Errorf("creating metrics server: %w", err)
 		}
 		go func() {
-			logger.Info("starting metrics server", "addr", *metricsAddr)
-			if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := metricsSrv.ListenAndServe(); err != nil {
 				logger.Error("metrics server error", "error", err)
 			}
 		}()
@@ -433,7 +422,7 @@ func run() error {
 	go func() {
 		if cfg.TLS != nil {
 			logger.Info("starting HTTPS server", "addr", cfg.ListenAddr, "version", Version)
-			if err := srv.ListenAndServeTLS(cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil && err != http.ErrServerClosed {
+			if err := srv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
 				errCh <- err
 			}
 		} else {

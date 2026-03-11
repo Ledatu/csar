@@ -12,9 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledatu/csar-core/health"
+
 	"github.com/ledatu/csar/internal/config"
 	"github.com/ledatu/csar/internal/router"
-	"github.com/ledatu/csar/pkg/health"
 )
 
 // ============================================================================
@@ -63,12 +64,6 @@ func (u *upstreamAPI) setResponse(code int, body string) {
 	defer u.mu.Unlock()
 	u.responseCode = code
 	u.responseBody = body
-}
-
-func (u *upstreamAPI) setDelay(d time.Duration) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.responseDelay = d
 }
 
 func (u *upstreamAPI) getLastHeaders() http.Header {

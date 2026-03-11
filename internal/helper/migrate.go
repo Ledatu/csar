@@ -11,14 +11,14 @@ import (
 // MigrateOptions configures the db migrate command.
 type MigrateOptions struct {
 	Source      TokenSource
-	TargetDSN  string
-	Table      string // default: "csar_tokens"
-	Encrypt    bool   // whether to encrypt plaintext tokens before inserting
+	TargetDSN   string
+	Table       string // default: "csar_tokens"
+	Encrypt     bool   // whether to encrypt plaintext tokens before inserting
 	KMSProvider string
-	KMSKeyID   string
-	LocalKeys  map[string]string
-	DryRun     bool // show what would be done without writing
-	Upsert     bool // update existing tokens (default: true)
+	KMSKeyID    string
+	LocalKeys   map[string]string
+	DryRun      bool // show what would be done without writing
+	Upsert      bool // update existing tokens (default: true)
 
 	// Yandex KMS options (used when KMSProvider == "yandexapi")
 	YandexEndpoint   string

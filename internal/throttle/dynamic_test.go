@@ -85,9 +85,9 @@ func TestSanitizeKeyPart(t *testing.T) {
 	}{
 		{"abc123", "abc123"},
 		{"abc-def_ghi.jkl:mno", "abc-def_ghi.jkl:mno"},
-		{"abc/def", "abcdef"},          // slashes removed
-		{"abc def", "abcdef"},          // spaces removed
-		{"abc{def}", "abcdef"},         // braces removed
+		{"abc/def", "abcdef"},                 // slashes removed
+		{"abc def", "abcdef"},                 // spaces removed
+		{"abc{def}", "abcdef"},                // braces removed
 		{"a" + string(make([]byte, 200)), ""}, // long string truncated
 	}
 

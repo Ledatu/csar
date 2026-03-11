@@ -7,7 +7,8 @@ import "fmt"
 // (shallow merge). Must be called after Load / before Validate.
 func (c *Config) ResolveRetryPolicies() error {
 	for path, methods := range c.Paths {
-		for method, route := range methods {
+		for method := range methods {
+			route := methods[method]
 			if route.Retry == nil || route.Retry.Use == "" {
 				continue
 			}

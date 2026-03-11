@@ -7,7 +7,8 @@ import "fmt"
 // override policy values (shallow merge). Must be called after Load / before Validate.
 func (c *Config) ResolveAuthValidatePolicies() error {
 	for path, methods := range c.Paths {
-		for method, route := range methods {
+		for method := range methods {
+			route := methods[method]
 			if route.AuthValidate == nil || route.AuthValidate.Use == "" {
 				continue
 			}

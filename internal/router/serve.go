@@ -46,7 +46,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	rt, captures := r.matchRoute(req.Method, req.URL.Path)
 	if rt == nil {
 		apierror.New(apierror.CodeRouteNotFound, http.StatusNotFound,
-			"no route matched").WithDetail(req.Method+" "+req.URL.Path).
+			"no route matched").WithDetail(req.Method + " " + req.URL.Path).
 			WithRequestID(requestID).Write(w)
 		return
 	}
@@ -109,7 +109,7 @@ func (r *Router) serveWithIPCheck(w http.ResponseWriter, req *http.Request, rt *
 			"route", rt.routeKey,
 		)
 		apierror.New(apierror.CodeAccessDenied, http.StatusForbidden,
-			"access denied").WithDetail("client_ip: "+clientIP).
+			"access denied").WithDetail("client_ip: " + clientIP).
 			WithRequestID(r.requestID(req)).Write(w)
 		return
 	}
@@ -275,7 +275,7 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 				r.metrics.RecordSDKThrottled(rt.routeKey, "throttled")
 			}
 			apierror.New(apierror.CodeThrottled, http.StatusServiceUnavailable,
-				"global rate limit exceeded").WithRetryAfterMS(int64(retryAfterSec)*1000).
+				"global rate limit exceeded").WithRetryAfterMS(int64(retryAfterSec) * 1000).
 				WithDetail(err.Error()).WithRequestID(r.requestID(req)).Write(w)
 			return
 		}
@@ -345,7 +345,7 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 				if est, ok := activeThrottler.(throttle.RetryEstimator); ok {
 					retryAfter = est.EstimateRetryAfter()
 				} else if rt.config.Traffic != nil && rt.config.Traffic.MaxWait.Duration > 0 {
-					retryAfter = int(rt.config.Traffic.MaxWait.Duration.Seconds())
+					retryAfter = int(rt.config.Traffic.MaxWait.Seconds())
 					if retryAfter < 1 {
 						retryAfter = 1
 					}
@@ -357,7 +357,7 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 					r.metrics.RecordSDKThrottled(rt.routeKey, "throttled")
 				}
 				apierror.New(apierror.CodeThrottled, http.StatusServiceUnavailable,
-					"service temporarily unavailable").WithRetryAfterMS(int64(retryAfter)*1000).
+					"service temporarily unavailable").WithRetryAfterMS(int64(retryAfter) * 1000).
 					WithDetail(err.Error()).WithRequestID(r.requestID(req)).Write(w)
 				return
 			}
@@ -445,7 +445,7 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 					r.metrics.RecordSDKCircuitOpen(rt.routeKey)
 				}
 				apierror.New(apierror.CodeCircuitOpen, http.StatusServiceUnavailable,
-					"circuit breaker open").WithRetryAfterMS(int64(retryAfterSecs)*1000).
+					"circuit breaker open").WithRetryAfterMS(int64(retryAfterSecs) * 1000).
 					WithDetail(csarStatus).WithRequestID(r.requestID(req)).Write(w)
 			}
 		}
@@ -525,11 +525,7 @@ func isStreamingRequest(r *http.Request) bool {
 
 	// SSE: Accept: text/event-stream
 	accept := r.Header.Get("Accept")
-	if strings.Contains(accept, "text/event-stream") {
-		return true
-	}
-
-	return false
+	return strings.Contains(accept, "text/event-stream")
 }
 
 // statusCapture captures the HTTP status code without blocking the response.

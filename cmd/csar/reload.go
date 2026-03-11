@@ -140,7 +140,8 @@ func logStartupSummary(logger *slog.Logger, cfg *config.Config, r *router.Router
 	secureRoutes := 0
 	throttledRoutes := 0
 	for _, pathCfg := range cfg.Paths {
-		for _, routeCfg := range pathCfg {
+		for method := range pathCfg {
+			routeCfg := pathCfg[method]
 			totalRoutes++
 			if len(routeCfg.Security) > 0 {
 				secureRoutes++

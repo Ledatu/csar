@@ -225,7 +225,6 @@ func TestAuthService_ReadThrough_CachesOnce(t *testing.T) {
 	errs := make([]error, concurrency)
 
 	for i := 0; i < concurrency; i++ {
-		i := i
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

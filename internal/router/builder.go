@@ -85,8 +85,10 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 		logger.Info("registered circuit breaker", "name", name)
 	}
 
-	for _, fr := range cfg.FlatRoutes() {
-		if err := r.buildRoute(cfg, fr, cbManager, logger); err != nil {
+	flatRoutes := cfg.FlatRoutes()
+	for i := range flatRoutes {
+		fr := &flatRoutes[i]
+		if err := r.buildRoute(cfg, *fr, cbManager, logger); err != nil {
 			return nil, err
 		}
 	}

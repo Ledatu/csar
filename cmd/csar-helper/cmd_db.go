@@ -90,17 +90,17 @@ var (
 	migrateHTTPHeaders []string
 
 	// S3 source
-	migrateS3Bucket         string
-	migrateS3Endpoint       string
-	migrateS3Region         string
-	migrateS3Prefix         string
-	migrateS3AuthMode       string
-	migrateS3AccessKeyID    string
+	migrateS3Bucket          string
+	migrateS3Endpoint        string
+	migrateS3Region          string
+	migrateS3Prefix          string
+	migrateS3AuthMode        string
+	migrateS3AccessKeyID     string
 	migrateS3SecretAccessKey string
-	migrateS3IAMToken       string
-	migrateS3OAuthToken     string
-	migrateS3SAKeyFile      string
-	migrateS3KMSMode        string
+	migrateS3IAMToken        string
+	migrateS3OAuthToken      string
+	migrateS3SAKeyFile       string
+	migrateS3KMSMode         string
 
 	// Yandex KMS
 	migrateYandexEndpoint   string
@@ -182,11 +182,11 @@ optionally encrypts them, and inserts/upserts them into the target database.`,
 				Region:   migrateS3Region,
 				Prefix:   migrateS3Prefix,
 				Auth: ycloud.AuthConfig{
-					AuthMode:       migrateS3AuthMode,
-					IAMToken:       logging.NewSecret(migrateS3IAMToken),
-					OAuthToken:     logging.NewSecret(migrateS3OAuthToken),
-					SAKeyFile:      migrateS3SAKeyFile,
-					AccessKeyID:    logging.NewSecret(migrateS3AccessKeyID),
+					AuthMode:        migrateS3AuthMode,
+					IAMToken:        logging.NewSecret(migrateS3IAMToken),
+					OAuthToken:      logging.NewSecret(migrateS3OAuthToken),
+					SAKeyFile:       migrateS3SAKeyFile,
+					AccessKeyID:     logging.NewSecret(migrateS3AccessKeyID),
 					SecretAccessKey: logging.NewSecret(migrateS3SecretAccessKey),
 				},
 			}, logger)

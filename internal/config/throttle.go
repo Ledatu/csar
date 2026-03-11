@@ -7,7 +7,8 @@ import "fmt"
 // values (shallow merge). Must be called after Load / before Validate.
 func (c *Config) ResolveThrottlePolicies() error {
 	for path, methods := range c.Paths {
-		for method, route := range methods {
+		for method := range methods {
+			route := methods[method]
 			if route.Traffic == nil || route.Traffic.Use == "" {
 				continue
 			}

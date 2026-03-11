@@ -42,7 +42,7 @@ func AdminAuthMiddleware(validator *authn.JWTValidator, cfg AdminAuthConfig, log
 		HeaderName:  "Authorization",
 		TokenPrefix: "Bearer ",
 		CacheTTL:    5 * time.Minute,
-		ForwardClaims: map[string]string{
+		ForwardClaims: map[string]string{ //nolint:gosec // G101: header mapping names, not credentials
 			"sub":              "X-Admin-Sub",
 			"scope":            "X-Admin-Scope",
 			"tenant":           "X-Admin-Tenant",

@@ -27,29 +27,29 @@ import (
 
 // route holds a compiled route with its proxy and throttler.
 type route struct {
-	config         config.RouteConfig
-	proxy          *proxy.ReverseProxy
-	loadBalancer   http.Handler              // nil if no load balancing; otherwise a load-balancing handler
-	throttler      throttle.Waiter           // nil if no traffic shaping configured
-	circuitBreaker *resilience.CircuitBreaker // nil if no resilience configured
-	backpressureHandler http.Handler              // proxy wrapped with backpressure middleware (nil = disabled)
-	retryHandler        http.Handler              // proxy wrapped with retry middleware (nil = use proxy directly)
-	routeKey       string                    // "METHOD:PATH"
-	injectHeaders  []string                  // headers to strip/inject for security (e.g. ["Authorization", "X-Client-Secret"])
-	allowCIDRs     []*net.IPNet              // nil = use global; empty after init = deny all (shouldn't happen)
-	hasRouteACL    bool                      // true if this route has its own x-csar-access (overrides global)
-	trustProxy     bool                      // route-scoped: trust X-Forwarded-For / X-Real-IP for this route
-	pathPattern    *regexp.Regexp            // compiled regex when path contains {var:regex} variables
-	pathRewrite    string                    // rewrite template with $1/$2 back-references
-	method         string                    // HTTP method for this route (uppercase)
-	originalPath   string                    // the original path definition (e.g. "/api/v1/users/{id:[0-9]+}")
-	jwtConfig      *authn.Config             // nil if no inbound JWT validation
-	dlpConfig      *dlp.Config               // nil if no response redaction
-	tenantConfig   *tenant.Config            // nil if no multi-tenant routing
-	corsConfig     *config.CORSConfig        // nil if no CORS configuration
-	cacheConfig    *cache.Config             // nil if no response caching
-	excludeIPs     []*net.IPNet              // IPs/CIDRs that bypass this route's throttle
-	vipOverrides   []vipOverride             // header-based throttle policy swaps
+	config              config.RouteConfig
+	proxy               *proxy.ReverseProxy
+	loadBalancer        http.Handler               // nil if no load balancing; otherwise a load-balancing handler
+	throttler           throttle.Waiter            // nil if no traffic shaping configured
+	circuitBreaker      *resilience.CircuitBreaker // nil if no resilience configured
+	backpressureHandler http.Handler               // proxy wrapped with backpressure middleware (nil = disabled)
+	retryHandler        http.Handler               // proxy wrapped with retry middleware (nil = use proxy directly)
+	routeKey            string                     // "METHOD:PATH"
+	injectHeaders       []string                   // headers to strip/inject for security (e.g. ["Authorization", "X-Client-Secret"])
+	allowCIDRs          []*net.IPNet               // nil = use global; empty after init = deny all (shouldn't happen)
+	hasRouteACL         bool                       // true if this route has its own x-csar-access (overrides global)
+	trustProxy          bool                       // route-scoped: trust X-Forwarded-For / X-Real-IP for this route
+	pathPattern         *regexp.Regexp             // compiled regex when path contains {var:regex} variables
+	pathRewrite         string                     // rewrite template with $1/$2 back-references
+	method              string                     // HTTP method for this route (uppercase)
+	originalPath        string                     // the original path definition (e.g. "/api/v1/users/{id:[0-9]+}")
+	jwtConfig           *authn.Config              // nil if no inbound JWT validation
+	dlpConfig           *dlp.Config                // nil if no response redaction
+	tenantConfig        *tenant.Config             // nil if no multi-tenant routing
+	corsConfig          *config.CORSConfig         // nil if no CORS configuration
+	cacheConfig         *cache.Config              // nil if no response caching
+	excludeIPs          []*net.IPNet               // IPs/CIDRs that bypass this route's throttle
+	vipOverrides        []vipOverride              // header-based throttle policy swaps
 }
 
 // vipOverride associates a header with a map of values → alternate Waiters.
@@ -66,21 +66,21 @@ type Router struct {
 	regexRoutes      []*route          // routes with {var:regex} patterns (checked after exact match)
 	cfg              *config.Config
 	logger           *slog.Logger
-	metrics          *metrics.Metrics        // nil if no metrics
-	telemetry        *telemetry.Provider     // nil if no telemetry
-	authInjector     *middleware.AuthInjector // nil if no auth injection configured
-	jwtValidator     *authn.JWTValidator     // nil if no route uses JWT validation
-	dlpRedactor      *dlp.Redactor           // nil if no route uses DLP redaction
-	tenantRouter     *tenant.Router          // nil if no route uses tenant routing
-	responseCache    *cache.ResponseCache    // nil if no route uses response caching
-	ssrfProtection   *proxy.SSRFProtection   // nil if SSRF protection is disabled
+	metrics          *metrics.Metrics          // nil if no metrics
+	telemetry        *telemetry.Provider       // nil if no telemetry
+	authInjector     *middleware.AuthInjector  // nil if no auth injection configured
+	jwtValidator     *authn.JWTValidator       // nil if no route uses JWT validation
+	dlpRedactor      *dlp.Redactor             // nil if no route uses DLP redaction
+	tenantRouter     *tenant.Router            // nil if no route uses tenant routing
+	responseCache    *cache.ResponseCache      // nil if no route uses response caching
+	ssrfProtection   *proxy.SSRFProtection     // nil if SSRF protection is disabled
 	throttleManager  *throttle.ThrottleManager // manages all per-route throttlers
-	redisClient      *redis.Client           // shared Redis client for distributed throttling (nil if not configured)
-	pools            []*loadbalancer.Pool     // tracked for Close() cleanup on reload
-	globalCIDRs      []*net.IPNet            // parsed global access_control.allow_cidrs
-	hasGlobalACL     bool                    // true if global access_control is configured
-	globalTrustProxy bool                    // global default for trust_proxy (from access_control)
-	reqIDHeader      string                  // resolved request ID header name (default: "X-Request-ID")
+	redisClient      *redis.Client             // shared Redis client for distributed throttling (nil if not configured)
+	pools            []*loadbalancer.Pool      // tracked for Close() cleanup on reload
+	globalCIDRs      []*net.IPNet              // parsed global access_control.allow_cidrs
+	hasGlobalACL     bool                      // true if global access_control is configured
+	globalTrustProxy bool                      // global default for trust_proxy (from access_control)
+	reqIDHeader      string                    // resolved request ID header name (default: "X-Request-ID")
 }
 
 // GetThrottler returns the throttler for a given route key (for observability).

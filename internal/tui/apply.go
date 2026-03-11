@@ -56,7 +56,7 @@ func ApplyGenerateResult(r *GenerateResult) error {
 	// Phase 3: Write all files — no conflict check remains so partial
 	// failure here is an OS-level I/O error, not a user-input issue.
 	for _, f := range files {
-		if err := os.WriteFile(f.path, []byte(f.content), 0o644); err != nil {
+		if err := os.WriteFile(f.path, []byte(f.content), 0o644); err != nil { //nolint:gosec // G306: generated file is intentionally world-readable
 			return fmt.Errorf("writing %s: %w", f.path, err)
 		}
 		fmt.Printf("  %s created: %s\n", IconCheck, f.path)

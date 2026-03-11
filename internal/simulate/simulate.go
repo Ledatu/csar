@@ -61,7 +61,8 @@ func buildRouteTable(cfg *config.Config) (exact map[string]*compiledRoute, prefi
 	exact = make(map[string]*compiledRoute)
 
 	for path, methods := range cfg.Paths {
-		for method, route := range methods {
+		for method := range methods {
+			route := methods[method]
 			m := strings.ToUpper(method)
 			cr := &compiledRoute{
 				path:   path,
@@ -228,7 +229,7 @@ func resolveMiddlewares(cfg *config.Config, route config.RouteConfig, path strin
 	if route.Traffic != nil {
 		waitStr := "none"
 		if route.Traffic.MaxWait.Duration > 0 {
-			waitStr = route.Traffic.MaxWait.Duration.String()
+			waitStr = route.Traffic.MaxWait.String()
 		}
 		mws = append(mws, MiddlewareInfo{
 			Name:    "Rate Limit",
@@ -245,7 +246,7 @@ func resolveMiddlewares(cfg *config.Config, route config.RouteConfig, path strin
 			details = fmt.Sprintf("%s (threshold=%d, timeout=%s)",
 				route.Resilience.CircuitBreaker,
 				cb.FailureThreshold,
-				cb.Timeout.Duration.String())
+				cb.Timeout.String())
 		}
 		mws = append(mws, MiddlewareInfo{
 			Name:    "Circuit Breaker",
@@ -258,7 +259,7 @@ func resolveMiddlewares(cfg *config.Config, route config.RouteConfig, path strin
 	if route.Retry != nil {
 		mws = append(mws, MiddlewareInfo{
 			Name:    "Retry",
-			Details: fmt.Sprintf("max_attempts=%d, backoff=%s", route.Retry.MaxAttempts, route.Retry.Backoff.Duration.String()),
+			Details: fmt.Sprintf("max_attempts=%d, backoff=%s", route.Retry.MaxAttempts, route.Retry.Backoff.String()),
 			Impact:  "observes",
 		})
 	}
@@ -310,9 +311,11 @@ func resolveMiddlewares(cfg *config.Config, route config.RouteConfig, path strin
 
 func buildDecision(result *MatchResult) string {
 	var parts []string
-	parts = append(parts, fmt.Sprintf("Matched: %s %s", result.RouteMethod, result.RoutePath))
-	parts = append(parts, fmt.Sprintf("Target: %s", result.TargetURL))
-	parts = append(parts, fmt.Sprintf("Match type: %s", result.MatchType))
+	parts = append(parts,
+		fmt.Sprintf("Matched: %s %s", result.RouteMethod, result.RoutePath),
+		fmt.Sprintf("Target: %s", result.TargetURL),
+		fmt.Sprintf("Match type: %s", result.MatchType),
+	)
 
 	blockers := 0
 	modifiers := 0

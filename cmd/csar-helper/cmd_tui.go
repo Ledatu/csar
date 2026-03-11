@@ -15,7 +15,7 @@ import (
 
 var (
 	tuiConfigPath string
-	tuiContext     string // optional context name override
+	tuiContext    string // optional context name override
 )
 
 var tuiCmd = &cobra.Command{

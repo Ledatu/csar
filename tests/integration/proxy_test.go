@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledatu/csar-core/health"
+
 	"github.com/ledatu/csar/internal/config"
-	"github.com/ledatu/csar/pkg/health"
 )
 
 // TestE2E_BasicProxy: client → CSAR router → upstream → response back

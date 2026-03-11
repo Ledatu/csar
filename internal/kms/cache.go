@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"sync"
 	"time"
 
@@ -84,7 +85,11 @@ func (c *CachingProvider) Decrypt(ctx context.Context, keyID string, ciphertext 
 		return nil, err
 	}
 
-	return result.([]byte), nil
+	b, ok := result.([]byte)
+	if !ok {
+		return nil, fmt.Errorf("unexpected cache result type")
+	}
+	return b, nil
 }
 
 // Close releases the inner provider and clears the cache.

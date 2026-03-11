@@ -56,8 +56,7 @@ func RenderValidationReport(profile string, violations []error, warnings []strin
 			Width(70)
 
 		var errLines []string
-		errLines = append(errLines, ErrorStyle.Render(fmt.Sprintf("\n  %s  %d error(s)", IconCross, len(violations))))
-		errLines = append(errLines, "")
+		errLines = append(errLines, ErrorStyle.Render(fmt.Sprintf("\n  %s  %d error(s)", IconCross, len(violations))), "")
 		for _, v := range violations {
 			errLines = append(errLines, fmt.Sprintf("  %s %s",
 				ErrorStyle.Render(IconDot),
@@ -77,8 +76,7 @@ func RenderValidationReport(profile string, violations []error, warnings []strin
 			Width(70)
 
 		var warnLines []string
-		warnLines = append(warnLines, WarningStyle.Render(fmt.Sprintf("\n  %s  %d warning(s)", IconWarning, len(warnings))))
-		warnLines = append(warnLines, "")
+		warnLines = append(warnLines, WarningStyle.Render(fmt.Sprintf("\n  %s  %d warning(s)", IconWarning, len(warnings))), "")
 		for _, w := range warnings {
 			warnLines = append(warnLines, fmt.Sprintf("  %s %s",
 				WarningStyle.Render(IconDot),

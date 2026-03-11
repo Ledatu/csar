@@ -185,7 +185,10 @@ func (s *AuthServiceImpl) GetEncryptedToken(ctx context.Context, req *csarv1.Tok
 
 		switch {
 		case fetchErr == nil:
-			fetched := res.(TokenEntry)
+			fetched, typeOK := res.(TokenEntry)
+			if !typeOK {
+				return nil, status.Errorf(codes.Internal, "unexpected cache result type")
+			}
 			if !s.isValid(req.TokenRef, fetched) {
 				return nil, status.Errorf(codes.NotFound, "token ref %q not found (invalid)", req.TokenRef)
 			}

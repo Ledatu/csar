@@ -8,9 +8,9 @@ import (
 )
 
 var (
-	devJWKSPubKey   string
-	devJWKSFile     string
-	devJWKSAddr     string
+	devJWKSPubKey string
+	devJWKSFile   string
+	devJWKSAddr   string
 )
 
 var devJWKSCmd = &cobra.Command{

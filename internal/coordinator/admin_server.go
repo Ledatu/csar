@@ -18,14 +18,14 @@ import (
 
 // AdminServer is the internal HTTPS server for token lifecycle management.
 type AdminServer struct {
-	cfg       AdminAPIConfig
-	authSvc   *AuthServiceImpl
-	coord     *Coordinator
-	store     MutableTokenStore
+	cfg         AdminAPIConfig
+	authSvc     *AuthServiceImpl
+	coord       *Coordinator
+	store       MutableTokenStore
 	kmsProvider kms.Provider // nil when s3_manages_encryption=true
-	logger    *slog.Logger
-	metrics   *AdminMetrics
-	server    *http.Server
+	logger      *slog.Logger
+	metrics     *AdminMetrics
+	server      *http.Server
 }
 
 // NewAdminServer creates an AdminServer wired to the coordinator's internal
@@ -97,8 +97,8 @@ func (s *AdminServer) ListenAndServe() error {
 	)
 
 	if s.cfg.S3ManagesEncryption != nil && *s.cfg.S3ManagesEncryption {
-		s.logger.Warn("s3_manages_encryption=true: token values are stored as plaintext in S3, "+
-			"relying entirely on S3 server-side encryption. "+
+		s.logger.Warn("s3_manages_encryption=true: token values are stored as plaintext in S3, " +
+			"relying entirely on S3 server-side encryption. " +
 			"This trades away application-layer KMS wrapping. Use only if acceptable for your threat model.")
 	}
 
@@ -133,7 +133,7 @@ func (s *AdminServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 type putTokenRequest struct {
 	Value    string            `json:"value"`
-	KMSKeyID string           `json:"kms_key_id"`
+	KMSKeyID string            `json:"kms_key_id"`
 	Mode     string            `json:"mode"`
 	Metadata map[string]string `json:"metadata"`
 }
@@ -324,10 +324,10 @@ func (s *AdminServer) handleDeleteToken(w http.ResponseWriter, r *http.Request) 
 // --- GET (metadata only) ---
 
 type tokenMetadataResponse struct {
-	TokenRef  string `json:"token_ref"`
-	KMSKeyID  string `json:"kms_key_id,omitempty"`
-	Version   string `json:"version,omitempty"`
-	HasValue  bool   `json:"has_value"`
+	TokenRef string `json:"token_ref"`
+	KMSKeyID string `json:"kms_key_id,omitempty"`
+	Version  string `json:"version,omitempty"`
+	HasValue bool   `json:"has_value"`
 }
 
 func (s *AdminServer) handleGetToken(w http.ResponseWriter, r *http.Request) {

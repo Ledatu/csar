@@ -67,7 +67,7 @@ func TestStartSpan_CreatesChildSpan(t *testing.T) {
 
 	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Start a child span
-		r, span := p.StartSpan(r, "child-operation")
+		_, span := p.StartSpan(r, "child-operation")
 		defer span.End()
 
 		// Span should be valid (even if noop)

@@ -34,8 +34,7 @@ func printGenerateSummary(r *GenerateResult) {
 	}
 
 	if len(r.Routes) > 0 {
-		lines = append(lines, "")
-		lines = append(lines, LabelStyle.Render("Routes:"))
+		lines = append(lines, "", LabelStyle.Render("Routes:"))
 		for _, rt := range r.Routes {
 			lines = append(lines,
 				fmt.Sprintf("  %s %s %s %s",
@@ -51,7 +50,7 @@ func printGenerateSummary(r *GenerateResult) {
 	if r.GenerateCompose {
 		lines = append(lines,
 			"",
-			LabelStyle.Render("Docker Compose:") + "  " + SuccessStyle.Render("yes"),
+			LabelStyle.Render("Docker Compose:")+"  "+SuccessStyle.Render("yes"),
 		)
 		var svc []string
 		svc = append(svc, "router")
@@ -65,13 +64,13 @@ func printGenerateSummary(r *GenerateResult) {
 			svc = append(svc, "postgres")
 		}
 		lines = append(lines,
-			LabelStyle.Render("Services:") + "  " + ValueStyle.Render(strings.Join(svc, ", ")),
+			LabelStyle.Render("Services:")+"  "+ValueStyle.Render(strings.Join(svc, ", ")),
 		)
 	}
 
 	lines = append(lines,
 		"",
-		LabelStyle.Render("Output:") + "  " + ValueStyle.Render(r.OutputDir),
+		LabelStyle.Render("Output:")+"  "+ValueStyle.Render(r.OutputDir),
 		"",
 		DimStyle.Render("Files created:"),
 		DimStyle.Render("  "+IconCheck+" config.yaml"),

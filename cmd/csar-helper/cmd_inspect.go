@@ -109,7 +109,9 @@ func routeToAnnotatedMap(route config.RouteConfig) map[string]interface{} {
 		return nil
 	}
 	var m map[string]interface{}
-	yaml.Unmarshal(data, &m)
+	if err := yaml.Unmarshal(data, &m); err != nil {
+		return nil
+	}
 	return m
 }
 

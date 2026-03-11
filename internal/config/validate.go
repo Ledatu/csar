@@ -132,12 +132,9 @@ func (c *Config) Validate() error {
 		if coord.InvalidationBufferSize != 0 && coord.InvalidationBufferSize < 100 {
 			return fmt.Errorf("coordinator.invalidation_buffer_size must be >= 100, got %d", coord.InvalidationBufferSize)
 		}
-	} else {
-		// Coordinator is disabled — warn if TLS fields are set (dead config)
-		if coord.CAFile != "" || coord.CertFile != "" || coord.KeyFile != "" {
-			warnings = append(warnings,
-				"coordinator is disabled but TLS fields (ca_file/cert_file/key_file) are set — these have no effect")
-		}
+	} else if coord.CAFile != "" || coord.CertFile != "" || coord.KeyFile != "" {
+		warnings = append(warnings,
+			"coordinator is disabled but TLS fields (ca_file/cert_file/key_file) are set — these have no effect")
 	}
 
 	// Validate global access control
@@ -160,7 +157,8 @@ func (c *Config) Validate() error {
 	}
 
 	for path, methods := range c.Paths {
-		for method, route := range methods {
+		for method := range methods {
+			route := methods[method]
 			if route.Backend.TargetURL == "" {
 				return fmt.Errorf("path %s method %s: x-csar-backend.target_url is required", path, method)
 			}

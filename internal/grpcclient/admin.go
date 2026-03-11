@@ -91,24 +91,14 @@ func Connect(opts ConnectOptions) (*AdminClient, error) {
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
 	}
 
-	// Block until the connection is actually established (or timeout).
-	// Without WithBlock, DialContext returns immediately and failures surface
-	// only on the first RPC — misleading for CLI users.
-	dialOpts = append(dialOpts, grpc.WithBlock())
+	opts.Logger.Info("creating gRPC client for coordinator", "address", opts.Address)
 
-	ctx, cancel := context.WithTimeout(context.Background(), opts.Timeout)
-	defer cancel()
-
-	opts.Logger.Info("connecting to coordinator…", "address", opts.Address, "timeout", opts.Timeout)
-
-	dialStart := time.Now()
-	conn, err := grpc.DialContext(ctx, opts.Address, dialOpts...)
-	dialDuration := time.Since(dialStart)
+	conn, err := grpc.NewClient(opts.Address, dialOpts...)
 	if err != nil {
-		return nil, fmt.Errorf("connecting to coordinator at %s (failed after %s): %w", opts.Address, dialDuration.Round(time.Millisecond), err)
+		return nil, fmt.Errorf("creating gRPC client for coordinator at %s: %w", opts.Address, err)
 	}
 
-	opts.Logger.Info("connected to coordinator (transport ready)", "address", opts.Address, "dial_duration", dialDuration.Round(time.Millisecond))
+	opts.Logger.Info("gRPC client created (connection is lazy)", "address", opts.Address)
 
 	return &AdminClient{
 		conn:   conn,

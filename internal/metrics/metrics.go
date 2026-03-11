@@ -93,7 +93,11 @@ type Metrics struct {
 // If registry is nil, the default global registry is used.
 func New(registry *prometheus.Registry) *Metrics {
 	if registry == nil {
-		registry = prometheus.DefaultRegisterer.(*prometheus.Registry)
+		reg, ok := prometheus.DefaultRegisterer.(*prometheus.Registry)
+		if !ok {
+			reg = prometheus.NewRegistry()
+		}
+		registry = reg
 	}
 
 	factory := promauto.With(registry)

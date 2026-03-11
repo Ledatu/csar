@@ -46,10 +46,10 @@ type AdminAuthConfig struct {
 
 // AdminAuthzConfig holds authorization policy settings.
 type AdminAuthzConfig struct {
-	RequiredScopes            map[string]string // operation -> scope (e.g. "write" -> "csar.token.write")
-	EnforceTokenPrefixClaim   bool
-	EnforceAllowedKMSKeys     bool
-	AllowedKMSKeys            []string
+	RequiredScopes          map[string]string // operation -> scope (e.g. "write" -> "csar.token.write")
+	EnforceTokenPrefixClaim bool
+	EnforceAllowedKMSKeys   bool
+	AllowedKMSKeys          []string
 }
 
 // AdminLimitsConfig holds request limits for the admin API.

@@ -47,13 +47,13 @@ func DefaultSSRFProtection() *SSRFProtection {
 // Well-known private/reserved subnets.
 var (
 	// RFC 1918 — Private IPv4
-	private10    = mustParseCIDR("10.0.0.0/8")
-	private172   = mustParseCIDR("172.16.0.0/12")
-	private192   = mustParseCIDR("192.168.0.0/16")
+	private10  = mustParseCIDR("10.0.0.0/8")
+	private172 = mustParseCIDR("172.16.0.0/12")
+	private192 = mustParseCIDR("192.168.0.0/16")
 	// RFC 3927 — Link-Local IPv4
-	linkLocal4   = mustParseCIDR("169.254.0.0/16")
+	linkLocal4 = mustParseCIDR("169.254.0.0/16")
 	// RFC 4291 — Link-Local IPv6
-	linkLocal6   = mustParseCIDR("fe80::/10")
+	linkLocal6 = mustParseCIDR("fe80::/10")
 	// Cloud metadata endpoint
 	metadataAddr = net.ParseIP("169.254.169.254")
 )

@@ -132,7 +132,7 @@ func TestSecret_LogValue_Redacts(t *testing.T) {
 
 func TestSecret_String_Redacts(t *testing.T) {
 	s := NewSecret("my-password")
-	str := fmt.Sprintf("%s", s)
+	str := s.String()
 	if str != "[REDACTED]" {
 		t.Errorf("String() should return [REDACTED], got %q", str)
 	}

@@ -53,7 +53,6 @@ func CheckAdminAuthorization(claims *AdminClaims, authzCfg AdminAuthzConfig, op 
 		}
 	}
 
-	isMutatingOp := op == OpWrite || op == OpRotate || op == OpDelete
 	if authzCfg.EnforceAllowedKMSKeys && kmsKeyID != "" {
 		if len(claims.AllowedKMSKeys) == 0 {
 			return fmt.Errorf("authorization: allowed_kms_keys claim is required but absent")
@@ -68,10 +67,6 @@ func CheckAdminAuthorization(claims *AdminClaims, authzCfg AdminAuthzConfig, op 
 		if !found {
 			return fmt.Errorf("authorization: kms_key_id %q not in allowed list", kmsKeyID)
 		}
-	} else if authzCfg.EnforceAllowedKMSKeys && isMutatingOp && len(claims.AllowedKMSKeys) == 0 && kmsKeyID == "" {
-		// For mutating operations, if enforcement is on and the claim is absent,
-		// still allow only when kms_key_id is not involved (e.g. s3_manages_encryption=true).
-		// This is intentionally permissive for passthrough mode only.
 	}
 
 	if len(authzCfg.AllowedKMSKeys) > 0 && kmsKeyID != "" {

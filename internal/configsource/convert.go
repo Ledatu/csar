@@ -37,7 +37,9 @@ import (
 func ConfigToRouteEntries(cfg *config.Config) map[string]statestore.RouteEntry {
 	entries := make(map[string]statestore.RouteEntry)
 
-	for _, fr := range cfg.FlatRoutes() {
+	flatRoutes := cfg.FlatRoutes()
+	for i := range flatRoutes {
+		fr := &flatRoutes[i]
 		routeID := strings.ToUpper(fr.Method) + ":" + fr.Path
 
 		entry := statestore.RouteEntry{

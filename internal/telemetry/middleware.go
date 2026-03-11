@@ -1,6 +1,7 @@
 package telemetry
 
 import (
+	"context"
 	"net/http"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -28,5 +29,5 @@ func (p *Provider) StartSpan(r *http.Request, name string, attrs ...attribute.Ke
 func (p *Provider) SpanFromContext(parent trace.SpanContext, name string, attrs ...attribute.KeyValue) (trace.Span, func()) {
 	// This is a simplified helper — for full control use the tracer directly.
 	// In practice, the parent context carries the span.
-	return trace.SpanFromContext(nil), func() {}
+	return trace.SpanFromContext(context.Background()), func() {}
 }

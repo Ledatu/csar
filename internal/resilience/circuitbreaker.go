@@ -46,8 +46,8 @@ type CircuitBreakerConfig struct {
 
 // CircuitBreaker implements the circuit breaker pattern.
 type CircuitBreaker struct {
-	cfg   CircuitBreakerConfig
-	name  string
+	cfg  CircuitBreakerConfig
+	name string
 
 	mu               sync.Mutex
 	state            CircuitState

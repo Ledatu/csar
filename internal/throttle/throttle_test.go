@@ -298,9 +298,6 @@ func TestThrottleManager_SyncKeys_AllActive(t *testing.T) {
 
 func TestWaiterInterface_ThrottlerSatisfies(t *testing.T) {
 	var w Waiter = New(10, 5, time.Second)
-	if w == nil {
-		t.Fatal("Throttler should satisfy Waiter interface")
-	}
 	if w.Waiting() != 0 {
 		t.Errorf("Waiting() = %d, want 0", w.Waiting())
 	}

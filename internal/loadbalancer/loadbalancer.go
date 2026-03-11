@@ -22,7 +22,6 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -90,15 +89,14 @@ type Pool struct {
 	strategy Strategy
 	counter  atomic.Uint64
 	logger   *slog.Logger
-	mu       sync.RWMutex
 	pathMode string // "replace" (default) or "append"
 
 	// Health checking state (parallel arrays to targets/proxies).
-	healthy  []atomic.Bool  // true = target is healthy (default: all true)
-	failures []atomic.Int32 // consecutive failure count per target
-	successes []atomic.Int32 // consecutive success count per target
-	hcConfig *HealthCheckConfig // nil if health checking is disabled
-	cancel   context.CancelFunc // cancels the health check goroutines
+	healthy   []atomic.Bool      // true = target is healthy (default: all true)
+	failures  []atomic.Int32     // consecutive failure count per target
+	successes []atomic.Int32     // consecutive success count per target
+	hcConfig  *HealthCheckConfig // nil if health checking is disabled
+	cancel    context.CancelFunc // cancels the health check goroutines
 }
 
 // PoolOption configures the load balancer Pool.
@@ -378,7 +376,7 @@ func (p *Pool) selectTarget() int {
 func (p *Pool) selectRoundRobin(n int) int {
 	start := p.counter.Add(1)
 	for i := 0; i < n; i++ {
-		idx := int((start - 1 + uint64(i)) % uint64(n))
+		idx := int((start - 1 + uint64(i)) % uint64(n)) //nolint:gosec // G115: n is always non-negative (slice length)
 		if p.healthy[idx].Load() {
 			return idx
 		}
@@ -389,7 +387,7 @@ func (p *Pool) selectRoundRobin(n int) int {
 // selectRandom picks a random healthy target.
 func (p *Pool) selectRandom(n int) int {
 	// Try a random target first (fast path).
-	idx := rand.IntN(n)
+	idx := rand.IntN(n) //nolint:gosec // G404: non-cryptographic use for load balancing
 	if p.healthy[idx].Load() {
 		return idx
 	}

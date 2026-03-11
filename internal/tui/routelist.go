@@ -17,10 +17,10 @@ import (
 
 // RouteItem represents a single route in the bubbles list.
 type RouteItem struct {
-	Path    string
-	Method  string
-	Route   config.RouteConfig
-	Dirty   bool // true if modified since last save
+	Path   string
+	Method string
+	Route  config.RouteConfig
+	Dirty  bool // true if modified since last save
 }
 
 func (i RouteItem) FilterValue() string {
@@ -97,9 +97,8 @@ func (d routeDelegate) Render(w io.Writer, m list.Model, index int, listItem lis
 
 // RouteListModel wraps bubbles/list for displaying routes.
 type RouteListModel struct {
-	list     list.Model
-	keys     routeListKeyMap
-	quitting bool
+	list list.Model
+	keys routeListKeyMap
 }
 
 type routeListKeyMap struct {
@@ -168,7 +167,10 @@ func (m RouteListModel) SelectedRoute() *RouteItem {
 	if item == nil {
 		return nil
 	}
-	ri := item.(RouteItem)
+	ri, ok := item.(RouteItem)
+	if !ok {
+		return nil
+	}
 	return &ri
 }
 
@@ -241,9 +243,9 @@ func configToItems(cfg *config.Config) []list.Item {
 	return items
 }
 
-func truncate(s string, max int) string {
-	if len(s) <= max {
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
 		return s
 	}
-	return s[:max-1] + "…"
+	return s[:maxLen-1] + "…"
 }

@@ -37,17 +37,17 @@ const (
 
 // AppModel is the top-level Bubble Tea model for the TUI route editor.
 type AppModel struct {
-	cfg        *config.Config
-	cfgPath    string
-	screen     appScreen
-	routeList  RouteListModel
-	routeEdit  RouteEditModel
-	routeAdd   RouteAddModel
-	width      int
-	height     int
-	statusMsg  string
-	statusErr  bool
-	pushFn     func(*config.Config) error // optional: push to coordinator
+	cfg       *config.Config
+	cfgPath   string
+	screen    appScreen
+	routeList RouteListModel
+	routeEdit RouteEditModel
+	routeAdd  RouteAddModel
+	width     int
+	height    int
+	statusMsg string
+	statusErr bool
+	pushFn    func(*config.Config) error // optional: push to coordinator
 }
 
 // AppOption configures the TUI app.
@@ -281,5 +281,5 @@ func (m AppModel) View() string {
 
 // writeConfigFile writes data to a config file.
 func writeConfigFile(path string, data []byte) error {
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o644) //nolint:gosec // G306: config file is intentionally world-readable
 }

@@ -341,7 +341,7 @@ func (a *AuthInjector) getStale(tokenRef string) string {
 	if a.staleTTL > 0 && time.Since(entry.addedAt) > a.staleTTL {
 		// Lazy eviction: remove expired entry.
 		a.staleMu.Lock()
-		if e, exists := a.staleCache[tokenRef]; exists && e.addedAt == entry.addedAt {
+		if e, exists := a.staleCache[tokenRef]; exists && e.addedAt.Equal(entry.addedAt) {
 			delete(a.staleCache, tokenRef)
 		}
 		a.staleMu.Unlock()

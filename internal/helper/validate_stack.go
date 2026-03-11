@@ -60,13 +60,10 @@ func ValidateStack(stackDir string) *StackCheckResult {
 	if _, err := os.Stat(tlsDir); err == nil {
 		result.addInfo("TLS directory", "tls/ directory found")
 		checkTLSCerts(result, tlsDir)
-	} else {
-		// Check if config.yaml references TLS
-		if configReferencesPath(configPath, "cert_file") || configReferencesPath(configPath, "key_file") {
-			result.addWarning("TLS directory",
-				"Config references TLS certificates but tls/ directory not found. "+
-					"Run: csar-helper generate to create dev certs.")
-		}
+	} else if configReferencesPath(configPath, "cert_file") || configReferencesPath(configPath, "key_file") {
+		result.addWarning("TLS directory",
+			"Config references TLS certificates but tls/ directory not found. "+
+				"Run: csar-helper generate to create dev certs.")
 	}
 
 	// 5. Check DB DSN syntax in .env
@@ -155,7 +152,7 @@ func checkComposeVolumeMounts(result *StackCheckResult, composePath, stackDir st
 		matches := volumeRegex.FindStringSubmatch(line)
 		if len(matches) >= 2 {
 			hostPath := filepath.Join(stackDir, matches[1])
-			if _, err := os.Stat(hostPath); os.IsNotExist(err) {
+			if _, err := os.Stat(hostPath); os.IsNotExist(err) { //nolint:gosec // G703: hostPath is from config validation, not untrusted input
 				result.addWarning("volume mount: "+matches[1],
 					fmt.Sprintf("Volume mount host path %s does not exist", hostPath))
 			}
@@ -192,14 +189,15 @@ func checkDBDSN(result *StackCheckResult, envPath string) {
 			}
 			// Basic URL validation
 			_, err := url.Parse(dsn)
-			if err != nil {
+			switch {
+			case err != nil:
 				result.addError("DB DSN",
 					fmt.Sprintf("CSAR_TOKEN_STORE_DSN has invalid URL syntax: %v", err))
-			} else if !strings.HasPrefix(dsn, "postgres://") && !strings.HasPrefix(dsn, "postgresql://") &&
-				!strings.HasPrefix(dsn, "mysql://") && !strings.HasPrefix(dsn, "sqlite://") {
+			case !strings.HasPrefix(dsn, "postgres://") && !strings.HasPrefix(dsn, "postgresql://") &&
+				!strings.HasPrefix(dsn, "mysql://") && !strings.HasPrefix(dsn, "sqlite://"):
 				result.addWarning("DB DSN",
 					"CSAR_TOKEN_STORE_DSN doesn't start with a known scheme (postgres://, mysql://, sqlite://)")
-			} else {
+			default:
 				result.addInfo("DB DSN", "CSAR_TOKEN_STORE_DSN syntax looks valid")
 			}
 			return

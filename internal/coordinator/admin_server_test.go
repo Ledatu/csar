@@ -49,7 +49,7 @@ func (m *mockMutableStore) Close() error { return nil }
 // mockKMSProvider implements kms.Provider for testing.
 type mockKMSProvider struct{}
 
-func (m *mockKMSProvider) Name() string                                                    { return "mock" }
+func (m *mockKMSProvider) Name() string { return "mock" }
 func (m *mockKMSProvider) Encrypt(_ context.Context, _ string, plaintext []byte) ([]byte, error) {
 	return append([]byte("enc:"), plaintext...), nil
 }

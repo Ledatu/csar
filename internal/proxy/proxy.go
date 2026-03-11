@@ -25,10 +25,10 @@ import (
 type csarCtxKey struct{ name string }
 
 var (
-	ctxKeyWaitMS      = csarCtxKey{"X-CSAR-Wait-MS"}
-	ctxKeyStatus      = csarCtxKey{"X-CSAR-Status"}
-	ctxKeyRetryAftr   = csarCtxKey{"Retry-After"}
-	ctxKeyProtoVer    = csarCtxKey{"X-CSAR-Protocol-Version"}
+	ctxKeyWaitMS    = csarCtxKey{"X-CSAR-Wait-MS"}
+	ctxKeyStatus    = csarCtxKey{"X-CSAR-Status"}
+	ctxKeyRetryAftr = csarCtxKey{"Retry-After"}
+	ctxKeyProtoVer  = csarCtxKey{"X-CSAR-Protocol-Version"}
 )
 
 // WithCSARHeaders stores X-CSAR-Wait-MS, X-CSAR-Status, Retry-After, and
@@ -131,15 +131,16 @@ func New(targetURL string, opts ...Option) (*ReverseProxy, error) {
 	}
 
 	// Configure transport
-	if o.transport != nil {
+	switch {
+	case o.transport != nil:
 		proxy.Transport = o.transport
-	} else if o.tls != nil {
+	case o.tls != nil:
 		transport, err := buildTLSTransport(o.tls, o.ssrfProtection)
 		if err != nil {
 			return nil, fmt.Errorf("building TLS transport for %q: %w", targetURL, err)
 		}
 		proxy.Transport = transport
-	} else if o.ssrfProtection != nil {
+	case o.ssrfProtection != nil:
 		// No TLS, but SSRF protection is enabled — use a plain transport with safe dialer.
 		proxy.Transport = &http.Transport{
 			DialContext:         safeDialContext(o.ssrfProtection),

@@ -39,22 +39,22 @@ const (
 
 // RouteEditModel is a form for editing a single route's properties.
 type RouteEditModel struct {
-	index     int
-	item      RouteItem
-	inputs    []textinput.Model
-	focused   editField
-	help      help.Model
-	keys      editKeyMap
-	width     int
-	height    int
-	err       error
+	index   int
+	item    RouteItem
+	inputs  []textinput.Model
+	focused editField
+	help    help.Model
+	keys    editKeyMap
+	width   int
+	height  int
+	err     error
 }
 
 type editKeyMap struct {
-	Tab   key.Binding
-	STab  key.Binding
-	Save  key.Binding
-	Back  key.Binding
+	Tab  key.Binding
+	STab key.Binding
+	Save key.Binding
+	Back key.Binding
 }
 
 func newEditKeyMap() editKeyMap {
@@ -126,7 +126,7 @@ func NewRouteEdit(index int, item RouteItem, width, height int) RouteEditModel {
 	inputs[fieldMaxWait] = textinput.New()
 	inputs[fieldMaxWait].Placeholder = "5s"
 	if item.Route.Traffic != nil && item.Route.Traffic.MaxWait.Duration > 0 {
-		inputs[fieldMaxWait].SetValue(item.Route.Traffic.MaxWait.Duration.String())
+		inputs[fieldMaxWait].SetValue(item.Route.Traffic.MaxWait.String())
 	}
 	inputs[fieldMaxWait].CharLimit = 20
 	inputs[fieldMaxWait].Width = 15
@@ -221,8 +221,7 @@ func (m RouteEditModel) View() string {
 
 	// Info panel on the right
 	var infoLines []string
-	infoLines = append(infoLines, SubtitleStyle.Render("Route Details"))
-	infoLines = append(infoLines, "")
+	infoLines = append(infoLines, SubtitleStyle.Render("Route Details"), "")
 	if len(m.item.Route.Security) > 0 {
 		infoLines = append(infoLines, fmt.Sprintf("  %s Security: %d credential(s)", IconShield, len(m.item.Route.Security)))
 		for _, sec := range m.item.Route.Security {
@@ -239,7 +238,7 @@ func (m RouteEditModel) View() string {
 		infoLines = append(infoLines, fmt.Sprintf("  CORS: %s", strings.Join(m.item.Route.CORS.AllowedOrigins, ", ")))
 	}
 	if m.item.Route.Cache != nil {
-		infoLines = append(infoLines, fmt.Sprintf("  💾 Cache: TTL %s", m.item.Route.Cache.TTL.Duration.String()))
+		infoLines = append(infoLines, fmt.Sprintf("  💾 Cache: TTL %s", m.item.Route.Cache.TTL.String()))
 	}
 	if len(m.item.Route.Headers) > 0 {
 		infoLines = append(infoLines, fmt.Sprintf("  Headers: %d static", len(m.item.Route.Headers)))

@@ -341,7 +341,7 @@ func TestResolveThrottlePolicies_MergeOrder(t *testing.T) {
 			"base": {
 				RPS:     10,
 				Burst:   20,
-				MaxWait: Duration{500 * time.Millisecond},
+				MaxWait: Duration{Duration: 500 * time.Millisecond},
 				Backend: "local",
 			},
 		},
@@ -351,8 +351,8 @@ func TestResolveThrottlePolicies_MergeOrder(t *testing.T) {
 					Backend: BackendConfig{TargetURL: "http://example.com"},
 					Traffic: &TrafficConfig{
 						Use:     "base",
-						Burst:   50,                              // override burst
-						MaxWait: Duration{2 * time.Second},      // override max_wait
+						Burst:   50,                                  // override burst
+						MaxWait: Duration{Duration: 2 * time.Second}, // override max_wait
 					},
 				},
 			},

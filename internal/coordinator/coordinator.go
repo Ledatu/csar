@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"log/slog"
+	"math"
 	"sync"
 	"time"
 
@@ -328,9 +329,13 @@ func (c *Coordinator) sendRouteSnapshot(stream csarv1.CoordinatorService_Subscri
 		}
 
 		if r.Traffic != nil {
+			burst := r.Traffic.Burst
+			if burst > math.MaxInt32 {
+				burst = math.MaxInt32
+			}
 			rc.Traffic = &csarv1.TrafficConfig{
 				Rps:     r.Traffic.RPS,
-				Burst:   int32(r.Traffic.Burst),
+				Burst:   int32(burst),
 				MaxWait: durationpb.New(r.Traffic.MaxWait),
 			}
 		}
@@ -378,9 +383,13 @@ func (c *Coordinator) sendQuotaAssignment(routerID string, stream csarv1.Coordin
 	quotas := make(map[string]*csarv1.RouteQuota)
 	for _, route := range routes {
 		if route.Traffic != nil {
+			burst := route.Traffic.Burst / activeRouters
+			if burst > math.MaxInt32 {
+				burst = math.MaxInt32
+			}
 			quotas[route.ID] = &csarv1.RouteQuota{
 				Rps:   route.Traffic.RPS / float64(activeRouters),
-				Burst: int32(route.Traffic.Burst / activeRouters),
+				Burst: int32(burst),
 			}
 			// Ensure at least burst of 1
 			if quotas[route.ID].Burst < 1 {

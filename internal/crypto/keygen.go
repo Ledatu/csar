@@ -30,7 +30,7 @@ type GenerateOptions struct {
 type GeneratedKey struct {
 	PrivateKeyPath string
 	PublicKeyPath  string
-	KID            string       // key ID derived from SHA-256 of public key
+	KID            string // key ID derived from SHA-256 of public key
 	Algorithm      KeyAlgorithm
 }
 
@@ -82,7 +82,7 @@ func GenerateKeyPair(opts GenerateOptions) (*GeneratedKey, error) {
 	if err := os.WriteFile(privPath, privPEM, 0o600); err != nil {
 		return nil, fmt.Errorf("writing private key: %w", err)
 	}
-	if err := os.WriteFile(pubPath, pubPEM, 0o644); err != nil {
+	if err := os.WriteFile(pubPath, pubPEM, 0o644); err != nil { //nolint:gosec // G306: public key is intentionally world-readable
 		return nil, fmt.Errorf("writing public key: %w", err)
 	}
 

@@ -208,7 +208,7 @@ func (m *Middleware) backoffDelay(attempt int) time.Duration {
 	}
 	// Full jitter: uniform random in [0, delay]
 	if delay > 0 {
-		delay = time.Duration(rand.Int64N(int64(delay)))
+		delay = time.Duration(rand.Int64N(int64(delay))) //nolint:gosec // G404: non-cryptographic use for retry jitter
 	}
 	return delay
 }

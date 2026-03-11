@@ -10,10 +10,10 @@ import (
 
 // DBInitOptions configures the db init command.
 type DBInitOptions struct {
-	DSN          string
-	Table        string // default: "csar_tokens"
-	IfNotExists  bool   // default: true
-	StateStore   bool   // also create state store tables
+	DSN         string
+	Table       string // default: "csar_tokens"
+	IfNotExists bool   // default: true
+	StateStore  bool   // also create state store tables
 }
 
 // DBInit creates the csar_tokens table (and optionally state store tables)

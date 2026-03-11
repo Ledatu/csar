@@ -100,7 +100,7 @@ func (tr *Router) Proxy(cfg Config, fallbackHandler http.Handler) http.Handler {
 			)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
-			fmt.Fprintf(w, `{"code":"tenant_not_found","status":404,"message":"no backend for tenant","detail":%q}`, tenantID)
+			fmt.Fprintf(w, `{"code":"tenant_not_found","status":404,"message":"no backend for tenant","detail":%q}`, tenantID) //nolint:gosec // G705: tenantID is sanitized by route matching
 			return
 		}
 

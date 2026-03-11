@@ -20,12 +20,12 @@ type GenerateResult struct {
 	Profile     string
 
 	// TLS
-	EnableTLS bool
-	TLSCert   string
-	TLSKey    string
-	TLSMinVer string
-	TLSCA     string // CA cert path (for coordinator TLS)
-	TLSGenerated bool // true if dev certs were generated
+	EnableTLS    bool
+	TLSCert      string
+	TLSKey       string
+	TLSMinVer    string
+	TLSCA        string // CA cert path (for coordinator TLS)
+	TLSGenerated bool   // true if dev certs were generated
 
 	// TLS coordinator client certs (for router → coordinator mTLS)
 	CoordinatorCACert   string
@@ -44,8 +44,8 @@ type GenerateResult struct {
 	YandexKMSKeyID string
 
 	// Routes (supports multiple routes)
-	Routes           []GenerateRoute
-	RouteSecurities  []RouteSecurityAnswers // parallel to Routes
+	Routes          []GenerateRoute
+	RouteSecurities []RouteSecurityAnswers // parallel to Routes
 
 	// Rate limit backend
 	RateLimitBackend string

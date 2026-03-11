@@ -50,7 +50,7 @@ func main() {
 	mux.HandleFunc("/", handleCatchAll)
 
 	addr := ":" + port
-	log.Printf("mockapi starting on %s", addr)
+	log.Printf("mockapi starting on %s", addr) //nolint:gosec // G706: addr is from controlled environment
 	if err := http.ListenAndServe(addr, countMiddleware(mux)); err != nil {
 		log.Fatalf("mockapi: %v", err)
 	}
@@ -156,5 +156,5 @@ func handleCatchAll(w http.ResponseWriter, r *http.Request) {
 func writeJSON(w http.ResponseWriter, code int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }

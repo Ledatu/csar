@@ -171,7 +171,6 @@ func compilePathPattern(path string) (*regexp.Regexp, bool) {
 		closeBrace := strings.IndexByte(rest, '}')
 		if closeBrace < 0 {
 			b.WriteString(regexp.QuoteMeta(rest))
-			i = len(path)
 			break
 		}
 		varContent := rest[1:closeBrace]

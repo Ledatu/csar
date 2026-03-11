@@ -20,7 +20,7 @@ func TestNew_RegistersAllMetrics(t *testing.T) {
 	}
 
 	// Verify metrics are registered by gathering them
-	families, err := reg.Gather()
+	_, err := reg.Gather()
 	if err != nil {
 		t.Fatalf("Gather: %v", err)
 	}
@@ -31,15 +31,15 @@ func TestNew_RegistersAllMetrics(t *testing.T) {
 	m.ConnectedRouters.Set(5)
 	m.KMSCacheHits.Inc()
 
-	families, err = reg.Gather()
+	families, err := reg.Gather()
 	if err != nil {
 		t.Fatalf("Gather after increment: %v", err)
 	}
 
 	wantMetrics := map[string]bool{
-		"csar_router_requests_total":       false,
+		"csar_router_requests_total":         false,
 		"csar_coordinator_connected_routers": false,
-		"csar_kms_cache_hits_total":        false,
+		"csar_kms_cache_hits_total":          false,
 	}
 
 	for _, f := range families {
@@ -216,12 +216,16 @@ func TestSetThrottleQueueDepth(t *testing.T) {
 	families, _ := reg.Gather()
 	for _, f := range families {
 		if f.GetName() == "csar_throttle_queue_depth" {
-			for _, metric := range f.GetMetric() {
-				if metric.GetGauge().GetValue() != 42 {
-					t.Errorf("queue_depth = %f, want 42", metric.GetGauge().GetValue())
-				}
+			metrics := f.GetMetric()
+			if len(metrics) == 0 {
+				t.Error("no metrics found")
 				return
 			}
+			metric := metrics[0]
+			if metric.GetGauge().GetValue() != 42 {
+				t.Errorf("queue_depth = %f, want 42", metric.GetGauge().GetValue())
+			}
+			return
 		}
 	}
 	t.Error("csar_throttle_queue_depth not found")
@@ -269,12 +273,16 @@ func TestSetCircuitBreakerState(t *testing.T) {
 	families, _ := reg.Gather()
 	for _, f := range families {
 		if f.GetName() == "csar_circuit_breaker_state" {
-			for _, metric := range f.GetMetric() {
-				if metric.GetGauge().GetValue() != 1 {
-					t.Errorf("cb state = %f, want 1 (open)", metric.GetGauge().GetValue())
-				}
+			metrics := f.GetMetric()
+			if len(metrics) == 0 {
+				t.Error("no metrics found")
 				return
 			}
+			metric := metrics[0]
+			if metric.GetGauge().GetValue() != 1 {
+				t.Errorf("cb state = %f, want 1 (open)", metric.GetGauge().GetValue())
+			}
+			return
 		}
 	}
 	t.Error("circuit breaker state metric not found")
@@ -284,7 +292,7 @@ func TestRecordKMSDecrypt(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := New(reg)
 
-	m.RecordKMSDecrypt("key-123", 5*time.Millisecond, false) // miss
+	m.RecordKMSDecrypt("key-123", 5*time.Millisecond, false)  // miss
 	m.RecordKMSDecrypt("key-123", 100*time.Microsecond, true) // hit
 
 	families, _ := reg.Gather()

@@ -9,7 +9,8 @@ func (c *Config) ResolveSecurityProfiles() error {
 	if len(c.SecurityProfiles) == 0 {
 		// Fast path: no profiles defined. Verify no route references one.
 		for path, methods := range c.Paths {
-			for method, route := range methods {
+			for method := range methods {
+				route := methods[method]
 				for _, sec := range route.Security {
 					if sec.Profile != "" {
 						return fmt.Errorf("path %s method %s: security profile %q referenced but no security_profiles defined",
@@ -22,7 +23,8 @@ func (c *Config) ResolveSecurityProfiles() error {
 	}
 
 	for path, methods := range c.Paths {
-		for method, route := range methods {
+		for method := range methods {
+			route := methods[method]
 			for i, sec := range route.Security {
 				if sec.Profile == "" {
 					continue

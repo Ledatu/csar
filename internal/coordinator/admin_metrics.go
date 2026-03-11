@@ -18,7 +18,7 @@ type AdminMetrics struct {
 }
 
 var (
-	adminMetricsOnce     sync.Once
+	adminMetricsOnce      sync.Once
 	adminMetricsSingleton *AdminMetrics
 )
 

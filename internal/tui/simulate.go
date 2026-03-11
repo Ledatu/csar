@@ -58,8 +58,7 @@ func RenderSimulationResult(result *simulate.MatchResult) {
 			Width(70)
 
 		var pipeLines []string
-		pipeLines = append(pipeLines, SubtitleStyle.Render(fmt.Sprintf("  %s Middleware Pipeline (%d)", IconGear, len(result.Middlewares))))
-		pipeLines = append(pipeLines, "")
+		pipeLines = append(pipeLines, SubtitleStyle.Render(fmt.Sprintf("  %s Middleware Pipeline (%d)", IconGear, len(result.Middlewares))), "")
 
 		for i, mw := range result.Middlewares {
 			icon := IconDot
@@ -86,8 +85,7 @@ func RenderSimulationResult(result *simulate.MatchResult) {
 				icon,
 				lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(mw.Name),
 				impactStyle.Render("["+mw.Impact+"]"),
-			))
-			pipeLines = append(pipeLines, fmt.Sprintf("  %s  %s",
+			), fmt.Sprintf("  %s  %s",
 				func() string {
 					if i == len(result.Middlewares)-1 {
 						return " "

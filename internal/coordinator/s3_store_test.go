@@ -9,21 +9,6 @@ import (
 	"github.com/ledatu/csar-core/s3store"
 )
 
-// mockS3Client implements the subset of s3store.Client needed for testing.
-// We test through the S3TokenStore wrapper which calls the real s3store.Client
-// methods. For unit testing here, we use a simple in-memory mock.
-type mockS3Client struct {
-	objects map[string]s3store.ObjectEntry
-}
-
-func (m *mockS3Client) getObject(ref string) (s3store.ObjectEntry, error) {
-	e, ok := m.objects[ref]
-	if !ok {
-		return s3store.ObjectEntry{}, ErrTokenNotFound
-	}
-	return e, nil
-}
-
 func TestS3TokenStore_UpsertToken_Passthrough(t *testing.T) {
 	store := newMockMutableStore()
 

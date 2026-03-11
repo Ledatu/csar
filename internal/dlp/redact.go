@@ -186,14 +186,13 @@ func redactPath(data interface{}, path []string, mask string) bool {
 
 		key := path[0]
 		if key == "*" {
-			// Wildcard: apply to all values in the object.
-			any := false
+			matched := false
 			for k := range v {
 				if redactPath(v[k], path[1:], mask) {
-					any = true
+					matched = true
 				}
 			}
-			return any
+			return matched
 		}
 
 		child, ok := v[key]
@@ -206,17 +205,17 @@ func redactPath(data interface{}, path []string, mask string) bool {
 		// For arrays, apply the current path segment to each element.
 		// If the path segment is "*", consume it and descend.
 		// If it's not "*", also descend into each element (implicit array iteration).
-		any := false
+		matched := false
 		nextPath := path
 		if path[0] == "*" {
 			nextPath = path[1:]
 		}
 		for i := range v {
 			if redactPath(v[i], nextPath, mask) {
-				any = true
+				matched = true
 			}
 		}
-		return any
+		return matched
 
 	default:
 		return false

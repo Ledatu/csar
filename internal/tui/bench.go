@@ -66,19 +66,18 @@ type benchState struct {
 
 // BenchModel is the Bubble Tea model for the benchmark TUI.
 type BenchModel struct {
-	config      BenchConfig
-	spinner     spinner.Model
-	progress    progress.Model
-	result      *BenchResult
-	running     bool
-	done        bool
-	startTime   time.Time
-	reqsDone    int64
-	currentRPS  float64
-	elapsed     time.Duration
-	cancel      context.CancelFunc
-	width       int
-	state       *benchState // shared progress state
+	config     BenchConfig
+	spinner    spinner.Model
+	progress   progress.Model
+	result     *BenchResult
+	running    bool
+	done       bool
+	reqsDone   int64
+	currentRPS float64
+	elapsed    time.Duration
+	cancel     context.CancelFunc
+	width      int
+	state      *benchState // shared progress state
 }
 
 // NewBench creates a new benchmark TUI model.
@@ -164,7 +163,9 @@ func (m BenchModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case progress.FrameMsg:
 		progressModel, cmd := m.progress.Update(msg)
-		m.progress = progressModel.(progress.Model)
+		if p, ok := progressModel.(progress.Model); ok {
+			m.progress = p
+		}
 		return m, cmd
 	}
 
@@ -195,13 +196,13 @@ func (m BenchModel) View() string {
 		b.WriteString(m.renderResults())
 	} else {
 		// Progress
-		b.WriteString(fmt.Sprintf("  %s Running benchmark...\n\n", m.spinner.View()))
+		fmt.Fprintf(&b, "  %s Running benchmark...\n\n", m.spinner.View())
 		b.WriteString("  " + m.progress.View() + "\n\n")
-		b.WriteString(fmt.Sprintf("  Requests: %s   Elapsed: %s   RPS: %s\n",
+		fmt.Fprintf(&b, "  Requests: %s   Elapsed: %s   RPS: %s\n",
 			lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render(fmt.Sprintf("%d", m.reqsDone)),
 			DimStyle.Render(m.elapsed.Round(time.Millisecond).String()),
 			lipgloss.NewStyle().Foreground(ColorSecondary).Render(fmt.Sprintf("%.0f", m.currentRPS)),
-		))
+		)
 	}
 
 	b.WriteString("\n" + HelpStyle.Render("  q/ctrl+c to stop"))
@@ -251,8 +252,7 @@ func (m BenchModel) renderResults() string {
 
 	// ASCII histogram
 	if len(r.Latencies) > 0 {
-		latencyLines = append(latencyLines, "")
-		latencyLines = append(latencyLines, renderHistogram(r.Latencies, 40))
+		latencyLines = append(latencyLines, "", renderHistogram(r.Latencies, 40))
 	}
 
 	b.WriteString(latencyBox.Render(strings.Join(latencyLines, "\n")) + "\n\n")
@@ -266,8 +266,7 @@ func (m BenchModel) renderResults() string {
 			Width(min(m.width-4, 40))
 
 		var statusLines []string
-		statusLines = append(statusLines, SubtitleStyle.Render("  Status Codes"))
-		statusLines = append(statusLines, "")
+		statusLines = append(statusLines, SubtitleStyle.Render("  Status Codes"), "")
 		for code, count := range r.StatusCodes {
 			style := SuccessStyle
 			if code >= 400 {

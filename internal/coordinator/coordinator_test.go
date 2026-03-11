@@ -241,10 +241,7 @@ func TestCoordinator_SubscriberCount(t *testing.T) {
 	// The subscriber count should be 1 after connection
 	// We need to give the server goroutine a moment
 	deadline := time.After(2 * time.Second)
-	for {
-		if coord.SubscriberCount() == 1 {
-			break
-		}
+	for coord.SubscriberCount() != 1 {
 		select {
 		case <-deadline:
 			t.Fatalf("subscriber count = %d, want 1", coord.SubscriberCount())

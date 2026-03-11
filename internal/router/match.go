@@ -104,9 +104,7 @@ func compilePathPattern(path string) (*regexp.Regexp, bool) {
 		rest := path[i+brace:]
 		closeBrace := strings.IndexByte(rest, '}')
 		if closeBrace < 0 {
-			// Malformed — treat rest as literal
 			b.WriteString(regexp.QuoteMeta(rest))
-			i = len(path)
 			break
 		}
 

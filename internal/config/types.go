@@ -1060,7 +1060,8 @@ type RouteKey struct {
 func (c *Config) FlatRoutes() []FlatRoute {
 	var routes []FlatRoute
 	for path, methods := range c.Paths {
-		for method, route := range methods {
+		for method := range methods {
+			route := methods[method]
 			routes = append(routes, FlatRoute{
 				Path:   path,
 				Method: method,
@@ -1075,7 +1076,8 @@ func (c *Config) FlatRoutes() []FlatRoute {
 // Used by the bootstrap to decide whether an AuthInjector must be wired in.
 func (c *Config) HasSecureRoutes() bool {
 	for _, methods := range c.Paths {
-		for _, route := range methods {
+		for method := range methods {
+			route := methods[method]
 			for _, sec := range route.Security {
 				if sec.InjectHeader != "" {
 					return true

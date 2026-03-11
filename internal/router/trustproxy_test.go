@@ -152,7 +152,7 @@ func TestRouter_TrustProxy_RouteIsolation(t *testing.T) {
 
 	// Verify the /trusted route's trust_proxy doesn't leak to /untrusted
 	req = httptest.NewRequest(http.MethodGet, "/untrusted", nil)
-	req.RemoteAddr = "203.0.113.50:9999" // actual RemoteAddr is in allowlist
+	req.RemoteAddr = "203.0.113.50:9999"          // actual RemoteAddr is in allowlist
 	req.Header.Set("X-Forwarded-For", "10.0.0.1") // spoofed XFF (not in allowlist)
 	rec = httptest.NewRecorder()
 	r.ServeHTTP(rec, req)

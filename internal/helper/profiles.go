@@ -65,7 +65,7 @@ func InitProfile(profile Profile, outputDir string, force bool) error {
 			return fmt.Errorf("creating directory for %q: %w", dstPath, err)
 		}
 
-		if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+		if err := os.WriteFile(dstPath, data, 0o644); err != nil { //nolint:gosec // G306: template file is intentionally world-readable
 			return fmt.Errorf("writing %q: %w", dstPath, err)
 		}
 		fmt.Printf("  created: %s\n", dstPath)
@@ -80,8 +80,8 @@ func profileTemplates(profile Profile) map[string]string {
 	switch profile {
 	case ProfileDevLocal:
 		return map[string]string{
-			"templates/dev-local/config.yaml":   "config.yaml",
-			"templates/dev-local/env.example":   ".env.example",
+			"templates/dev-local/config.yaml": "config.yaml",
+			"templates/dev-local/env.example": ".env.example",
 		}
 	case ProfileProdSingle:
 		return map[string]string{
@@ -90,9 +90,9 @@ func profileTemplates(profile Profile) map[string]string {
 		}
 	case ProfileProdDistributed:
 		return map[string]string{
-			"templates/prod-distributed/config.yaml":          "config.yaml",
-			"templates/prod-distributed/env.example":          ".env.example",
-			"templates/prod-distributed/docker-compose.yaml":  "docker-compose.yaml",
+			"templates/prod-distributed/config.yaml":         "config.yaml",
+			"templates/prod-distributed/env.example":         ".env.example",
+			"templates/prod-distributed/docker-compose.yaml": "docker-compose.yaml",
 		}
 	default:
 		return nil
@@ -101,21 +101,21 @@ func profileTemplates(profile Profile) map[string]string {
 
 // ProfileValidationRules returns validation rules for a profile.
 type ProfileRule struct {
-	Name    string
-	Check   func(cfg ProfileCheckInput) error
+	Name  string
+	Check func(cfg ProfileCheckInput) error
 }
 
 // ProfileCheckInput contains the config fields needed for profile validation.
 type ProfileCheckInput struct {
-	Profile                string
-	CoordinatorEnabled     bool
-	CoordinatorAddress     string
-	CoordinatorCAFile      string
-	CoordinatorInsecure    bool
-	HasSecureRoutes        bool
-	TLSEnabled             bool
-	KMSProvider            string
-	SecurityEnvironment    string
+	Profile             string
+	CoordinatorEnabled  bool
+	CoordinatorAddress  string
+	CoordinatorCAFile   string
+	CoordinatorInsecure bool
+	HasSecureRoutes     bool
+	TLSEnabled          bool
+	KMSProvider         string
+	SecurityEnvironment string
 }
 
 // GetProfileRules returns the validation rules for the given profile.

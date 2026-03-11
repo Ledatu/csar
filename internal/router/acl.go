@@ -12,11 +12,12 @@ import (
 // trust_proxy is always route-scoped — no global side effects.
 func (r *Router) checkIPAccess(rt *route, req *http.Request) bool {
 	var cidrs []*net.IPNet
-	if rt.hasRouteACL {
+	switch {
+	case rt.hasRouteACL:
 		cidrs = rt.allowCIDRs
-	} else if r.hasGlobalACL {
+	case r.hasGlobalACL:
 		cidrs = r.globalCIDRs
-	} else {
+	default:
 		return true // no ACL configured
 	}
 

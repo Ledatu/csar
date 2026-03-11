@@ -42,14 +42,14 @@ var methodOptions = []string{"get", "post", "put", "delete", "patch"}
 
 // RouteAddModel is a form for adding a new route.
 type RouteAddModel struct {
-	inputs      []textinput.Model
-	methodIdx   int // index into methodOptions
-	focused     addField
-	help        help.Model
-	keys        addKeyMap
-	width       int
-	height      int
-	err         error
+	inputs    []textinput.Model
+	methodIdx int // index into methodOptions
+	focused   addField
+	help      help.Model
+	keys      addKeyMap
+	width     int
+	height    int
+	err       error
 }
 
 type addKeyMap struct {

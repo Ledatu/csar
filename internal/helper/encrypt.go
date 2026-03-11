@@ -16,9 +16,9 @@ type EncryptOptions struct {
 	LocalKeys   map[string]string // for local provider: keyID -> passphrase
 
 	// Yandex KMS options (used when KMSProvider == "yandexapi")
-	YandexEndpoint string
-	YandexAuthMode string
-	YandexIAMToken string
+	YandexEndpoint   string
+	YandexAuthMode   string
+	YandexIAMToken   string
 	YandexOAuthToken string
 }
 
