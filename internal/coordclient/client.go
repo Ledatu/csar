@@ -1,8 +1,9 @@
 // Package coordclient provides a coordinator subscription client for CSAR routers.
 //
 // It subscribes to the coordinator's gRPC stream and applies quota assignments
-// to local throttlers, processes token invalidation events, and reconnects
-// automatically with exponential backoff on stream errors.
+// to local throttlers, processes token invalidation events, applies full config
+// snapshots to rebuild the router, and reconnects automatically with exponential
+// backoff on stream errors.
 package coordclient
 
 import (
@@ -11,10 +12,18 @@ import (
 	"math"
 	"time"
 
+	"github.com/ledatu/csar/internal/config"
+	"github.com/ledatu/csar/internal/protoconv"
 	"github.com/ledatu/csar/internal/throttle"
 	"github.com/ledatu/csar/pkg/middleware"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
 )
+
+// ConfigApplier is called when a full config snapshot is received from the
+// coordinator. The implementation should rebuild the router and hot-swap it.
+type ConfigApplier interface {
+	Apply(cfg *config.Config) error
+}
 
 // Client subscribes to the coordinator gRPC stream and dispatches
 // configuration updates to the router's throttle manager and auth injector.
@@ -24,7 +33,8 @@ type Client struct {
 	routerAddr   string
 	logger       *slog.Logger
 	throttleMgr  *throttle.ThrottleManager
-	authInjector *middleware.AuthInjector // may be nil if no auth is configured
+	authInjector *middleware.AuthInjector
+	applier      ConfigApplier
 
 	// lastSeenVersion tracks the watermark for durable invalidation replay.
 	lastSeenVersion uint64
@@ -40,6 +50,13 @@ type Option func(*Client)
 // WithAuthInjector sets the auth injector for token invalidation events.
 func WithAuthInjector(a *middleware.AuthInjector) Option {
 	return func(c *Client) { c.authInjector = a }
+}
+
+// WithConfigApplier sets the callback for applying full config snapshots
+// received from the coordinator. When set, route snapshots trigger a
+// full router rebuild and hot-swap.
+func WithConfigApplier(a ConfigApplier) Option {
+	return func(c *Client) { c.applier = a }
 }
 
 // New creates a new coordinator subscription client.
@@ -118,7 +135,6 @@ func (c *Client) subscribe(ctx context.Context) error {
 		"last_seen_version", c.lastSeenVersion,
 	)
 
-	// Reset backoff on successful connection
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
@@ -141,14 +157,47 @@ func (c *Client) subscribe(ctx context.Context) error {
 		case *csarv1.ConfigUpdate_TokenInvalidation:
 			c.handleTokenInvalidation(u.TokenInvalidation)
 
+		case *csarv1.ConfigUpdate_FullConfigSnapshot:
+			c.handleFullConfigSnapshot(u.FullConfigSnapshot, msg.Version)
+
 		case *csarv1.ConfigUpdate_RouteSnapshot:
-			c.logger.Info("received route snapshot",
+			c.logger.Info("received legacy route snapshot (ignored, use FullConfigSnapshot)",
 				"routes", len(u.RouteSnapshot.GetRoutes()),
 				"version", msg.Version,
 			)
-			// Route snapshots are handled by SIGHUP-based config reload;
-			// the coordinator client focuses on quota and token updates.
 		}
+	}
+}
+
+// handleFullConfigSnapshot converts a FullConfigSnapshot to a config.Config
+// and applies it via the ConfigApplier to rebuild the router.
+func (c *Client) handleFullConfigSnapshot(snap *csarv1.FullConfigSnapshot, version uint64) {
+	if snap == nil {
+		return
+	}
+
+	c.logger.Info("received full config snapshot",
+		"routes", len(snap.GetRoutes()),
+		"version", version,
+	)
+
+	if c.applier == nil {
+		c.logger.Debug("full config snapshot received but no ConfigApplier configured")
+		return
+	}
+
+	cfg := protoconv.FullSnapshotToConfig(snap)
+
+	if err := c.applier.Apply(cfg); err != nil {
+		c.logger.Error("failed to apply config snapshot",
+			"version", version,
+			"error", err,
+		)
+	} else {
+		c.logger.Info("config snapshot applied successfully",
+			"version", version,
+			"routes", len(cfg.Paths),
+		)
 	}
 }
 

@@ -20,10 +20,7 @@ package statestore
 //	    id TEXT PRIMARY KEY,
 //	    path TEXT NOT NULL,
 //	    method TEXT NOT NULL,
-//	    target_url TEXT NOT NULL,
-//	    security_config JSONB,
-//	    traffic_config JSONB,
-//	    resilience_profile TEXT,
+//	    route_config JSONB NOT NULL,
 //	    updated_at TIMESTAMPTZ DEFAULT NOW()
 //	);
 //

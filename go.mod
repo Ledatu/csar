@@ -12,6 +12,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/ledatu/csar-core v0.1.3
+	github.com/ledatu/csar-proto v0.1.0
 	github.com/lib/pq v1.11.2
 	github.com/modelcontextprotocol/go-sdk v1.4.0
 	github.com/prometheus/client_golang v1.23.2
@@ -116,3 +117,5 @@ require (
 )
 
 replace github.com/ledatu/csar-core => ../csar-core
+
+replace github.com/ledatu/csar-proto => ../csar-proto

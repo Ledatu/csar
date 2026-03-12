@@ -1,6 +1,7 @@
 package router
 
 import (
+	"github.com/ledatu/csar/internal/authz"
 	"github.com/ledatu/csar/internal/metrics"
 	"github.com/ledatu/csar/internal/proxy"
 	"github.com/ledatu/csar/internal/telemetry"
@@ -44,4 +45,9 @@ func WithThrottleManager(tm *throttle.ThrottleManager) Option {
 // Routes with backend: "redis" will use this client for GCRA rate limiting.
 func WithRedisClient(client *redis.Client) Option {
 	return func(r *Router) { r.redisClient = client }
+}
+
+// WithAuthzClient sets the csar-authz gRPC client for routes with x-csar-authz config.
+func WithAuthzClient(c *authz.Client) Option {
+	return func(r *Router) { r.authzClient = c }
 }

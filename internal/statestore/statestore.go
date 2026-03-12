@@ -3,6 +3,8 @@ package statestore
 import (
 	"context"
 	"time"
+
+	"github.com/ledatu/csar/internal/config"
 )
 
 // StateStore is the QDB-style abstraction for all Control Plane persistent state.
@@ -47,42 +49,21 @@ type StateStore interface {
 }
 
 // RouteEntry represents a route stored in the state store.
+// It carries the full config.RouteConfig so the coordinator can push
+// the complete route configuration to routers via gRPC.
 type RouteEntry struct {
 	// ID is the unique route identifier (e.g. "GET:/api/v1/products").
-	ID string
+	ID string `json:"id"`
 
 	// Path is the URL path pattern.
-	Path string
+	Path string `json:"path"`
 
 	// Method is the HTTP method.
-	Method string
+	Method string `json:"method"`
 
-	// TargetURL is the upstream backend URL.
-	TargetURL string
-
-	// Security settings (optional).
-	Security *SecurityEntry
-
-	// Traffic settings (optional).
-	Traffic *TrafficEntry
-
-	// Resilience settings (optional).
-	ResilienceProfile string
-}
-
-// SecurityEntry holds security config for a route in the state store.
-type SecurityEntry struct {
-	KMSKeyID     string
-	TokenRef     string
-	InjectHeader string
-	InjectFormat string
-}
-
-// TrafficEntry holds traffic shaping config for a route.
-type TrafficEntry struct {
-	RPS     float64
-	Burst   int
-	MaxWait time.Duration
+	// Route is the full route configuration including backend, security,
+	// traffic, retry, CORS, DLP, auth-validate, tenant, cache, etc.
+	Route config.RouteConfig `json:"route"`
 }
 
 // RouterInfo represents a registered router instance.

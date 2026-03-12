@@ -17,6 +17,7 @@ import (
 	"github.com/ledatu/csar-core/httpserver"
 	"github.com/ledatu/csar-core/tlsx"
 
+	"github.com/ledatu/csar/internal/authz"
 	"github.com/ledatu/csar/internal/config"
 	"github.com/ledatu/csar/internal/coordclient"
 	"github.com/ledatu/csar/internal/kms"
@@ -152,6 +153,18 @@ func run() error {
 			"address", cfg.Redis.Address,
 			"db", cfg.Redis.DB,
 		)
+	}
+
+	// --- Authz client (csar-authz gRPC) ---
+	if cfg.Authz != nil && cfg.Authz.Address != "" {
+		authzClient, err := authz.New(cfg.Authz, logger)
+		if err != nil {
+			return fmt.Errorf("creating authz client: %w", err)
+		}
+		if authzClient != nil {
+			defer authzClient.Close()
+			routerOpts = append(routerOpts, router.WithAuthzClient(authzClient))
+		}
 	}
 
 	if cfg.HasSecureRoutes() {
@@ -328,9 +341,20 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// --- Coordinator subscription (distributed quota + token invalidation) ---
+	// Shared reloader used by both SIGHUP and coordinator-driven reload paths.
+	reloader := &routerReloader{
+		logger:        logger,
+		routerOpts:    routerOpts,
+		reloadHandler: rh,
+		tp:            tp,
+		sharedTM:      sharedTM,
+		currentRouter: r,
+	}
+
+	// --- Coordinator subscription (distributed quota + token invalidation + full config) ---
 	// When the coordinator is enabled, start a background subscription client
-	// that receives quota assignments and token invalidation events.
+	// that receives quota assignments, token invalidation events, and full
+	// config snapshots for coordinator-driven router hot-reload.
 	if cfg.Coordinator.Enabled && cfg.Coordinator.Address != "" {
 		conn, err := dialCoordinator(cfg.Coordinator, logger)
 		if err != nil {
@@ -344,6 +368,7 @@ func run() error {
 			if r.AuthInjector() != nil {
 				ccOpts = append(ccOpts, coordclient.WithAuthInjector(r.AuthInjector()))
 			}
+			ccOpts = append(ccOpts, coordclient.WithConfigApplier(reloader))
 			cc := coordclient.New(
 				coordSvcClient,
 				hostname,
@@ -371,8 +396,6 @@ func run() error {
 	// without dropping active HTTP connections.
 	sighupCh := make(chan os.Signal, 1)
 	signal.Notify(sighupCh, syscall.SIGHUP)
-	// currentRouter tracks the active router so we can close it on reload.
-	currentRouter := r
 	go func() {
 		for range sighupCh {
 			logger.Info("SIGHUP received — reloading configuration", "path", *configPath)
@@ -381,39 +404,16 @@ func run() error {
 				logger.Error("config reload failed — keeping current config", "error", err)
 				continue
 			}
-			// Log any new warnings.
 			for _, w := range newCfg.Warnings {
 				logger.Warn("(reload) " + w)
 			}
 
-			// Check for restart-required field changes.
 			checkRestartRequiredChanges(logger, restartSnapshot, newCfg)
 
-			// Rebuild the router with the same options (metrics, telemetry, auth injector).
-			newRouter, err := router.New(newCfg, logger, routerOpts...)
-			if err != nil {
+			if err := reloader.Apply(newCfg); err != nil {
 				logger.Error("router rebuild failed — keeping current router", "error", err)
 				continue
 			}
-			// Atomically swap the handler — in-flight requests finish on the old router.
-			rh.swap(tp.HTTPMiddleware("csar", newRouter))
-
-			// Stop health-check goroutines on the old router to prevent leaks.
-			// The new router starts its own health checks during construction.
-			currentRouter.Close()
-			currentRouter = newRouter
-
-			// Prune stale throttle keys from the shared manager.
-			pruned := sharedTM.SyncKeys(newRouter.RegisteredKeys())
-			if pruned > 0 {
-				logger.Info("pruned stale throttle keys after reload",
-					"pruned", pruned,
-				)
-			}
-
-			logger.Info("configuration reloaded successfully",
-				"routes", len(newCfg.Paths),
-			)
 		}
 	}()
 

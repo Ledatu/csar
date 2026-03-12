@@ -141,6 +141,10 @@ type Config struct {
 	// Routes reference them via x-csar-authn-validate: "policy_name".
 	AuthValidatePolicies map[string]AuthValidateConfig `yaml:"auth_validate_policies,omitempty" json:"auth_validate_policies,omitempty"`
 
+	// AuthzPolicies defines named, reusable authorization configurations.
+	// Routes reference them via x-csar-authz: "policy_name" or x-csar-authz.use: "policy_name".
+	AuthzPolicies map[string]AuthzRouteConfig `yaml:"authz_policies,omitempty" json:"authz_policies,omitempty"`
+
 	// GlobalThrottle defines a global rate limit applied to ALL routes as a safety net.
 	// Checked before per-route throttle. Uses a fast in-memory atomic counter.
 	GlobalThrottle *GlobalThrottleConfig `yaml:"global_throttle,omitempty" json:"global_throttle,omitempty"`
@@ -150,6 +154,10 @@ type Config struct {
 
 	// DebugHeaders configures traceability headers (X-Request-ID, X-CSAR-Route-ID).
 	DebugHeaders *DebugHeadersConfig `yaml:"debug_headers,omitempty" json:"debug_headers,omitempty"`
+
+	// Authz configures the connection to the csar-authz gRPC service.
+	// When set, routes with x-csar-authz can evaluate access policies.
+	Authz *AuthzClientConfig `yaml:"authz,omitempty" json:"authz,omitempty"`
 
 	// Paths holds the OpenAPI-style route definitions with x-csar-* extensions.
 	Paths map[string]PathConfig `yaml:"paths" json:"paths"`
@@ -280,6 +288,11 @@ type RouteConfig struct {
 
 	// Protocol configures per-route SDK protocol behavior.
 	Protocol *ProtocolPolicy `yaml:"x-csar-protocol,omitempty" json:"x-csar-protocol,omitempty"`
+
+	// Authz configures per-route authorization via csar-authz.
+	// When present, CSAR strips spoofable headers, evaluates the access policy
+	// against csar-authz, and injects trusted headers (e.g. X-User-Roles).
+	Authz *AuthzRouteConfig `yaml:"x-csar-authz,omitempty" json:"x-csar-authz,omitempty"`
 
 	// SourceInfo records which file and line each field was declared in.
 	// Populated during multi-file loading for diagnostics. Not serialized.
@@ -1093,4 +1106,70 @@ type FlatRoute struct {
 	Path   string
 	Method string
 	Route  RouteConfig
+}
+
+// AuthzClientConfig configures the gRPC connection to the csar-authz service.
+type AuthzClientConfig struct {
+	// Address is the gRPC address of the csar-authz service (e.g. "localhost:9091").
+	Address string `yaml:"address" json:"address"`
+
+	// TLS settings for the csar → csar-authz gRPC connection.
+	CAFile   string `yaml:"ca_file,omitempty" json:"ca_file,omitempty"`
+	CertFile string `yaml:"cert_file,omitempty" json:"cert_file,omitempty"`
+	KeyFile  string `yaml:"key_file,omitempty" json:"key_file,omitempty"`
+
+	// AllowInsecure permits plaintext gRPC to csar-authz (dev only).
+	AllowInsecure bool `yaml:"allow_insecure,omitempty" json:"allow_insecure,omitempty"`
+
+	// Timeout is the per-call deadline for CheckAccess RPCs. Default: "500ms".
+	Timeout Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+}
+
+// AuthzRouteConfig configures per-route authorization via csar-authz.
+// Placeholders use the same syntax as token_ref: {header.X-User-Id}, {query.id}, {path.id}.
+//
+// Supports bare string syntax for policy references:
+//
+//	x-csar-authz: "tenant-docs"                       # bare string → policy ref
+//	x-csar-authz: { subject: "{header.X-User-Id}", ... } # inline object
+//	x-csar-authz: { use: "tenant-docs", action: "write" } # policy ref + overrides
+type AuthzRouteConfig struct {
+	// Use is an optional reference to a named authz_policies entry.
+	// When set, all other fields are inherited from the policy; any
+	// inline fields override the policy's values (shallow merge).
+	Use string `yaml:"use,omitempty" json:"use,omitempty"`
+
+	// Subject is the principal identifier. Example: "{header.X-User-Id}".
+	Subject string `yaml:"subject,omitempty" json:"subject,omitempty"`
+
+	// Resource is the target resource path. Example: "document:{path.id}".
+	Resource string `yaml:"resource,omitempty" json:"resource,omitempty"`
+
+	// Action is the operation being performed. Example: "read".
+	Action string `yaml:"action,omitempty" json:"action,omitempty"`
+
+	// ScopeType is the assignment scope: "platform" or "tenant".
+	ScopeType string `yaml:"scope_type,omitempty" json:"scope_type,omitempty"`
+
+	// ScopeID identifies the scope instance. Example: "{header.X-Tenant-Id}".
+	ScopeID string `yaml:"scope_id,omitempty" json:"scope_id,omitempty"`
+
+	// StripHeaders lists headers to unconditionally remove from client requests
+	// before calling csar-authz (prevents spoofing). Example: ["X-User-Roles", "X-Authz-Decision"].
+	StripHeaders []string `yaml:"strip_headers,omitempty" json:"strip_headers,omitempty"`
+}
+
+// UnmarshalYAML handles bare string (policy reference) and inline object syntax for AuthzRouteConfig.
+func (a *AuthzRouteConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		a.Use = value.Value
+		return nil
+	}
+	type authzAlias AuthzRouteConfig
+	var alias authzAlias
+	if err := value.Decode(&alias); err != nil {
+		return err
+	}
+	*a = AuthzRouteConfig(alias)
+	return nil
 }

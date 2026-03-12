@@ -114,6 +114,39 @@ coordinator:
 #   emit_route_id: true                # emit X-CSAR-Route-ID with matched route key
 #   request_id_header: "X-Request-ID"  # header name for request correlation
 
+# --- Authorization Service (csar-authz) ---
+# Connects to csar-authz for RBAC-based access decisions on routes with x-csar-authz.
+# authz:
+#   address: "authz.internal:9091"     # gRPC address of csar-authz
+#   timeout: "500ms"                   # per-call CheckAccess timeout (default: 500ms)
+#   # ca_file: "/etc/csar/tls/authz-ca.pem"
+#   # cert_file: "/etc/csar/tls/authz-client-cert.pem"
+#   # key_file: "/etc/csar/tls/authz-client-key.pem"
+#   # allow_insecure: false            # dev only — plaintext gRPC
+
+# --- Named Authorization Policies ---
+# Define reusable authz configurations. Routes reference them via:
+#   x-csar-authz: "tenant-docs"                       # bare string shorthand
+#   x-csar-authz: { use: "tenant-docs", action: "write" }  # with inline overrides
+# authz_policies:
+#   tenant-docs:
+#     subject: "{header.X-User-Id}"
+#     resource: "document:{path.id}"
+#     action: "read"
+#     scope_type: "tenant"
+#     scope_id: "{header.X-Tenant-Id}"
+#     strip_headers:
+#       - "X-User-Roles"
+#       - "X-Authz-Decision"
+#   platform-admin:
+#     subject: "{header.X-User-Id}"
+#     resource: "admin:{path.resource}"
+#     action: "manage"
+#     scope_type: "platform"
+#     strip_headers:
+#       - "X-User-Roles"
+#       - "X-Authz-Decision"
+
 circuit_breakers:
   standard:
     max_requests: 5
@@ -405,6 +438,45 @@ paths:
   #       forward_claims:                   # copy JWT claims to request headers
   #         sub: "X-User-ID"
   #         email: "X-User-Email"
+
+  # --- Authorization (csar-authz) ---
+  # Evaluates access policy via csar-authz after JWT validation.
+  # Strips spoofable headers, resolves placeholders, and injects trusted headers.
+  #
+  # Inline config:
+  # /api/v1/documents/{id:[0-9]+}:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://docs-api.internal"
+  #     x-csar-authn-validate:
+  #       jwks_url: "https://auth.example.com/.well-known/jwks.json"
+  #       forward_claims:
+  #         sub: "X-User-Id"
+  #     x-csar-authz:
+  #       subject: "{header.X-User-Id}"          # from JWT forward_claims
+  #       resource: "document:{path.id}"          # path variable from URL
+  #       action: "read"
+  #       scope_type: "tenant"
+  #       scope_id: "{header.X-Tenant-Id}"
+  #       strip_headers:                          # prevent client spoofing
+  #         - "X-User-Roles"
+  #         - "X-Authz-Decision"
+  #
+  # Named policy reference (bare string):
+  # /api/v1/documents/{id:[0-9]+}:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://docs-api.internal"
+  #     x-csar-authz: "tenant-docs"              # ← references authz_policies.tenant-docs
+  #
+  # Policy reference with inline overrides:
+  # /api/v1/documents/{id:[0-9]+}:
+  #   delete:
+  #     x-csar-backend:
+  #       target_url: "https://docs-api.internal"
+  #     x-csar-authz:
+  #       use: "tenant-docs"                      # inherit from policy
+  #       action: "delete"                        # override action for this route
 
   # --- Payload Redaction / DLP ---
   # Masks specified JSON fields in upstream responses before returning to client.

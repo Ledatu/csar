@@ -65,9 +65,15 @@
       "description": "Named reusable auth validation configurations. Routes reference them via x-csar-authn-validate: \"policy_name\".",
       "additionalProperties": { "$ref": "#/$defs/AuthValidateConfigObject" }
     },
+    "authz_policies": {
+      "type": "object",
+      "description": "Named reusable authorization configurations. Routes reference them via x-csar-authz: \"policy_name\" or x-csar-authz.use: \"policy_name\".",
+      "additionalProperties": { "$ref": "#/$defs/AuthzRouteConfigObject" }
+    },
     "global_throttle": { "$ref": "#/$defs/GlobalThrottleConfig" },
     "readiness": { "$ref": "#/$defs/ReadinessConfig" },
     "debug_headers": { "$ref": "#/$defs/DebugHeadersConfig" },
+    "authz": { "$ref": "#/$defs/AuthzClientConfig" },
     "paths": {
       "type": "object",
       "description": "Route definitions using OpenAPI-style x-csar-* extensions. Keys are URL path patterns.",
@@ -1021,6 +1027,89 @@
         }
       }
     },
+    "AuthzClientConfig": {
+      "type": "object",
+      "description": "Connection settings for the csar-authz gRPC authorization service.",
+      "additionalProperties": false,
+      "required": ["address"],
+      "properties": {
+        "address": {
+          "type": "string",
+          "description": "gRPC address of the csar-authz service.",
+          "examples": ["localhost:9091", "authz.internal:443"]
+        },
+        "ca_file": {
+          "type": "string",
+          "description": "CA certificate for verifying the csar-authz server."
+        },
+        "cert_file": {
+          "type": "string",
+          "description": "Client certificate (PEM) for mTLS to csar-authz."
+        },
+        "key_file": {
+          "type": "string",
+          "description": "Client private key (PEM) for mTLS to csar-authz."
+        },
+        "allow_insecure": {
+          "type": "boolean",
+          "description": "Allow plaintext gRPC to csar-authz. Development only.",
+          "default": false
+        },
+        "timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "Per-call timeout for CheckAccess RPCs. Default: 500ms.",
+          "default": "500ms"
+        }
+      }
+    },
+    "AuthzRouteConfig": {
+      "oneOf": [
+        { "type": "string", "description": "Reference to a named authz_policies entry." },
+        { "$ref": "#/$defs/AuthzRouteConfigObject" }
+      ]
+    },
+    "AuthzRouteConfigObject": {
+      "type": "object",
+      "description": "Per-route authorization via csar-authz. Strips spoofable headers, evaluates access policy, injects trusted headers.",
+      "additionalProperties": false,
+      "properties": {
+        "use": {
+          "type": "string",
+          "description": "Reference to a named authz_policies entry. Inline fields override policy values."
+        },
+        "subject": {
+          "type": "string",
+          "description": "Principal identifier. Supports placeholders: {header.X-User-Id}, {query.user}, {path.id}.",
+          "examples": ["{header.X-User-Id}"]
+        },
+        "resource": {
+          "type": "string",
+          "description": "Target resource path. Supports placeholders.",
+          "examples": ["document:{path.id}", "/api/v1/projects/{path.project_id}"]
+        },
+        "action": {
+          "type": "string",
+          "description": "Operation being performed.",
+          "examples": ["read", "write", "delete"]
+        },
+        "scope_type": {
+          "type": "string",
+          "description": "Assignment scope: 'platform' (global) or 'tenant'.",
+          "enum": ["platform", "tenant"]
+        },
+        "scope_id": {
+          "type": "string",
+          "description": "Scope instance identifier. Supports placeholders.",
+          "examples": ["{header.X-Tenant-Id}"]
+        },
+        "strip_headers": {
+          "type": "array",
+          "description": "Headers unconditionally removed from client requests to prevent spoofing.",
+          "items": { "type": "string" },
+          "examples": [["X-User-Roles", "X-Authz-Decision"]]
+        }
+      }
+    },
     "RouteConfig": {
       "type": "object",
       "description": "Single route entry with x-csar-* extensions.",
@@ -1048,7 +1137,8 @@
           "description": "Maximum response body size (bytes) for DLP/retry buffering. Prevents DoS. Default: 0 (unlimited).",
           "minimum": 0
         },
-        "x-csar-protocol": { "$ref": "#/$defs/ProtocolPolicyConfig" }
+        "x-csar-protocol": { "$ref": "#/$defs/ProtocolPolicyConfig" },
+        "x-csar-authz": { "$ref": "#/$defs/AuthzRouteConfig" }
       }
     },
     "PathConfig": {

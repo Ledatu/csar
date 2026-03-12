@@ -220,6 +220,22 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 		r.setupCache(rt, fr, key, logger)
 	}
 
+	// Set up authz authorization if authz config is present.
+	if fr.Route.Authz != nil {
+		if r.authzClient == nil {
+			return fmt.Errorf("route %s has x-csar-authz config but no AuthzClient is configured — "+
+				"provide WithAuthzClient() or remove the authz config", key)
+		}
+		rt.authzConfig = fr.Route.Authz
+		logger.Info("authz authorization enabled",
+			"route", key,
+			"subject", fr.Route.Authz.Subject,
+			"resource", fr.Route.Authz.Resource,
+			"action", fr.Route.Authz.Action,
+			"strip_headers", fr.Route.Authz.StripHeaders,
+		)
+	}
+
 	// Apply max_response_size to DLP config if set (audit §2.3.4).
 	if fr.Route.MaxResponseSize > 0 && rt.dlpConfig != nil {
 		rt.dlpConfig.MaxResponseSize = fr.Route.MaxResponseSize

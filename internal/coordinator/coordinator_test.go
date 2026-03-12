@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledatu/csar-core/configutil"
+	"github.com/ledatu/csar/internal/config"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -26,14 +28,23 @@ func testEnv(t *testing.T) (csarv1.CoordinatorServiceClient, *Coordinator, func(
 	store := statestore.NewMemoryStore()
 	coord := New(store, newTestLogger())
 
-	// Seed routes
-	store.PutRoute(context.Background(), statestore.RouteEntry{
-		ID:        "GET:/api/v1",
-		Path:      "/api/v1",
-		Method:    "GET",
-		TargetURL: "http://upstream:8080",
-		Traffic:   &statestore.TrafficEntry{RPS: 100, Burst: 50, MaxWait: 30 * time.Second},
+	// Seed routes with full config.
+	err := store.PutRoute(context.Background(), statestore.RouteEntry{
+		ID:     "GET:/api/v1",
+		Path:   "/api/v1",
+		Method: "GET",
+		Route: config.RouteConfig{
+			Backend: config.BackendConfig{TargetURL: "http://upstream:8080"},
+			Traffic: &config.TrafficConfig{
+				RPS:     100,
+				Burst:   50,
+				MaxWait: configutil.Duration{Duration: 30 * time.Second},
+			},
+		},
 	})
+	if err != nil {
+		t.Fatalf("PutRoute: %v", err)
+	}
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -43,7 +54,7 @@ func testEnv(t *testing.T) (csarv1.CoordinatorServiceClient, *Coordinator, func(
 	srv := grpc.NewServer()
 	csarv1.RegisterCoordinatorServiceServer(srv, coord)
 
-	go srv.Serve(lis) //nolint: errcheck
+	go srv.Serve(lis) //nolint:errcheck // test server
 
 	conn, err := grpc.NewClient(
 		lis.Addr().String(),
@@ -65,7 +76,7 @@ func testEnv(t *testing.T) (csarv1.CoordinatorServiceClient, *Coordinator, func(
 	return client, coord, cleanup
 }
 
-func TestCoordinator_Subscribe_ReceivesSnapshot(t *testing.T) {
+func TestCoordinator_Subscribe_ReceivesFullConfigSnapshot(t *testing.T) {
 	client, _, cleanup := testEnv(t)
 	defer cleanup()
 
@@ -80,15 +91,15 @@ func TestCoordinator_Subscribe_ReceivesSnapshot(t *testing.T) {
 		t.Fatalf("Subscribe: %v", err)
 	}
 
-	// First message should be a RouteSnapshot
+	// First message should be a FullConfigSnapshot.
 	msg, err := stream.Recv()
 	if err != nil {
 		t.Fatalf("Recv: %v", err)
 	}
 
-	snapshot := msg.GetRouteSnapshot()
+	snapshot := msg.GetFullConfigSnapshot()
 	if snapshot == nil {
-		t.Fatal("expected RouteSnapshot, got different update type")
+		t.Fatal("expected FullConfigSnapshot, got different update type")
 	}
 
 	if len(snapshot.Routes) != 1 {
@@ -102,11 +113,17 @@ func TestCoordinator_Subscribe_ReceivesSnapshot(t *testing.T) {
 	if r.TargetUrl != "http://upstream:8080" {
 		t.Errorf("TargetUrl = %q", r.TargetUrl)
 	}
-	if r.Traffic == nil {
-		t.Fatal("Traffic is nil")
+	if r.Backend == nil {
+		t.Fatal("Backend is nil")
 	}
-	if r.Traffic.Rps != 100 {
-		t.Errorf("RPS = %f, want 100", r.Traffic.Rps)
+	if r.Backend.TargetUrl != "http://upstream:8080" {
+		t.Errorf("Backend.TargetUrl = %q", r.Backend.TargetUrl)
+	}
+	if r.TrafficConfig == nil {
+		t.Fatal("TrafficConfig is nil")
+	}
+	if r.TrafficConfig.Rps != 100 {
+		t.Errorf("RPS = %f, want 100", r.TrafficConfig.Rps)
 	}
 }
 
@@ -125,7 +142,7 @@ func TestCoordinator_Subscribe_ReceivesQuota(t *testing.T) {
 		t.Fatalf("Subscribe: %v", err)
 	}
 
-	// First message: RouteSnapshot
+	// First message: FullConfigSnapshot
 	_, err = stream.Recv()
 	if err != nil {
 		t.Fatalf("Recv 1: %v", err)
@@ -147,7 +164,6 @@ func TestCoordinator_Subscribe_ReceivesQuota(t *testing.T) {
 		t.Fatal("missing quota for GET:/api/v1")
 	}
 
-	// With 1 router, should get the full RPS
 	if rq.Rps != 100 {
 		t.Errorf("allocated RPS = %f, want 100", rq.Rps)
 	}
@@ -231,15 +247,11 @@ func TestCoordinator_SubscriberCount(t *testing.T) {
 	}
 
 	// Drain the initial messages
-	stream.Recv() //nolint: errcheck
-	stream.Recv() //nolint: errcheck
+	stream.Recv() //nolint:errcheck // drain initial snapshot
+	stream.Recv() //nolint:errcheck // drain initial quota
 
-	// Allow time for the subscriber to be registered
 	time.Sleep(100 * time.Millisecond)
 
-	// There may be redistribution messages too, just drain briefly
-	// The subscriber count should be 1 after connection
-	// We need to give the server goroutine a moment
 	deadline := time.After(2 * time.Second)
 	for coord.SubscriberCount() != 1 {
 		select {

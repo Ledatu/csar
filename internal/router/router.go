@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/ledatu/csar/internal/authn"
+	"github.com/ledatu/csar/internal/authz"
 	"github.com/ledatu/csar/internal/cache"
 	"github.com/ledatu/csar/internal/config"
 	"github.com/ledatu/csar/internal/dlp"
@@ -48,6 +49,7 @@ type route struct {
 	tenantConfig        *tenant.Config             // nil if no multi-tenant routing
 	corsConfig          *config.CORSConfig         // nil if no CORS configuration
 	cacheConfig         *cache.Config              // nil if no response caching
+	authzConfig         *config.AuthzRouteConfig   // nil if no authz authorization
 	excludeIPs          []*net.IPNet               // IPs/CIDRs that bypass this route's throttle
 	vipOverrides        []vipOverride              // header-based throttle policy swaps
 }
@@ -70,6 +72,7 @@ type Router struct {
 	telemetry        *telemetry.Provider       // nil if no telemetry
 	authInjector     *middleware.AuthInjector  // nil if no auth injection configured
 	jwtValidator     *authn.JWTValidator       // nil if no route uses JWT validation
+	authzClient      *authz.Client             // nil if no route uses authz
 	dlpRedactor      *dlp.Redactor             // nil if no route uses DLP redaction
 	tenantRouter     *tenant.Router            // nil if no route uses tenant routing
 	responseCache    *cache.ResponseCache      // nil if no route uses response caching

@@ -32,8 +32,8 @@ func (m *MemoryStore) GetRoutes(_ context.Context) ([]RouteEntry, error) {
 	defer m.mu.RUnlock()
 
 	routes := make([]RouteEntry, 0, len(m.routes))
-	for _, r := range m.routes {
-		routes = append(routes, r)
+	for id := range m.routes {
+		routes = append(routes, m.routes[id])
 	}
 	return routes, nil
 }
@@ -155,8 +155,8 @@ func (m *MemoryStore) Close() error {
 // Must be called with mu held.
 func (m *MemoryStore) notifyWatchers() {
 	routes := make([]RouteEntry, 0, len(m.routes))
-	for _, r := range m.routes {
-		routes = append(routes, r)
+	for id := range m.routes {
+		routes = append(routes, m.routes[id])
 	}
 
 	for _, ch := range m.watchers {

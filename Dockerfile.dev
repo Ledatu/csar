@@ -1,0 +1,25 @@
+# syntax=docker/dockerfile:1
+# Build context: parent directory (_csar/) for local replace directive resolution.
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /src
+
+COPY csar-core/ ./csar-core/
+
+COPY csar/go.mod csar/go.sum ./csar/
+WORKDIR /src/csar
+RUN go mod download
+
+WORKDIR /src
+COPY csar/ ./csar/
+WORKDIR /src/csar
+RUN CGO_ENABLED=0 go build -ldflags "-s -w -X main.Version=docker" -o /csar ./cmd/csar
+
+# ---
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates
+RUN adduser -D -u 10001 csar
+COPY --from=builder /csar /usr/local/bin/csar
+USER csar
+ENTRYPOINT ["csar"]
+CMD ["-config", "/etc/csar/config.yaml"]

@@ -12,6 +12,25 @@ import (
 	"github.com/ledatu/csar/internal/statestore"
 )
 
+// ConfigCallback is called after config is parsed but before routes are applied.
+// It receives the full parsed config for use cases like updating top-level
+// policies on the coordinator.
+type ConfigCallback func(cfg *config.Config)
+
+// WatcherOption configures the config watcher behavior.
+type WatcherOption func(*watcherOpts)
+
+type watcherOpts struct {
+	onConfigParsed ConfigCallback
+}
+
+// WithOnConfigParsed registers a callback invoked with the full parsed config
+// on every successful config apply. Used by the coordinator to capture
+// top-level policy maps for gRPC distribution.
+func WithOnConfigParsed(fn ConfigCallback) WatcherOption {
+	return func(o *watcherOpts) { o.onConfigParsed = fn }
+}
+
 // NewConfigWatcher creates a ConfigWatcher that applies csar-coordinator's
 // route-diff logic inside the ApplyFunc closure. The generic polling,
 // ETag, and hash-checking mechanics are handled by csar-core.
@@ -21,20 +40,35 @@ func NewConfigWatcher(
 	logger *slog.Logger,
 	opts ...coresrc.WatcherOption,
 ) *coresrc.ConfigWatcher {
+	return NewConfigWatcherWithOptions(source, store, logger, nil, opts...)
+}
+
+// NewConfigWatcherWithOptions is like NewConfigWatcher but accepts additional
+// WatcherOption for callbacks like OnConfigParsed.
+func NewConfigWatcherWithOptions(
+	source coresrc.ConfigSource,
+	store statestore.StateStore,
+	logger *slog.Logger,
+	wopts []WatcherOption,
+	coreOpts ...coresrc.WatcherOption,
+) *coresrc.ConfigWatcher {
+	var wo watcherOpts
+	for _, o := range wopts {
+		o(&wo)
+	}
+
 	var lastRoutes map[string]statestore.RouteEntry
 	seeded := false
 
 	applyFn := func(ctx context.Context, data []byte) (bool, error) {
-		// On first apply, seed from persistent store so that routes deleted
-		// from config before this restart are properly removed.
 		if !seeded {
 			existing, err := store.GetRoutes(ctx)
 			if err != nil {
 				logger.Warn("could not seed routes from store; treating as empty", "error", err)
 			} else {
 				lastRoutes = make(map[string]statestore.RouteEntry, len(existing))
-				for _, r := range existing {
-					lastRoutes[r.ID] = r
+				for i := range existing {
+					lastRoutes[existing[i].ID] = existing[i]
 				}
 			}
 			seeded = true
@@ -45,23 +79,27 @@ func NewConfigWatcher(
 			return false, fmt.Errorf("parsing config: %w", err)
 		}
 
+		if wo.onConfigParsed != nil {
+			wo.onConfigParsed(cfg)
+		}
+
 		newRoutes := ConfigToRouteEntries(cfg)
 
 		added, updated, deleted := diffRoutes(lastRoutes, newRoutes)
 
-		for _, r := range added {
-			if err := store.PutRoute(ctx, r); err != nil {
-				return false, fmt.Errorf("adding route %s: %w", r.ID, err)
+		for i := range added {
+			if err := store.PutRoute(ctx, added[i]); err != nil {
+				return false, fmt.Errorf("adding route %s: %w", added[i].ID, err)
 			}
 		}
-		for _, r := range updated {
-			if err := store.PutRoute(ctx, r); err != nil {
-				return false, fmt.Errorf("updating route %s: %w", r.ID, err)
+		for i := range updated {
+			if err := store.PutRoute(ctx, updated[i]); err != nil {
+				return false, fmt.Errorf("updating route %s: %w", updated[i].ID, err)
 			}
 		}
-		for _, r := range deleted {
-			if err := store.DeleteRoute(ctx, r.ID); err != nil {
-				return false, fmt.Errorf("deleting route %s: %w", r.ID, err)
+		for i := range deleted {
+			if err := store.DeleteRoute(ctx, deleted[i].ID); err != nil {
+				return false, fmt.Errorf("deleting route %s: %w", deleted[i].ID, err)
 			}
 		}
 
@@ -84,14 +122,15 @@ func NewConfigWatcher(
 		return totalChanges > 0, nil
 	}
 
-	return coresrc.NewConfigWatcher(source, applyFn, logger, opts...)
+	return coresrc.NewConfigWatcher(source, applyFn, logger, coreOpts...)
 }
 
 // diffRoutes computes the difference between old and new route maps.
 func diffRoutes(
 	old, newMap map[string]statestore.RouteEntry,
 ) (added, updated, deleted []statestore.RouteEntry) {
-	for id, newEntry := range newMap {
+	for id := range newMap {
+		newEntry := newMap[id]
 		oldEntry, exists := old[id]
 		if !exists {
 			added = append(added, newEntry)
@@ -100,9 +139,9 @@ func diffRoutes(
 		}
 	}
 
-	for id, oldEntry := range old {
+	for id := range old {
 		if _, exists := newMap[id]; !exists {
-			deleted = append(deleted, oldEntry)
+			deleted = append(deleted, old[id])
 		}
 	}
 
@@ -110,18 +149,8 @@ func diffRoutes(
 }
 
 func routeEqual(a, b statestore.RouteEntry) bool {
-	if a.ID != b.ID || a.Path != b.Path || a.Method != b.Method ||
-		a.TargetURL != b.TargetURL || a.ResilienceProfile != b.ResilienceProfile {
+	if a.ID != b.ID || a.Path != b.Path || a.Method != b.Method {
 		return false
 	}
-
-	if !reflect.DeepEqual(a.Security, b.Security) {
-		return false
-	}
-
-	if !reflect.DeepEqual(a.Traffic, b.Traffic) {
-		return false
-	}
-
-	return true
+	return reflect.DeepEqual(a.Route, b.Route)
 }

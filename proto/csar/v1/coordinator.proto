@@ -52,6 +52,9 @@ message ConfigUpdate {
     // Token invalidation event — instructs the router to clear
     // stale-cached tokens after a rotation (audit §1.2).
     TokenInvalidation token_invalidation = 5;
+
+    // Full configuration snapshot including routes and top-level policies.
+    FullConfigSnapshot full_config_snapshot = 6;
   }
 
   // Field 3 was SecretDistribution (removed — plaintext token distribution).
@@ -72,7 +75,28 @@ message TokenInvalidation {
   uint64 invalidation_version = 2;
 }
 
-// RouteSnapshot contains the full set of routes.
+// FullConfigSnapshot carries the complete configuration: routes plus
+// all top-level policies and settings that routes may reference.
+message FullConfigSnapshot {
+  repeated RouteConfig routes = 1;
+
+  // Named policy maps referenced by routes via "use" / "profile" fields.
+  map<string, CircuitBreakerProfileProto> circuit_breakers = 2;
+  map<string, SecurityConfigProto> security_profiles = 3;
+  map<string, ThrottlingPolicyProto> throttling_policies = 4;
+  map<string, CORSConfigProto> cors_policies = 5;
+  map<string, RetryConfigProto> retry_policies = 6;
+  map<string, RedactConfigProto> redact_policies = 7;
+  map<string, AuthValidateConfigProto> auth_validate_policies = 8;
+  map<string, AuthzRouteConfigProto> authz_policies = 12;
+
+  // Global settings.
+  GlobalThrottleProto global_throttle = 9;
+  DebugHeadersProto debug_headers = 10;
+  AccessControlProto global_access_control = 11;
+}
+
+// RouteSnapshot contains the full set of routes (legacy, kept for backward compat).
 message RouteSnapshot {
   repeated RouteConfig routes = 1;
 }
@@ -82,36 +106,270 @@ message RouteConfig {
   string route_id = 1;
   string path = 2;
   string method = 3;
+
+  // Deprecated flat fields kept for wire compat (4-7).
   string target_url = 4;
-
-  // Security settings (optional).
-  SecurityConfig security = 5;
-
-  // Traffic settings (optional).
-  TrafficConfig traffic = 6;
-
-  // Resilience profile name (optional).
+  SecurityConfigProto security = 5;
+  TrafficConfigProto traffic = 6;
   string resilience_profile = 7;
+
+  // Full config (new fields).
+  BackendConfigProto backend = 10;
+  repeated SecurityConfigProto securities = 11;
+  TrafficConfigProto traffic_config = 12;
+  RetryConfigProto retry = 13;
+  RedactConfigProto redact = 14;
+  CORSConfigProto cors = 15;
+  TenantConfigProto tenant = 16;
+  CacheConfigProto cache = 17;
+  AuthValidateConfigProto auth_validate = 18;
+  AccessControlProto access = 19;
+  ResilienceConfigProto resilience = 20;
+  map<string, string> headers = 21;
+  int64 max_response_size = 22;
+  ProtocolPolicyProto protocol = 23;
+  AuthzRouteConfigProto authz = 24;
 }
 
-// SecurityConfig pushed to routers — contains the header injection config.
-// Routers obtain decrypted tokens via AuthService.GetEncryptedToken + KMS decryption.
-message SecurityConfig {
-  string token_ref = 1;
-  string inject_header = 2;
-  string inject_format = 3;
+// ---------------------------------------------------------------------------
+// Backend
+// ---------------------------------------------------------------------------
 
-  // kms_key_id is the KMS key used to decrypt the token.
-  // Required for routers to perform KMS decryption when fetching tokens.
-  string kms_key_id = 4;
+message BackendConfigProto {
+  string target_url = 1;
+  repeated string targets = 2;
+  string load_balancer = 3;
+  string path_rewrite = 4;
+  string path_mode = 5;
+  HealthCheckConfigProto health_check = 6;
+  BackendTLSConfigProto tls = 7;
 }
 
-// TrafficConfig describes rate limiting parameters.
-message TrafficConfig {
+message HealthCheckConfigProto {
+  bool enabled = 1;
+  string mode = 2;
+  string path = 3;
+  google.protobuf.Duration interval = 4;
+  google.protobuf.Duration timeout = 5;
+  int32 unhealthy_threshold = 6;
+  int32 healthy_threshold = 7;
+}
+
+message BackendTLSConfigProto {
+  bool insecure_skip_verify = 1;
+  string ca_file = 2;
+  string cert_file = 3;
+  string key_file = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Security
+// ---------------------------------------------------------------------------
+
+message SecurityConfigProto {
+  string profile = 1;
+  string kms_key_id = 2;
+  string token_ref = 3;
+  string token_version = 4;
+  string inject_header = 5;
+  string inject_format = 6;
+  string on_kms_error = 7;
+  bool strip_token_params = 8;
+  bool strip_token_params_set = 9;
+}
+
+// ---------------------------------------------------------------------------
+// Traffic / throttling
+// ---------------------------------------------------------------------------
+
+message TrafficConfigProto {
+  string use = 1;
+  double rps = 2;
+  int32 burst = 3;
+  google.protobuf.Duration max_wait = 4;
+  string backend = 5;
+  string key = 6;
+  repeated string exclude_ips = 7;
+  repeated VIPOverrideProto vip_overrides = 8;
+  AdaptiveBackpressureProto adaptive_backpressure = 9;
+  string client_limit_mode = 10;
+}
+
+message VIPOverrideProto {
+  string header = 1;
+  map<string, string> values = 2;
+}
+
+message AdaptiveBackpressureProto {
+  bool enabled = 1;
+  repeated string respect_headers = 2;
+  bool suspend_bucket = 3;
+  int64 max_body_buffer = 4;
+}
+
+message ThrottlingPolicyProto {
+  double rps = 1;
+  int32 burst = 2;
+  google.protobuf.Duration max_wait = 3;
+  string backend = 4;
+  string key = 5;
+  repeated string exclude_ips = 6;
+  repeated VIPOverrideProto vip_overrides = 7;
+  string client_limit_mode = 8;
+}
+
+message GlobalThrottleProto {
   double rps = 1;
   int32 burst = 2;
   google.protobuf.Duration max_wait = 3;
 }
+
+// ---------------------------------------------------------------------------
+// Auth validation (inbound JWT/JWKS)
+// ---------------------------------------------------------------------------
+
+message AuthValidateConfigProto {
+  string use = 1;
+  string jwks_url = 2;
+  string issuer = 3;
+  repeated string audiences = 4;
+  string header_name = 5;
+  string token_prefix = 6;
+  google.protobuf.Duration cache_ttl = 7;
+  map<string, string> required_claims = 8;
+  map<string, string> forward_claims = 9;
+  string cookie_name = 10;
+}
+
+// ---------------------------------------------------------------------------
+// Retry
+// ---------------------------------------------------------------------------
+
+message RetryConfigProto {
+  string use = 1;
+  int32 max_attempts = 2;
+  google.protobuf.Duration backoff = 3;
+  google.protobuf.Duration max_backoff = 4;
+  repeated int32 retryable_status_codes = 5;
+  repeated string retryable_methods = 6;
+  bool auto_retry_429 = 7;
+  google.protobuf.Duration max_internal_wait = 8;
+}
+
+// ---------------------------------------------------------------------------
+// Redact (DLP)
+// ---------------------------------------------------------------------------
+
+message RedactConfigProto {
+  string use = 1;
+  repeated string fields = 2;
+  string mask = 3;
+  bool enabled = 4;
+  bool enabled_set = 5;
+}
+
+// ---------------------------------------------------------------------------
+// CORS
+// ---------------------------------------------------------------------------
+
+message CORSConfigProto {
+  string use = 1;
+  repeated string allowed_origins = 2;
+  repeated string allowed_methods = 3;
+  repeated string allowed_headers = 4;
+  repeated string exposed_headers = 5;
+  bool allow_credentials = 6;
+  int32 max_age = 7;
+}
+
+// ---------------------------------------------------------------------------
+// Tenant
+// ---------------------------------------------------------------------------
+
+message TenantConfigProto {
+  string header = 1;
+  map<string, string> backends = 2;
+  string default_backend = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Cache
+// ---------------------------------------------------------------------------
+
+message CacheConfigProto {
+  bool enabled = 1;
+  bool enabled_set = 2;
+  google.protobuf.Duration ttl = 3;
+  int32 max_entries = 4;
+  int64 max_body_size = 5;
+  repeated string methods = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Access control
+// ---------------------------------------------------------------------------
+
+message AccessControlProto {
+  repeated string allow_cidrs = 1;
+  bool trust_proxy = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Resilience
+// ---------------------------------------------------------------------------
+
+message ResilienceConfigProto {
+  string circuit_breaker = 1;
+}
+
+message CircuitBreakerProfileProto {
+  uint32 max_requests = 1;
+  google.protobuf.Duration interval = 2;
+  google.protobuf.Duration timeout = 3;
+  uint32 failure_threshold = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Protocol
+// ---------------------------------------------------------------------------
+
+message ProtocolPolicyProto {
+  bool emit_wait_ms = 1;
+  bool emit_wait_ms_set = 2;
+  bool transparent_retry = 3;
+  bool transparent_retry_set = 4;
+  bool emit_client_hint = 5;
+  bool emit_client_hint_set = 6;
+}
+
+// ---------------------------------------------------------------------------
+// Debug headers
+// ---------------------------------------------------------------------------
+
+message DebugHeadersProto {
+  bool enabled = 1;
+  bool emit_route_id = 2;
+  bool emit_route_id_set = 3;
+  string request_id_header = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Authz (csar-authz per-route authorization)
+// ---------------------------------------------------------------------------
+
+message AuthzRouteConfigProto {
+  string use = 1;
+  string subject = 2;
+  string resource = 3;
+  string action = 4;
+  string scope_type = 5;
+  string scope_id = 6;
+  repeated string strip_headers = 7;
+}
+
+// ---------------------------------------------------------------------------
+// Quota (unchanged from original)
+// ---------------------------------------------------------------------------
 
 // QuotaAssignment tells a router its allocated share of the global rate limits.
 message QuotaAssignment {
@@ -124,6 +382,10 @@ message RouteQuota {
   double rps = 1;
   int32 burst = 2;
 }
+
+// ---------------------------------------------------------------------------
+// Health (unchanged from original)
+// ---------------------------------------------------------------------------
 
 // HealthReport is sent by a router to the coordinator.
 message HealthReport {

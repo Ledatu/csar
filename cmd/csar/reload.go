@@ -4,10 +4,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"sync/atomic"
 
 	"github.com/ledatu/csar/internal/config"
+	"github.com/ledatu/csar/internal/coordclient"
 	"github.com/ledatu/csar/internal/router"
+	"github.com/ledatu/csar/internal/telemetry"
+	"github.com/ledatu/csar/internal/throttle"
 )
 
 // reloadableHandler wraps an http.Handler with an atomic pointer so it can be
@@ -135,7 +139,6 @@ func logStartupSummary(logger *slog.Logger, cfg *config.Config, r *router.Router
 		coordStatus = fmt.Sprintf("enabled (grpc://%s, %s)", cfg.Coordinator.Address, transport)
 	}
 
-	// Count routes with security and throttle
 	totalRoutes := 0
 	secureRoutes := 0
 	throttledRoutes := 0
@@ -163,4 +166,56 @@ func logStartupSummary(logger *slog.Logger, cfg *config.Config, r *router.Router
 		"coordinator", coordStatus,
 		"routes", fmt.Sprintf("%d (%d with security, %d with throttle)", totalRoutes, secureRoutes, throttledRoutes),
 	)
+}
+
+// ---------------------------------------------------------------------------
+// Config applier for coordinator-driven hot-reload
+// ---------------------------------------------------------------------------
+
+// routerReloader implements coordclient.ConfigApplier by rebuilding the router
+// from a new config and atomically swapping the HTTP handler.
+type routerReloader struct {
+	mu            sync.Mutex
+	logger        *slog.Logger
+	routerOpts    []router.Option
+	reloadHandler *reloadableHandler
+	tp            *telemetry.Provider
+	sharedTM      *throttle.ThrottleManager
+	currentRouter *router.Router
+}
+
+var _ coordclient.ConfigApplier = (*routerReloader)(nil)
+
+// Apply rebuilds the router from cfg and hot-swaps it.
+func (rl *routerReloader) Apply(cfg *config.Config) error {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	for _, w := range cfg.Warnings {
+		rl.logger.Warn("(coordinator-reload) " + w)
+	}
+
+	newRouter, err := router.New(cfg, rl.logger, rl.routerOpts...)
+	if err != nil {
+		return fmt.Errorf("router rebuild from coordinator config: %w", err)
+	}
+
+	rl.reloadHandler.swap(rl.tp.HTTPMiddleware("csar", newRouter))
+
+	if rl.currentRouter != nil {
+		rl.currentRouter.Close()
+	}
+	rl.currentRouter = newRouter
+
+	pruned := rl.sharedTM.SyncKeys(newRouter.RegisteredKeys())
+	if pruned > 0 {
+		rl.logger.Info("pruned stale throttle keys after coordinator reload",
+			"pruned", pruned,
+		)
+	}
+
+	rl.logger.Info("configuration reloaded from coordinator",
+		"routes", len(cfg.Paths),
+	)
+	return nil
 }

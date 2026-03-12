@@ -6,7 +6,6 @@ import (
 
 	"github.com/ledatu/csar-core/configutil"
 	"github.com/ledatu/csar/internal/config"
-	"github.com/ledatu/csar/internal/statestore"
 )
 
 func TestConfigToRouteEntries_FullParity(t *testing.T) {
@@ -67,7 +66,6 @@ func TestConfigToRouteEntries_FullParity(t *testing.T) {
 		t.Fatal("expected route GET:/api/v1/users")
 	}
 
-	// Propagated fields
 	if entry.ID != "GET:/api/v1/users" {
 		t.Errorf("ID = %q, want %q", entry.ID, "GET:/api/v1/users")
 	}
@@ -77,38 +75,49 @@ func TestConfigToRouteEntries_FullParity(t *testing.T) {
 	if entry.Method != "GET" {
 		t.Errorf("Method = %q, want %q", entry.Method, "GET")
 	}
-	if entry.TargetURL != "https://primary.example.com" {
-		t.Errorf("TargetURL = %q, want explicit TargetURL", entry.TargetURL)
+
+	// Full route config is now carried through.
+	if entry.Route.Backend.TargetURL != "https://primary.example.com" {
+		t.Errorf("Backend.TargetURL = %q, want explicit TargetURL", entry.Route.Backend.TargetURL)
 	}
-	if entry.Security == nil {
-		t.Fatal("Security should be set (first credential)")
+	if len(entry.Route.Security) != 2 {
+		t.Fatalf("Security count = %d, want 2", len(entry.Route.Security))
 	}
-	if entry.Security.KMSKeyID != "key-1" {
-		t.Errorf("Security.KMSKeyID = %q, want %q", entry.Security.KMSKeyID, "key-1")
+	if entry.Route.Security[0].KMSKeyID != "key-1" {
+		t.Errorf("Security[0].KMSKeyID = %q, want %q", entry.Route.Security[0].KMSKeyID, "key-1")
 	}
-	if entry.Security.TokenRef != "tok-a" {
-		t.Errorf("Security.TokenRef = %q, want %q", entry.Security.TokenRef, "tok-a")
+	if entry.Route.Security[1].InjectHeader != "X-Client-Secret" {
+		t.Errorf("Security[1].InjectHeader = %q, want %q", entry.Route.Security[1].InjectHeader, "X-Client-Secret")
 	}
-	if entry.Security.InjectHeader != "Authorization" {
-		t.Errorf("Security.InjectHeader = %q, want %q", entry.Security.InjectHeader, "Authorization")
-	}
-	if entry.Security.InjectFormat != "Bearer {token}" {
-		t.Errorf("Security.InjectFormat = %q, want %q", entry.Security.InjectFormat, "Bearer {token}")
-	}
-	if entry.Traffic == nil {
+	if entry.Route.Traffic == nil {
 		t.Fatal("Traffic should be set")
 	}
-	if entry.Traffic.RPS != 100 {
-		t.Errorf("Traffic.RPS = %v, want 100", entry.Traffic.RPS)
+	if entry.Route.Traffic.RPS != 100 {
+		t.Errorf("Traffic.RPS = %v, want 100", entry.Route.Traffic.RPS)
 	}
-	if entry.Traffic.Burst != 50 {
-		t.Errorf("Traffic.Burst = %v, want 50", entry.Traffic.Burst)
+	if entry.Route.Traffic.Burst != 50 {
+		t.Errorf("Traffic.Burst = %v, want 50", entry.Route.Traffic.Burst)
 	}
-	if entry.Traffic.MaxWait != 5*time.Second {
-		t.Errorf("Traffic.MaxWait = %v, want 5s", entry.Traffic.MaxWait)
+	if entry.Route.Traffic.Backend != "redis" {
+		t.Errorf("Traffic.Backend = %q, want redis", entry.Route.Traffic.Backend)
 	}
-	if entry.ResilienceProfile != "aggressive" {
-		t.Errorf("ResilienceProfile = %q, want %q", entry.ResilienceProfile, "aggressive")
+	if entry.Route.Traffic.Key != "per-ip" {
+		t.Errorf("Traffic.Key = %q, want per-ip", entry.Route.Traffic.Key)
+	}
+	if entry.Route.Resilience == nil || entry.Route.Resilience.CircuitBreaker != "aggressive" {
+		t.Errorf("Resilience.CircuitBreaker = %v, want aggressive", entry.Route.Resilience)
+	}
+	if entry.Route.Headers["X-Custom"] != "value" {
+		t.Errorf("Headers[X-Custom] = %q, want value", entry.Route.Headers["X-Custom"])
+	}
+	if entry.Route.Retry == nil {
+		t.Error("Retry should be set")
+	}
+	if entry.Route.CORS == nil {
+		t.Error("CORS should be set")
+	}
+	if entry.Route.Cache == nil {
+		t.Error("Cache should be set")
 	}
 }
 
@@ -127,8 +136,8 @@ func TestConfigToRouteEntries_FallbackToFirstTarget(t *testing.T) {
 
 	entries := ConfigToRouteEntries(cfg)
 	entry := entries["POST:/lb"]
-	if entry.TargetURL != "https://a.example.com" {
-		t.Errorf("TargetURL = %q, want first target", entry.TargetURL)
+	if len(entry.Route.Backend.Targets) != 2 {
+		t.Errorf("Targets count = %d, want 2", len(entry.Route.Backend.Targets))
 	}
 }
 
@@ -145,18 +154,18 @@ func TestConfigToRouteEntries_NoSecurity(t *testing.T) {
 
 	entries := ConfigToRouteEntries(cfg)
 	entry := entries["GET:/open"]
-	if entry.Security != nil {
-		t.Error("Security should be nil for routes without security config")
+	if len(entry.Route.Security) != 0 {
+		t.Error("Security should be empty for routes without security config")
 	}
-	if entry.Traffic != nil {
+	if entry.Route.Traffic != nil {
 		t.Error("Traffic should be nil for routes without traffic config")
 	}
-	if entry.ResilienceProfile != "" {
-		t.Error("ResilienceProfile should be empty for routes without resilience config")
+	if entry.Route.Resilience != nil {
+		t.Error("Resilience should be nil for routes without resilience config")
 	}
 }
 
-func TestConfigToRouteEntries_IntentionallyExcludedFields(t *testing.T) {
+func TestConfigToRouteEntries_AllFieldsPropagated(t *testing.T) {
 	trueVal := true
 	cfg := &config.Config{
 		Paths: map[string]config.PathConfig{
@@ -177,15 +186,15 @@ func TestConfigToRouteEntries_IntentionallyExcludedFields(t *testing.T) {
 						},
 					},
 					Headers:         map[string]string{"X-H": "val"},
-					AuthValidate:    &config.AuthValidateConfig{},
-					Access:          &config.AccessControlConfig{},
-					Retry:           &config.RetryConfig{},
-					Redact:          &config.RedactConfig{},
-					Tenant:          &config.TenantConfig{},
-					CORS:            &config.CORSConfig{},
+					AuthValidate:    &config.AuthValidateConfig{JWKSURL: "https://auth.example.com/.well-known/jwks.json"},
+					Access:          &config.AccessControlConfig{AllowCIDRs: []string{"10.0.0.0/8"}},
+					Retry:           &config.RetryConfig{MaxAttempts: 3},
+					Redact:          &config.RedactConfig{Fields: []string{"email"}},
+					Tenant:          &config.TenantConfig{Header: "X-Tenant-ID"},
+					CORS:            &config.CORSConfig{AllowedOrigins: []string{"*"}},
 					Cache:           &config.CacheConfig{},
 					MaxResponseSize: 1024,
-					Protocol:        &config.ProtocolPolicy{},
+					Protocol:        &config.ProtocolPolicy{EmitWaitMS: &trueVal},
 				},
 			},
 		},
@@ -194,33 +203,40 @@ func TestConfigToRouteEntries_IntentionallyExcludedFields(t *testing.T) {
 	entries := ConfigToRouteEntries(cfg)
 	entry := entries["GET:/full"]
 
-	// These are the only fields we expect in the statestore entry.
-	want := statestore.RouteEntry{
-		ID:        "GET:/full",
-		Path:      "/full",
-		Method:    "GET",
-		TargetURL: "https://target.example.com",
-		Security: &statestore.SecurityEntry{
-			KMSKeyID:     "key-1",
-			TokenRef:     "tok",
-			InjectHeader: "Authorization",
-			InjectFormat: "Bearer {token}",
-		},
+	if entry.Route.Backend.TargetURL != "https://target.example.com" {
+		t.Errorf("TargetURL = %q", entry.Route.Backend.TargetURL)
 	}
-
-	if entry.ID != want.ID {
-		t.Errorf("ID = %q, want %q", entry.ID, want.ID)
+	if len(entry.Route.Security) != 1 {
+		t.Fatalf("Security count = %d, want 1", len(entry.Route.Security))
 	}
-	if entry.TargetURL != want.TargetURL {
-		t.Errorf("TargetURL = %q, want %q", entry.TargetURL, want.TargetURL)
+	if entry.Route.Security[0].OnKMSError != "serve_stale" {
+		t.Errorf("OnKMSError = %q, want serve_stale", entry.Route.Security[0].OnKMSError)
 	}
-	if entry.Security.KMSKeyID != want.Security.KMSKeyID {
-		t.Errorf("Security.KMSKeyID = %q, want %q", entry.Security.KMSKeyID, want.Security.KMSKeyID)
+	if entry.Route.Headers["X-H"] != "val" {
+		t.Errorf("Headers[X-H] = %q", entry.Route.Headers["X-H"])
 	}
-	if entry.Traffic != nil {
-		t.Error("Traffic should be nil (not configured)")
+	if entry.Route.AuthValidate == nil {
+		t.Error("AuthValidate should be set")
 	}
-	if entry.ResilienceProfile != "" {
-		t.Error("ResilienceProfile should be empty (not configured)")
+	if entry.Route.Access == nil || len(entry.Route.Access.AllowCIDRs) != 1 {
+		t.Error("Access should have 1 CIDR")
+	}
+	if entry.Route.Retry == nil || entry.Route.Retry.MaxAttempts != 3 {
+		t.Error("Retry.MaxAttempts should be 3")
+	}
+	if entry.Route.Redact == nil || len(entry.Route.Redact.Fields) != 1 {
+		t.Error("Redact should have 1 field")
+	}
+	if entry.Route.Tenant == nil || entry.Route.Tenant.Header != "X-Tenant-ID" {
+		t.Error("Tenant.Header should be X-Tenant-ID")
+	}
+	if entry.Route.CORS == nil || len(entry.Route.CORS.AllowedOrigins) != 1 {
+		t.Error("CORS should have 1 origin")
+	}
+	if entry.Route.MaxResponseSize != 1024 {
+		t.Errorf("MaxResponseSize = %d, want 1024", entry.Route.MaxResponseSize)
+	}
+	if entry.Route.Protocol == nil || entry.Route.Protocol.EmitWaitMS == nil || !*entry.Route.Protocol.EmitWaitMS {
+		t.Error("Protocol.EmitWaitMS should be true")
 	}
 }

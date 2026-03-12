@@ -15,6 +15,7 @@ import (
 	"github.com/ledatu/csar/internal/resilience"
 	"github.com/ledatu/csar/internal/throttle"
 	"github.com/ledatu/csar/pkg/middleware"
+	"github.com/ledatu/csar/pkg/middleware/authzmw"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -129,9 +130,26 @@ func (r *Router) serveWithIPCheck(w http.ResponseWriter, req *http.Request, rt *
 	// If the route requires JWT auth-validate, validate the token before proceeding.
 	if rt.jwtConfig != nil && r.jwtValidator != nil {
 		validated := r.jwtValidator.Wrap(*rt.jwtConfig, http.HandlerFunc(func(vw http.ResponseWriter, vr *http.Request) {
-			r.serveAfterAuth(vw, vr, rt)
+			r.serveAfterJWT(vw, vr, rt)
 		}))
 		validated.ServeHTTP(w, req)
+		return
+	}
+
+	r.serveAfterJWT(w, req, rt)
+}
+
+// serveAfterJWT runs authz evaluation if configured, then continues to serveAfterAuth.
+func (r *Router) serveAfterJWT(w http.ResponseWriter, req *http.Request, rt *route) {
+	if rt.authzConfig != nil && r.authzClient != nil {
+		mw := authzmw.New(r.authzClient, r.requestID)
+		wrapped := mw.Wrap(authzmw.Config{
+			RouteConfig:  rt.authzConfig,
+			OriginalPath: rt.originalPath,
+		}, http.HandlerFunc(func(aw http.ResponseWriter, ar *http.Request) {
+			r.serveAfterAuth(aw, ar, rt)
+		}))
+		wrapped.ServeHTTP(w, req)
 		return
 	}
 

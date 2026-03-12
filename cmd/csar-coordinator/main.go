@@ -30,6 +30,7 @@ import (
 	"github.com/ledatu/csar-core/s3store"
 	"github.com/ledatu/csar-core/ycloud"
 
+	csarcfg "github.com/ledatu/csar/internal/config"
 	csarcsrc "github.com/ledatu/csar/internal/configsource"
 	"github.com/ledatu/csar/internal/coordinator"
 	"github.com/ledatu/csar/internal/kms"
@@ -171,6 +172,10 @@ func main() {
 	}
 	defer store.Close()
 
+	// Create coordinator (before config watcher so we can wire the OnConfigParsed callback).
+	coord := coordinator.New(store, logger)
+	coord.SetInvalidationBufferSize(*invalidationBufferSize)
+
 	// Initialize config source watcher (loads route configuration into StateStore).
 	var configWatcher *configsource.ConfigWatcher
 	if *configSource != "" {
@@ -210,9 +215,14 @@ func main() {
 			logger.Info("config hash policy: TOFU (Trust On First Use)")
 		}
 
-		configWatcher = csarcsrc.NewConfigWatcher(
+		configWatcher = csarcsrc.NewConfigWatcherWithOptions(
 			src, store,
 			logger.With("component", "config_watcher"),
+			[]csarcsrc.WatcherOption{
+				csarcsrc.WithOnConfigParsed(func(cfg *csarcfg.Config) {
+					coord.SetTopLevelConfig(cfg)
+				}),
+			},
 			opts...,
 		)
 
@@ -227,10 +237,6 @@ func main() {
 		initCancel()
 		logger.Info("initial config loaded from source")
 	}
-
-	// Create coordinator
-	coord := coordinator.New(store, logger)
-	coord.SetInvalidationBufferSize(*invalidationBufferSize)
 
 	// Create AuthService for token delivery to routers
 	authSvc := coordinator.NewAuthService(logger)
