@@ -81,13 +81,14 @@ func (r *Router) matchRoute(method, path string) (*route, []string) {
 //	"/api/v1/users/{id:[0-9]+}"       → "^/api/v1/users/([0-9]+)$"
 //	"/api/{version:v[0-9]+}/items/{id}" → "^/api/(v[0-9]+)/items/([^/]+)$"
 //	"/api/v1/products"                → nil, false (no variables)
-func compilePathPattern(path string) (*regexp.Regexp, bool) {
+func compilePathPattern(path string) (*regexp.Regexp, []string, bool) {
 	// Quick check: if no '{' then no variables.
 	if !strings.Contains(path, "{") {
-		return nil, false
+		return nil, nil, false
 	}
 
 	var b strings.Builder
+	var varNames []string
 	b.WriteString("^")
 
 	i := 0
@@ -112,11 +113,12 @@ func compilePathPattern(path string) (*regexp.Regexp, bool) {
 		varContent := rest[1:closeBrace]
 		if colonIdx := strings.IndexByte(varContent, ':'); colonIdx >= 0 {
 			// Has explicit regex: {name:pattern}
+			varNames = append(varNames, varContent[:colonIdx])
 			userPattern := varContent[colonIdx+1:]
 
 			// ReDoS protection: reject dangerous patterns (audit §2.2.4).
 			if dangerousPatterns.MatchString(userPattern) {
-				return nil, false
+				return nil, nil, false
 			}
 
 			b.WriteString("(")
@@ -124,6 +126,7 @@ func compilePathPattern(path string) (*regexp.Regexp, bool) {
 			b.WriteString(")")
 		} else {
 			// Plain variable: {name} → match any non-slash segment
+			varNames = append(varNames, varContent)
 			b.WriteString("([^/]+)")
 		}
 
@@ -136,12 +139,12 @@ func compilePathPattern(path string) (*regexp.Regexp, bool) {
 
 	// ReDoS protection: reject overly long patterns (audit §2.2.4).
 	if len(pattern) > maxRegexLength {
-		return nil, false
+		return nil, nil, false
 	}
 
 	re, err := regexp.Compile(pattern)
 	if err != nil {
-		return nil, false
+		return nil, nil, false
 	}
-	return re, true
+	return re, varNames, true
 }

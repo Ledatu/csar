@@ -4,6 +4,7 @@
 package authzmw
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -18,13 +19,23 @@ import (
 // placeholderRe matches {source.key} patterns used in authz config templates.
 var placeholderRe = regexp.MustCompile(`\{(query|header|path)\.([^}]+)\}`)
 
-// pathVarRe matches named path variables like {varname} or {varname:pattern}.
-var pathVarRe = regexp.MustCompile(`\{([^:}]+)(?::[^}]+)?\}`)
+type pathVarsKey struct{}
+
+// WithPathVars stores path variable bindings in the request context.
+// Must be called before path rewriting so values reflect the original URL.
+func WithPathVars(ctx context.Context, vars map[string]string) context.Context {
+	return context.WithValue(ctx, pathVarsKey{}, vars)
+}
+
+// PathVarsFromContext retrieves path variable bindings from the context.
+func PathVarsFromContext(ctx context.Context) map[string]string {
+	vars, _ := ctx.Value(pathVarsKey{}).(map[string]string)
+	return vars
+}
 
 // Config holds the per-route authz middleware configuration.
 type Config struct {
-	RouteConfig  *config.AuthzRouteConfig
-	OriginalPath string // route definition path (e.g. "/api/v1/users/{id:[0-9]+}")
+	RouteConfig *config.AuthzRouteConfig
 }
 
 // Middleware wraps an http.Handler with authz checking.
@@ -40,14 +51,12 @@ func New(client *authz.Client, requestIDFn func(*http.Request) string) *Middlewa
 
 // Wrap returns an http.Handler that enforces authz before calling next.
 func (m *Middleware) Wrap(cfg Config, next http.Handler) http.Handler {
-	pathVarNames := extractPathVarNames(cfg.OriginalPath)
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, h := range cfg.RouteConfig.StripHeaders {
 			r.Header.Del(h)
 		}
 
-		pathVars := resolvePathVars(cfg.OriginalPath, pathVarNames, r.URL.Path)
+		pathVars := PathVarsFromContext(r.Context())
 
 		subject, err := resolvePlaceholder(cfg.RouteConfig.Subject, r, pathVars)
 		if err != nil {
@@ -114,43 +123,6 @@ func (m *Middleware) Wrap(cfg Config, next http.Handler) http.Handler {
 	})
 }
 
-// extractPathVarNames returns the ordered list of variable names from a route path.
-func extractPathVarNames(routePath string) []string {
-	matches := pathVarRe.FindAllStringSubmatch(routePath, -1)
-	names := make([]string, 0, len(matches))
-	for _, m := range matches {
-		names = append(names, m[1])
-	}
-	return names
-}
-
-// resolvePathVars extracts named path variables by segment comparison between
-// the route definition and the actual request path.
-func resolvePathVars(routePath string, varNames []string, actualPath string) map[string]string {
-	if len(varNames) == 0 {
-		return nil
-	}
-
-	routeSegments := strings.Split(strings.Trim(routePath, "/"), "/")
-	actualSegments := strings.Split(strings.Trim(actualPath, "/"), "/")
-
-	vars := make(map[string]string, len(varNames))
-	varIdx := 0
-	for i, seg := range routeSegments {
-		if varIdx >= len(varNames) {
-			break
-		}
-		if i >= len(actualSegments) {
-			break
-		}
-		if strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}") {
-			vars[varNames[varIdx]] = actualSegments[i]
-			varIdx++
-		}
-	}
-	return vars
-}
-
 // resolvePlaceholder replaces {source.key} patterns in a template string.
 func resolvePlaceholder(tmpl string, r *http.Request, pathVars map[string]string) (string, error) {
 	if !strings.Contains(tmpl, "{") {
@@ -169,7 +141,14 @@ func resolvePlaceholder(tmpl string, r *http.Request, pathVars map[string]string
 		var val string
 		switch source {
 		case "query":
-			val = r.URL.Query().Get(key)
+			values := r.URL.Query()[key]
+			if len(values) > 1 {
+				resolveErr = fmt.Errorf("duplicate query parameter %q (HTTP parameter pollution)", key)
+				return match
+			}
+			if len(values) == 1 {
+				val = values[0]
+			}
 		case "header":
 			val = r.Header.Get(key)
 		case "path":

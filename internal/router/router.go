@@ -44,6 +44,7 @@ type route struct {
 	pathRewrite         string                     // rewrite template with $1/$2 back-references
 	method              string                     // HTTP method for this route (uppercase)
 	originalPath        string                     // the original path definition (e.g. "/api/v1/users/{id:[0-9]+}")
+	pathVarNames        []string                   // ordered variable names extracted from originalPath (e.g. ["id"])
 	jwtConfig           *authn.Config              // nil if no inbound JWT validation
 	dlpConfig           *dlp.Config                // nil if no response redaction
 	tenantConfig        *tenant.Config             // nil if no multi-tenant routing

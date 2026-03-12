@@ -52,6 +52,16 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Build path variable map from regex captures BEFORE path rewrite.
+	// captures[0] is the full match; captures[1..n] correspond to pathVarNames.
+	if len(rt.pathVarNames) > 0 && len(captures) > len(rt.pathVarNames) {
+		pathVars := make(map[string]string, len(rt.pathVarNames))
+		for i, name := range rt.pathVarNames {
+			pathVars[name] = captures[i+1]
+		}
+		req = req.WithContext(authzmw.WithPathVars(req.Context(), pathVars))
+	}
+
 	// Emit route ID debug header when enabled.
 	if r.cfg.DebugHeaders != nil && r.cfg.DebugHeaders.Enabled {
 		emitRouteID := r.cfg.DebugHeaders.EmitRouteID == nil || *r.cfg.DebugHeaders.EmitRouteID
@@ -144,8 +154,7 @@ func (r *Router) serveAfterJWT(w http.ResponseWriter, req *http.Request, rt *rou
 	if rt.authzConfig != nil && r.authzClient != nil {
 		mw := authzmw.New(r.authzClient, r.requestID)
 		wrapped := mw.Wrap(authzmw.Config{
-			RouteConfig:  rt.authzConfig,
-			OriginalPath: rt.originalPath,
+			RouteConfig: rt.authzConfig,
 		}, http.HandlerFunc(func(aw http.ResponseWriter, ar *http.Request) {
 			r.serveAfterAuth(aw, ar, rt)
 		}))

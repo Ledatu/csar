@@ -142,8 +142,9 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 	}
 
 	// Compile regex path pattern if path contains {var:regex} segments.
-	if pat, hasRegex := compilePathPattern(fr.Path); hasRegex {
+	if pat, varNames, hasRegex := compilePathPattern(fr.Path); hasRegex {
 		rt.pathPattern = pat
+		rt.pathVarNames = varNames
 		if fr.Route.Backend.PathRewrite != "" {
 			rt.pathRewrite = fr.Route.Backend.PathRewrite
 		}

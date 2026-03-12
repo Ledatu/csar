@@ -186,6 +186,12 @@ func (v *JWTValidator) Wrap(cfg Config, next http.Handler) http.Handler {
 		}
 
 		// Forward claims to request headers.
+		// Always clear target headers first to prevent spoofing: if a client
+		// sends X-User-Id and the JWT lacks the "sub" claim, the client-supplied
+		// value must not survive into downstream middleware (e.g. authzmw).
+		for _, headerName := range cfg.ForwardClaims {
+			r.Header.Del(headerName)
+		}
 		for claimName, headerName := range cfg.ForwardClaims {
 			if val, ok := vt.Claims[claimName]; ok {
 				r.Header.Set(headerName, claimToString(val))
