@@ -13,6 +13,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/ledatu/csar-core/configload"
+	"github.com/ledatu/csar-core/configsource"
 	"github.com/ledatu/csar-core/health"
 	"github.com/ledatu/csar-core/httpserver"
 	"github.com/ledatu/csar-core/tlsx"
@@ -46,7 +48,6 @@ func main() {
 
 func run() error {
 	// CLI flags
-	configPath := flag.String("config", "config.example.yaml", "path to config file")
 	metricsAddr := flag.String("metrics-addr", ":9100", "Prometheus metrics listen address (empty to disable)")
 	otlpEndpoint := flag.String("otlp-endpoint", "", "OTLP gRPC endpoint for tracing (empty to disable)")
 	otlpInsecure := flag.Bool("otlp-insecure", false, "use insecure connection for OTLP (default: TLS required)")
@@ -68,6 +69,10 @@ func run() error {
 	// Token source flags (one required when secure routes exist)
 	tokenFile := flag.String("token-file", "", "path to YAML file with token_ref -> plaintext mappings (local dev)")
 
+	// Config source flags (S3, HTTP, manifest); env-var driven like coordinator/authn/authz.
+	sf := configload.NewSourceFlags()
+	sf.RegisterFlags(flag.CommandLine)
+
 	flag.Parse()
 
 	// Structured logger
@@ -75,11 +80,34 @@ func run() error {
 		Level: slog.LevelInfo,
 	}))
 
-	// Load configuration
-	logger.Info("loading configuration", "path", *configPath)
-	cfg, err := config.Load(*configPath)
-	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+	// Load configuration via configload stack (env-driven, like coordinator/authn/authz).
+	// CONFIG_SOURCE=file (default) uses config.Load() which supports include directives.
+	// CONFIG_SOURCE=manifest/s3/http uses configload.LoadInitial() with ParseBytes.
+	var cfg *config.Config
+	var configSource configsource.ConfigSource
+
+	if sf.Source == "file" {
+		logger.Info("loading configuration from file", "path", sf.File)
+		var loadErr error
+		cfg, loadErr = config.Load(sf.File)
+		if loadErr != nil {
+			return fmt.Errorf("loading config: %w", loadErr)
+		}
+	} else {
+		logger.Info("loading configuration from remote source", "source", sf.Source)
+		srcParams := sf.SourceParams()
+		initCtx, initCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		var loadErr error
+		cfg, loadErr = configload.LoadInitial(initCtx, &srcParams, logger, config.ParseBytes)
+		initCancel()
+		if loadErr != nil {
+			return fmt.Errorf("loading config from %s: %w", sf.Source, loadErr)
+		}
+		src, buildErr := configsource.BuildSource(&srcParams, logger)
+		if buildErr != nil {
+			return fmt.Errorf("building config source for reload: %w", buildErr)
+		}
+		configSource = src
 	}
 
 	// If redact_sensitive_logs is enabled, wrap the logger with a redacting handler
@@ -167,7 +195,10 @@ func run() error {
 		}
 	}
 
-	if cfg.HasSecureRoutes() {
+	// Initialize KMS / AuthInjector when the local config has secure routes
+	// OR when --kms-provider is explicitly set (e.g. for coordinator-pushed
+	// routes that may contain x-csar-security).
+	if cfg.HasSecureRoutes() || *kmsProvider != "" {
 		// Resolve KMS provider: CLI flag takes precedence, then config.
 		providerName := *kmsProvider
 		if providerName == "" && cfg.KMS != nil && cfg.KMS.Provider != "" {
@@ -398,10 +429,26 @@ func run() error {
 	signal.Notify(sighupCh, syscall.SIGHUP)
 	go func() {
 		for range sighupCh {
-			logger.Info("SIGHUP received — reloading configuration", "path", *configPath)
-			newCfg, err := config.Load(*configPath)
-			if err != nil {
-				logger.Error("config reload failed — keeping current config", "error", err)
+			var newCfg *config.Config
+			var reloadErr error
+			if configSource != nil {
+				logger.Info("SIGHUP received — reloading configuration from remote source", "source", sf.Source)
+				fetched, fetchErr := configSource.Fetch(context.Background())
+				if fetchErr != nil {
+					logger.Error("config reload failed — keeping current config", "error", fetchErr)
+					continue
+				}
+				if fetched.Data == nil {
+					logger.Info("SIGHUP reload: remote config unchanged")
+					continue
+				}
+				newCfg, reloadErr = config.ParseBytes(fetched.Data)
+			} else {
+				logger.Info("SIGHUP received — reloading configuration", "path", sf.File)
+				newCfg, reloadErr = config.Load(sf.File)
+			}
+			if reloadErr != nil {
+				logger.Error("config reload failed — keeping current config", "error", reloadErr)
 				continue
 			}
 			for _, w := range newCfg.Warnings {
@@ -416,6 +463,30 @@ func run() error {
 			}
 		}
 	}()
+
+	// Periodic config watcher for remote sources (auto-reload without SIGHUP).
+	if configSource != nil {
+		if interval := sf.ParseRefreshInterval(); interval > 0 {
+			applyFn := func(_ context.Context, data []byte) (bool, error) {
+				newCfg, err := config.ParseBytes(data)
+				if err != nil {
+					return false, fmt.Errorf("parsing refreshed config: %w", err)
+				}
+				checkRestartRequiredChanges(logger, restartSnapshot, newCfg)
+				if err := reloader.Apply(newCfg); err != nil {
+					return false, fmt.Errorf("applying refreshed config: %w", err)
+				}
+				return true, nil
+			}
+			watcher := configsource.NewConfigWatcher(
+				configSource, applyFn,
+				logger.With("component", "config_watcher"),
+				sf.WatcherOptions()...,
+			)
+			go watcher.RunPeriodicWatch(ctx, interval)
+			logger.Info("config watcher started", "interval", interval, "source", sf.Source)
+		}
+	}
 
 	// Start the server in a goroutine
 	errCh := make(chan error, 1)
