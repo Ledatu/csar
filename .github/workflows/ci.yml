@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: csar
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/csar-core
+          path: csar-core
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/csar-proto
+          path: csar-proto
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: csar/go.sum
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: csar
+          args: --config .golangci.yml --timeout 5m
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: csar
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/csar-core
+          path: csar-core
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/csar-proto
+          path: csar-proto
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: csar/go.sum
+
+      - name: Run unit tests
+        working-directory: csar
+        run: go test $(go list ./... | grep -v tests/) -count=1 -race
+
+      - name: Run integration tests
+        working-directory: csar
+        run: go test ./tests/integration/ -v -count=1
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [csar, csar-coordinator, csar-helper, csar-mcp]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: csar
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/csar-core
+          path: csar-core
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/csar-proto
+          path: csar-proto
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: csar/go.sum
+
+      - name: Build ${{ matrix.target }}
+        working-directory: csar
+        run: go build -ldflags "-s -w" -o /dev/null ./cmd/${{ matrix.target }}

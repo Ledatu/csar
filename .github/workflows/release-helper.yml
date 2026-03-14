@@ -1,0 +1,117 @@
+name: Release csar-helper
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag (e.g. v1.2.0). Uses HEAD if empty."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: csar
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/csar-core
+          path: csar-core
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/csar-proto
+          path: csar-proto
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: csar/go.sum
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.tag }}" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=dev-$(git -C csar rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build csar-helper
+        working-directory: csar
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          OUTNAME="csar-helper-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}"
+          go build -ldflags "-s -w -X main.Version=${VERSION}" \
+            -o "../${OUTNAME}" ./cmd/csar-helper
+          echo "artifact=${OUTNAME}" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.artifact }}
+          path: ${{ env.artifact }}
+
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.tag }}" ]]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=dev-$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum csar-helper-* > checksums.txt
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber --repo "${{ github.repository }}"
+          else
+            gh release create "$TAG" dist/* \
+              --repo "${{ github.repository }}" \
+              --title "csar-helper ${TAG}" \
+              --generate-notes
+          fi
