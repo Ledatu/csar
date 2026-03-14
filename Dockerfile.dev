@@ -5,6 +5,7 @@ FROM golang:1.25-alpine AS builder
 WORKDIR /src
 
 COPY csar-core/ ./csar-core/
+COPY csar-proto/ ./csar-proto/
 
 COPY csar/go.mod csar/go.sum ./csar/
 WORKDIR /src/csar

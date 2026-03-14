@@ -980,19 +980,19 @@ func (cc *CacheConfig) IsEnabled() bool {
 type SSRFConfig struct {
 	// BlockPrivate blocks connections to RFC 1918 private subnets.
 	// Default: true.
-	BlockPrivate *bool `yaml:"block_private,omitempty" json:"block_private,omitempty"`
+	BlockPrivate *bool `yaml:"block_private" json:"block_private"`
 
 	// BlockLoopback blocks connections to loopback addresses (127.0.0.0/8, ::1).
 	// Default: true.
-	BlockLoopback *bool `yaml:"block_loopback,omitempty" json:"block_loopback,omitempty"`
+	BlockLoopback *bool `yaml:"block_loopback" json:"block_loopback"`
 
 	// BlockLinkLocal blocks connections to link-local addresses (169.254.0.0/16, fe80::/10).
 	// Default: true.
-	BlockLinkLocal *bool `yaml:"block_link_local,omitempty" json:"block_link_local,omitempty"`
+	BlockLinkLocal *bool `yaml:"block_link_local" json:"block_link_local"`
 
 	// BlockMetadata blocks connections to cloud metadata endpoints (169.254.169.254).
 	// Default: true.
-	BlockMetadata *bool `yaml:"block_metadata,omitempty" json:"block_metadata,omitempty"`
+	BlockMetadata *bool `yaml:"block_metadata" json:"block_metadata"`
 
 	// AllowedInternalHosts is an explicit allowlist of internal hosts that may be accessed.
 	AllowedInternalHosts []string `yaml:"allowed_internal_hosts,omitempty" json:"allowed_internal_hosts,omitempty"`
