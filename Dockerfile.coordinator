@@ -6,7 +6,8 @@ COPY go.mod go.sum ./
 RUN sed -i '/^replace /d' go.mod && go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=docker" -o /csar-coordinator ./cmd/csar-coordinator
+RUN sed -i '/^replace /d' go.mod && \
+    CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=docker" -o /csar-coordinator ./cmd/csar-coordinator
 
 # ---
 FROM alpine:3.21
