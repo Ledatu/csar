@@ -38,9 +38,9 @@ func (c *Config) ResolveBackendTLSPolicies() error {
 			if bt.KeyFile != "" {
 				merged.KeyFile = bt.KeyFile
 			}
-		if bt.insecureSkipVerifySet {
-			merged.InsecureSkipVerify = bt.InsecureSkipVerify
-		}
+			if bt.insecureSkipVerifySet {
+				merged.InsecureSkipVerify = bt.InsecureSkipVerify
+			}
 			route.Backend.TLS = &merged
 			annotatePolicy(&route, "x-csar-backend.tls", policyName)
 			methods[method] = route

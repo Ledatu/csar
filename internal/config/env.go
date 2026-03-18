@@ -18,8 +18,9 @@ func expandEnvInStruct(v reflect.Value) {
 	configutil.ExpandEnvInStruct(v)
 }
 
-// Compile-time check: ensure logging.Secret is handled via text interfaces.
+// Compile-time checks.
 var (
 	_ encoding.TextMarshaler   = logging.Secret{}
 	_ encoding.TextUnmarshaler = &logging.Secret{}
+	_ configutil.EnvExpandable = &logging.Secret{}
 )
