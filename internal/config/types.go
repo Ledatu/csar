@@ -145,6 +145,12 @@ type Config struct {
 	// Routes reference them via x-csar-authz: "policy_name" or x-csar-authz.use: "policy_name".
 	AuthzPolicies map[string]AuthzRouteConfig `yaml:"authz_policies,omitempty" json:"authz_policies,omitempty"`
 
+	// BackendTLSPolicies defines named, reusable outbound TLS configurations.
+	// Routes reference them via x-csar-backend.tls: "policy_name" or
+	// x-csar-backend.tls: { use: "policy_name", insecure_skip_verify: true }.
+	// Policy definitions are terminal — they do not support the "use" field.
+	BackendTLSPolicies map[string]BackendTLSPolicy `yaml:"backend_tls_policies,omitempty" json:"backend_tls_policies,omitempty"`
+
 	// GlobalThrottle defines a global rate limit applied to ALL routes as a safety net.
 	// Checked before per-route throttle. Uses a fast in-memory atomic counter.
 	GlobalThrottle *GlobalThrottleConfig `yaml:"global_throttle,omitempty" json:"global_throttle,omitempty"`
@@ -373,8 +379,11 @@ func (bc *BackendConfig) AllTargets() []string {
 	return targets
 }
 
-// BackendTLSConfig configures outbound TLS to an upstream.
-type BackendTLSConfig struct {
+// BackendTLSPolicy is a terminal, named outbound TLS configuration.
+// Defined in the top-level backend_tls_policies map and referenced by name
+// from route-level BackendTLSConfig. Policy definitions do not support the
+// "use" field — they are plain value objects, keeping resolution one-pass.
+type BackendTLSPolicy struct {
 	// InsecureSkipVerify disables certificate verification (dev only!).
 	InsecureSkipVerify bool `yaml:"insecure_skip_verify,omitempty" json:"insecure_skip_verify,omitempty"`
 
@@ -386,6 +395,63 @@ type BackendTLSConfig struct {
 
 	// KeyFile is the client key for mTLS to the upstream.
 	KeyFile string `yaml:"key_file,omitempty" json:"key_file,omitempty"`
+}
+
+// BackendTLSConfig configures outbound TLS to an upstream.
+//
+// Supports three YAML syntaxes:
+//
+//	tls: "authn-mtls"                          # bare string → policy ref
+//	tls: { ca_file: "...", cert_file: "..." }  # inline object
+//	tls: { use: "authn-mtls", insecure_skip_verify: true }  # policy ref + overrides
+type BackendTLSConfig struct {
+	// Use is an optional reference to a named backend_tls_policies entry.
+	// When set, all other fields are inherited from the policy; any
+	// inline fields override the policy's values (shallow merge).
+	Use string `yaml:"use,omitempty" json:"use,omitempty"`
+
+	// InsecureSkipVerify disables certificate verification (dev only!).
+	InsecureSkipVerify bool `yaml:"insecure_skip_verify,omitempty" json:"insecure_skip_verify,omitempty"`
+
+	// CAFile is the path to a custom CA bundle for verifying the upstream cert.
+	CAFile string `yaml:"ca_file,omitempty" json:"ca_file,omitempty"`
+
+	// CertFile is the client certificate for mTLS to the upstream.
+	CertFile string `yaml:"cert_file,omitempty" json:"cert_file,omitempty"`
+
+	// KeyFile is the client key for mTLS to the upstream.
+	KeyFile string `yaml:"key_file,omitempty" json:"key_file,omitempty"`
+
+	// insecureSkipVerifySet tracks whether insecure_skip_verify was explicitly
+	// present in the YAML source. Used during policy merge to distinguish
+	// "not specified" (inherit from policy) from "explicitly false" (override).
+	insecureSkipVerifySet bool
+}
+
+// UnmarshalYAML handles bare string (policy reference) and inline object syntax.
+func (bt *BackendTLSConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		bt.Use = value.Value
+		return nil
+	}
+	type btAlias BackendTLSConfig
+	var alias btAlias
+	if err := value.Decode(&alias); err != nil {
+		return err
+	}
+	*bt = BackendTLSConfig(alias)
+
+	// Detect explicit presence of insecure_skip_verify so that a route
+	// can override a policy's "true" back to "false" during merge.
+	if value.Kind == yaml.MappingNode {
+		for i := 0; i < len(value.Content)-1; i += 2 {
+			if value.Content[i].Value == "insecure_skip_verify" {
+				bt.insecureSkipVerifySet = true
+				break
+			}
+		}
+	}
+	return nil
 }
 
 // SecurityConfig configures token injection via KMS.

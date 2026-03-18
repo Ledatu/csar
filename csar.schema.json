@@ -70,6 +70,11 @@
       "description": "Named reusable authorization configurations. Routes reference them via x-csar-authz: \"policy_name\" or x-csar-authz.use: \"policy_name\".",
       "additionalProperties": { "$ref": "#/$defs/AuthzRouteConfigObject" }
     },
+    "backend_tls_policies": {
+      "type": "object",
+      "description": "Named reusable outbound TLS configurations. Routes reference them via x-csar-backend.tls: \"policy_name\" or x-csar-backend.tls.use: \"policy_name\". Policy definitions are terminal — they do not support the \"use\" field.",
+      "additionalProperties": { "$ref": "#/$defs/BackendTLSPolicy" }
+    },
     "global_throttle": { "$ref": "#/$defs/GlobalThrottleConfig" },
     "readiness": { "$ref": "#/$defs/ReadinessConfig" },
     "debug_headers": { "$ref": "#/$defs/DebugHeadersConfig" },
@@ -956,7 +961,7 @@
           "enum": ["replace", "append"],
           "default": "replace"
         },
-        "tls": { "$ref": "#/$defs/BackendTLSConfig" }
+        "tls": { "$ref": "#/$defs/BackendTLSRef" }
       }
     },
     "HealthCheckConfig": {
@@ -1003,9 +1008,49 @@
         }
       }
     },
+    "BackendTLSRef": {
+      "description": "Outbound TLS configuration. Supports a policy name (string) or an inline object.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Reference to a named backend_tls_policies entry."
+        },
+        {
+          "$ref": "#/$defs/BackendTLSConfig"
+        }
+      ]
+    },
     "BackendTLSConfig": {
       "type": "object",
-      "description": "Outbound TLS to an upstream.",
+      "description": "Outbound TLS to an upstream. May reference a named backend_tls_policies entry via \"use\", with inline fields overriding policy values.",
+      "additionalProperties": false,
+      "properties": {
+        "use": {
+          "type": "string",
+          "description": "Reference to a backend_tls_policies entry. Inline fields override the policy's values."
+        },
+        "insecure_skip_verify": {
+          "type": "boolean",
+          "description": "Disable certificate verification. Development only!",
+          "default": false
+        },
+        "ca_file": {
+          "type": "string",
+          "description": "Path to a custom CA bundle for verifying the upstream cert."
+        },
+        "cert_file": {
+          "type": "string",
+          "description": "Client certificate (PEM) for mTLS to the upstream."
+        },
+        "key_file": {
+          "type": "string",
+          "description": "Client private key (PEM) for mTLS to the upstream."
+        }
+      }
+    },
+    "BackendTLSPolicy": {
+      "type": "object",
+      "description": "Terminal named outbound TLS configuration. Does not support \"use\" — policy definitions are plain value objects.",
       "additionalProperties": false,
       "properties": {
         "insecure_skip_verify": {

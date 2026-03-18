@@ -31,28 +31,8 @@ func ParseBytes(data []byte) (*Config, error) {
 	// Expand environment variables in all string fields AFTER unmarshaling.
 	expandEnvInStruct(reflect.ValueOf(cfg).Elem())
 
-	// Resolve all policy references before validation.
-	if err := cfg.ResolveSecurityProfiles(); err != nil {
-		return nil, fmt.Errorf("resolving security profiles: %w", err)
-	}
-	if err := cfg.ResolveThrottlePolicies(); err != nil {
-		return nil, fmt.Errorf("resolving throttle policies: %w", err)
-	}
-	if err := cfg.ResolveCORSPolicies(); err != nil {
-		return nil, fmt.Errorf("resolving CORS policies: %w", err)
-	}
-	if err := cfg.ResolveRetryPolicies(); err != nil {
-		return nil, fmt.Errorf("resolving retry policies: %w", err)
-	}
-	if err := cfg.ResolveRedactPolicies(); err != nil {
-		return nil, fmt.Errorf("resolving redact policies: %w", err)
-	}
-	if err := cfg.ResolveAuthValidatePolicies(); err != nil {
-		return nil, fmt.Errorf("resolving auth-validate policies: %w", err)
-	}
-
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("validating config: %w", err)
+	if err := cfg.resolveAndValidate(); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil

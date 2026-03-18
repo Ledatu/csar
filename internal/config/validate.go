@@ -156,6 +156,15 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// Validate backend TLS policy definitions.
+	// Note: the "use" field is structurally rejected — BackendTLSPolicy has no
+	// Use field, and the JSON schema sets additionalProperties: false.
+	for name, policy := range c.BackendTLSPolicies {
+		if (policy.CertFile != "") != (policy.KeyFile != "") {
+			return fmt.Errorf("backend_tls_policies.%s: cert_file and key_file must both be set for mTLS", name)
+		}
+	}
+
 	for path, methods := range c.Paths {
 		for method := range methods {
 			route := methods[method]
@@ -176,6 +185,10 @@ func (c *Config) Validate() error {
 
 			// Validate backend TLS config
 			if bt := route.Backend.TLS; bt != nil {
+				if bt.Use != "" {
+					return fmt.Errorf("path %s method %s: x-csar-backend.tls has unresolved policy reference %q — "+
+						"call ResolveBackendTLSPolicies() before Validate()", path, method, bt.Use)
+				}
 				if bt.CertFile != "" && bt.KeyFile == "" {
 					return fmt.Errorf("path %s method %s: backend tls cert_file requires key_file", path, method)
 				}
