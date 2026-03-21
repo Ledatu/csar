@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ledatu/csar-core/httpmiddleware"
 	"github.com/ledatu/csar/internal/apierror"
-	"github.com/ledatu/csar/internal/cors"
 	"github.com/ledatu/csar/internal/proxy"
 	"github.com/ledatu/csar/internal/resilience"
 	"github.com/ledatu/csar/internal/throttle"
@@ -81,27 +81,31 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// This allows browsers to make OPTIONS preflight requests even from
 	// restricted networks (audit §3.2 Criticism 5).
 	if rt.corsConfig != nil {
-		corsMiddleware := cors.New()
-		corsCfg := cors.Config{
+		reqIDHeader := r.reqIDHeader
+		if reqIDHeader == "" {
+			reqIDHeader = "X-Request-ID"
+		}
+		csarExposed := []string{
+			"X-CSAR-Wait-MS", "X-CSAR-Status", "Retry-After",
+			"X-CSAR-Protocol-Version", reqIDHeader, "X-CSAR-Route-ID",
+		}
+		corsMw := httpmiddleware.CORS(&httpmiddleware.CORSConfig{
 			AllowedOrigins:   rt.corsConfig.AllowedOrigins,
 			AllowedMethods:   rt.corsConfig.AllowedMethods,
 			AllowedHeaders:   rt.corsConfig.AllowedHeaders,
-			ExposedHeaders:   rt.corsConfig.ExposedHeaders,
+			ExposedHeaders:   append(rt.corsConfig.ExposedHeaders, csarExposed...),
 			AllowCredentials: rt.corsConfig.AllowCredentials,
 			MaxAge:           rt.corsConfig.MaxAge,
-			RequestIDHeader:  r.reqIDHeader,
-		}
+		})
 
 		// For OPTIONS preflight, handle immediately without further pipeline.
 		if req.Method == http.MethodOptions && req.Header.Get("Origin") != "" {
-			corsMiddleware.Wrap(corsCfg, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				// no-op: preflight already handled by CORS middleware.
-			})).ServeHTTP(w, req)
+			corsMw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(w, req)
 			return
 		}
 
 		// For normal requests, wrap the remaining pipeline with CORS headers.
-		corsMiddleware.Wrap(corsCfg, http.HandlerFunc(func(cw http.ResponseWriter, cr *http.Request) {
+		corsMw(http.HandlerFunc(func(cw http.ResponseWriter, cr *http.Request) {
 			r.serveWithIPCheck(cw, cr, rt)
 		})).ServeHTTP(w, req)
 		return
