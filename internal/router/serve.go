@@ -140,8 +140,14 @@ func (r *Router) serveWithIPCheck(w http.ResponseWriter, req *http.Request, rt *
 		defer span.End()
 	}
 
-	// Step 0a: Inbound JWT validation (audit §3.3.1).
-	// If the route requires JWT auth-validate, validate the token before proceeding.
+	// Step 0a: Inbound auth validation (audit §3.3.1).
+	if rt.sessionConfig != nil && rt.sessionValidator != nil {
+		validated := rt.sessionValidator.Wrap(*rt.sessionConfig, http.HandlerFunc(func(vw http.ResponseWriter, vr *http.Request) {
+			r.serveAfterJWT(vw, vr, rt)
+		}))
+		validated.ServeHTTP(w, req)
+		return
+	}
 	if rt.jwtConfig != nil && r.jwtValidator != nil {
 		validated := r.jwtValidator.Wrap(*rt.jwtConfig, http.HandlerFunc(func(vw http.ResponseWriter, vr *http.Request) {
 			r.serveAfterJWT(vw, vr, rt)

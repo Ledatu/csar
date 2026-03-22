@@ -23,8 +23,20 @@ func (c *Config) ResolveAuthValidatePolicies() error {
 					path, method, policyName)
 			}
 			merged := policy
+			if route.AuthValidate.Mode != "" {
+				merged.Mode = route.AuthValidate.Mode
+			}
 			if route.AuthValidate.JWKSURL != "" {
 				merged.JWKSURL = route.AuthValidate.JWKSURL
+			}
+			if route.AuthValidate.SessionEndpoint != "" {
+				merged.SessionEndpoint = route.AuthValidate.SessionEndpoint
+			}
+			if route.AuthValidate.SessionTLS != "" {
+				merged.SessionTLS = route.AuthValidate.SessionTLS
+			}
+			if len(route.AuthValidate.ForwardHeaders) > 0 {
+				merged.ForwardHeaders = route.AuthValidate.ForwardHeaders
 			}
 			if route.AuthValidate.Issuer != "" {
 				merged.Issuer = route.AuthValidate.Issuer

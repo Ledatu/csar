@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledatu/csar-core/apierror"
 	"github.com/ledatu/csar-core/jwtx"
 )
 
@@ -354,9 +355,7 @@ func (v *JWTValidator) getJWKS(jwksURL string, cacheTTL time.Duration) ([]JSONWe
 }
 
 func (v *JWTValidator) reject(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	fmt.Fprintf(w, `{"code":"auth_failed","status":%d,"message":%q}`, status, message)
+	apierror.New(apierror.CodeAuthFailed, status, message).Write(w)
 }
 
 // claimToString converts a JWT claim value to a canonical string representation.

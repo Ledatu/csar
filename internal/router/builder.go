@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledatu/csar-core/tlsx"
+
 	"github.com/ledatu/csar/internal/authn"
 	"github.com/ledatu/csar/internal/backpressure"
 	"github.com/ledatu/csar/internal/cache"
@@ -192,9 +194,18 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 		r.setupRetry(rt, fr, key, logger)
 	}
 
-	// Set up JWT validation if auth-validate config is present (audit §3.3.1).
+	// Set up auth validation if auth-validate config is present (audit §3.3.1).
 	if fr.Route.AuthValidate != nil {
-		r.setupJWT(rt, fr, key, logger)
+		switch fr.Route.AuthValidate.Mode {
+		case "session":
+			if err := r.setupSession(rt, fr, cfg, key, logger); err != nil {
+				return err
+			}
+		case "", "jwt":
+			r.setupJWT(rt, fr, key, logger)
+		default:
+			return fmt.Errorf("route %s: unknown auth_validate mode %q", key, fr.Route.AuthValidate.Mode)
+		}
 	}
 
 	// Set up DLP redaction if redact config is present (audit §3.3.2).
@@ -584,6 +595,47 @@ func (r *Router) setupJWT(rt *route, fr config.FlatRoute, key string, logger *sl
 	)
 }
 
+// setupSession configures session-based auth validation for a route.
+func (r *Router) setupSession(rt *route, fr config.FlatRoute, cfg *config.Config, key string, logger *slog.Logger) error {
+	tlsRef := fr.Route.AuthValidate.SessionTLS
+
+	if r.sessionValidators == nil {
+		r.sessionValidators = make(map[string]*authn.SessionValidator)
+	}
+
+	sv, exists := r.sessionValidators[tlsRef]
+	if !exists {
+		var client *http.Client
+		if tlsRef != "" {
+			policy, ok := cfg.BackendTLSPolicies[tlsRef]
+			if !ok {
+				return fmt.Errorf("route %s: session_tls policy %q not found in backend_tls_policies", key, tlsRef)
+			}
+			transport, err := buildSessionTransport(&policy)
+			if err != nil {
+				return fmt.Errorf("route %s: failed to build session TLS transport for policy %q: %w", key, tlsRef, err)
+			}
+			client = &http.Client{Transport: transport, Timeout: 10 * time.Second}
+		}
+		sv = authn.NewSessionValidator(logger, client)
+		r.sessionValidators[tlsRef] = sv
+	}
+
+	rt.sessionValidator = sv
+	rt.sessionConfig = &authn.SessionConfig{
+		Endpoint:       fr.Route.AuthValidate.SessionEndpoint,
+		CookieName:     fr.Route.AuthValidate.CookieName,
+		ForwardHeaders: fr.Route.AuthValidate.ForwardHeaders,
+		CacheTTL:       fr.Route.AuthValidate.CacheTTL.Duration,
+	}
+	logger.Info("session validation enabled",
+		"route", key,
+		"endpoint", fr.Route.AuthValidate.SessionEndpoint,
+		"tls_policy", tlsRef,
+	)
+	return nil
+}
+
 // setupDLP configures DLP redaction for a route.
 func (r *Router) setupDLP(rt *route, fr config.FlatRoute, key string, logger *slog.Logger) {
 	if r.dlpRedactor == nil {
@@ -642,4 +694,17 @@ func (r *Router) setupCache(rt *route, fr config.FlatRoute, key string, logger *
 		"ttl", cacheCfg.TTL,
 		"max_entries", cacheCfg.MaxEntries,
 	)
+}
+
+func buildSessionTransport(policy *config.BackendTLSPolicy) (*http.Transport, error) {
+	tlsCfg, err := tlsx.NewClientTLSConfig(tlsx.ClientConfig{
+		CAFile:             policy.CAFile,
+		CertFile:           policy.CertFile,
+		KeyFile:            policy.KeyFile,
+		InsecureSkipVerify: policy.InsecureSkipVerify,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &http.Transport{TLSClientConfig: tlsCfg}, nil
 }

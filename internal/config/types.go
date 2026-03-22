@@ -846,14 +846,30 @@ type AuthValidateConfig struct {
 	// Use is an optional reference to a named auth_validate_policies entry.
 	Use string `yaml:"use,omitempty" json:"use,omitempty"`
 
-	// JWKSURL is the endpoint serving the JSON Web Key Set.
-	// Example: "https://auth.example.com/.well-known/jwks.json"
-	JWKSURL string `yaml:"jwks_url" json:"jwks_url"`
+	// Mode selects the validation strategy: "" or "jwt" (default) performs local
+	// JWT/JWKS validation; "session" makes a subrequest to SessionEndpoint.
+	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 
-	// Issuer, if set, validates the "iss" claim matches.
+	// JWKSURL is the endpoint serving the JSON Web Key Set (jwt mode).
+	// Example: "https://auth.example.com/.well-known/jwks.json"
+	JWKSURL string `yaml:"jwks_url,omitempty" json:"jwks_url,omitempty"`
+
+	// SessionEndpoint is the URL called via subrequest in session mode.
+	// Example: "https://authn:8081/auth/validate"
+	SessionEndpoint string `yaml:"session_endpoint,omitempty" json:"session_endpoint,omitempty"`
+
+	// SessionTLS is a reference to a backend_tls_policies entry for the
+	// subrequest HTTP client in session mode.
+	SessionTLS string `yaml:"session_tls,omitempty" json:"session_tls,omitempty"`
+
+	// ForwardHeaders lists response headers to copy from the session
+	// validation response into the proxied request (session mode).
+	ForwardHeaders []string `yaml:"forward_headers,omitempty" json:"forward_headers,omitempty"`
+
+	// Issuer, if set, validates the "iss" claim matches (jwt mode).
 	Issuer string `yaml:"issuer,omitempty" json:"issuer,omitempty"`
 
-	// Audiences, if set, validates the "aud" claim contains at least one entry.
+	// Audiences, if set, validates the "aud" claim contains at least one entry (jwt mode).
 	Audiences []string `yaml:"audiences,omitempty" json:"audiences,omitempty"`
 
 	// HeaderName is the HTTP header carrying the token. Default: "Authorization".
@@ -863,21 +879,21 @@ type AuthValidateConfig struct {
 	// Default: "Bearer " (with trailing space).
 	TokenPrefix string `yaml:"token_prefix,omitempty" json:"token_prefix,omitempty"`
 
-	// CacheTTL controls how long JWKS keys are cached. Default: 5m.
+	// CacheTTL controls how long JWKS keys / session validation results are cached.
+	// Default: 5m for jwt mode, 30s for session mode.
 	CacheTTL Duration `yaml:"cache_ttl,omitempty" json:"cache_ttl,omitempty"`
 
-	// RequiredClaims specifies claim key=value pairs that must be present.
+	// RequiredClaims specifies claim key=value pairs that must be present (jwt mode).
 	// Example: {"role": "admin"}
 	RequiredClaims map[string]string `yaml:"required_claims,omitempty" json:"required_claims,omitempty"`
 
 	// ForwardClaims copies specified JWT claims into request headers
-	// before proxying. Map key = claim name, value = header name.
+	// before proxying. Map key = claim name, value = header name (jwt mode).
 	// Example: {"sub": "X-User-ID", "email": "X-User-Email"}
 	ForwardClaims map[string]string `yaml:"forward_claims,omitempty" json:"forward_claims,omitempty"`
 
-	// CookieName, if set, reads the JWT from the named cookie instead of
-	// a request header. When set, HeaderName and TokenPrefix are ignored.
-	// Useful for browser-based auth where csar-authn issues session cookies.
+	// CookieName, if set, reads the token/session ID from the named cookie
+	// instead of a request header. Used in both jwt and session modes.
 	CookieName string `yaml:"cookie_name,omitempty" json:"cookie_name,omitempty"`
 }
 

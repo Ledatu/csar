@@ -277,16 +277,20 @@ func protoToCacheConfig(c *csarv1.CacheConfigProto) *config.CacheConfig {
 
 func protoToAuthValidateConfig(a *csarv1.AuthValidateConfigProto) *config.AuthValidateConfig {
 	return &config.AuthValidateConfig{
-		Use:            a.GetUse(),
-		JWKSURL:        a.GetJwksUrl(),
-		Issuer:         a.GetIssuer(),
-		Audiences:      a.GetAudiences(),
-		HeaderName:     a.GetHeaderName(),
-		TokenPrefix:    a.GetTokenPrefix(),
-		CacheTTL:       configutil.Duration{Duration: a.GetCacheTtl().AsDuration()},
-		RequiredClaims: a.GetRequiredClaims(),
-		ForwardClaims:  a.GetForwardClaims(),
-		CookieName:     a.GetCookieName(),
+		Use:             a.GetUse(),
+		Mode:            a.GetMode(),
+		JWKSURL:         a.GetJwksUrl(),
+		SessionEndpoint: a.GetSessionEndpoint(),
+		SessionTLS:      a.GetSessionTls(),
+		ForwardHeaders:  a.GetForwardHeaders(),
+		Issuer:          a.GetIssuer(),
+		Audiences:       a.GetAudiences(),
+		HeaderName:      a.GetHeaderName(),
+		TokenPrefix:     a.GetTokenPrefix(),
+		CacheTTL:        configutil.Duration{Duration: a.GetCacheTtl().AsDuration()},
+		RequiredClaims:  a.GetRequiredClaims(),
+		ForwardClaims:   a.GetForwardClaims(),
+		CookieName:      a.GetCookieName(),
 	}
 }
 

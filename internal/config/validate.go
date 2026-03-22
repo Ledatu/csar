@@ -238,13 +238,28 @@ func (c *Config) Validate() error {
 				}
 			}
 
-			// Validate auth-validate (JWT/JWKS) config
+			// Validate auth-validate config (JWT or session mode).
 			if route.AuthValidate != nil {
-				if route.AuthValidate.JWKSURL == "" {
-					return fmt.Errorf("path %s method %s: x-csar-authn-validate.jwks_url is required", path, method)
-				}
-				if !strings.HasPrefix(route.AuthValidate.JWKSURL, "https://") && !strings.HasPrefix(route.AuthValidate.JWKSURL, "http://") {
-					return fmt.Errorf("path %s method %s: x-csar-authn-validate.jwks_url must start with http:// or https://", path, method)
+				switch route.AuthValidate.Mode {
+				case "session":
+					if route.AuthValidate.SessionEndpoint == "" {
+						return fmt.Errorf("path %s method %s: x-csar-authn-validate.session_endpoint is required for session mode", path, method)
+					}
+					if !strings.HasPrefix(route.AuthValidate.SessionEndpoint, "https://") && !strings.HasPrefix(route.AuthValidate.SessionEndpoint, "http://") {
+						return fmt.Errorf("path %s method %s: x-csar-authn-validate.session_endpoint must start with http:// or https://", path, method)
+					}
+					if route.AuthValidate.CookieName == "" {
+						return fmt.Errorf("path %s method %s: x-csar-authn-validate.cookie_name is required for session mode", path, method)
+					}
+				case "", "jwt":
+					if route.AuthValidate.JWKSURL == "" {
+						return fmt.Errorf("path %s method %s: x-csar-authn-validate.jwks_url is required", path, method)
+					}
+					if !strings.HasPrefix(route.AuthValidate.JWKSURL, "https://") && !strings.HasPrefix(route.AuthValidate.JWKSURL, "http://") {
+						return fmt.Errorf("path %s method %s: x-csar-authn-validate.jwks_url must start with http:// or https://", path, method)
+					}
+				default:
+					return fmt.Errorf("path %s method %s: x-csar-authn-validate.mode %q is not recognized (expected \"jwt\" or \"session\")", path, method, route.AuthValidate.Mode)
 				}
 			}
 

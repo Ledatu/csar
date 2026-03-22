@@ -46,6 +46,8 @@ type route struct {
 	originalPath        string                     // the original path definition (e.g. "/api/v1/users/{id:[0-9]+}")
 	pathVarNames        []string                   // ordered variable names extracted from originalPath (e.g. ["id"])
 	jwtConfig           *authn.Config              // nil if no inbound JWT validation
+	sessionConfig       *authn.SessionConfig       // nil if no session-based validation
+	sessionValidator    *authn.SessionValidator    // per-route ref to the validator for this route's TLS profile
 	dlpConfig           *dlp.Config                // nil if no response redaction
 	tenantConfig        *tenant.Config             // nil if no multi-tenant routing
 	corsConfig          *config.CORSConfig         // nil if no CORS configuration
@@ -65,26 +67,27 @@ type vipOverride struct {
 // It matches incoming requests to configured routes and applies
 // the pipeline: ip_check -> cors -> security_inject -> throttle.Wait -> circuit_breaker -> proxy.Forward.
 type Router struct {
-	routes           map[string]*route // keyed by "METHOD:PATH" (exact/prefix routes)
-	regexRoutes      []*route          // routes with {var:regex} patterns (checked after exact match)
-	cfg              *config.Config
-	logger           *slog.Logger
-	metrics          *metrics.Metrics          // nil if no metrics
-	telemetry        *telemetry.Provider       // nil if no telemetry
-	authInjector     *middleware.AuthInjector  // nil if no auth injection configured
-	jwtValidator     *authn.JWTValidator       // nil if no route uses JWT validation
-	authzClient      *authz.Client             // nil if no route uses authz
-	dlpRedactor      *dlp.Redactor             // nil if no route uses DLP redaction
-	tenantRouter     *tenant.Router            // nil if no route uses tenant routing
-	responseCache    *cache.ResponseCache      // nil if no route uses response caching
-	ssrfProtection   *proxy.SSRFProtection     // nil if SSRF protection is disabled
-	throttleManager  *throttle.ThrottleManager // manages all per-route throttlers
-	redisClient      *redis.Client             // shared Redis client for distributed throttling (nil if not configured)
-	pools            []*loadbalancer.Pool      // tracked for Close() cleanup on reload
-	globalCIDRs      []*net.IPNet              // parsed global access_control.allow_cidrs
-	hasGlobalACL     bool                      // true if global access_control is configured
-	globalTrustProxy bool                      // global default for trust_proxy (from access_control)
-	reqIDHeader      string                    // resolved request ID header name (default: "X-Request-ID")
+	routes            map[string]*route // keyed by "METHOD:PATH" (exact/prefix routes)
+	regexRoutes       []*route          // routes with {var:regex} patterns (checked after exact match)
+	cfg               *config.Config
+	logger            *slog.Logger
+	metrics           *metrics.Metrics                   // nil if no metrics
+	telemetry         *telemetry.Provider                // nil if no telemetry
+	authInjector      *middleware.AuthInjector           // nil if no auth injection configured
+	jwtValidator      *authn.JWTValidator                // nil if no route uses JWT validation
+	sessionValidators map[string]*authn.SessionValidator // keyed by session_tls policy name ("" = default)
+	authzClient       *authz.Client                      // nil if no route uses authz
+	dlpRedactor       *dlp.Redactor                      // nil if no route uses DLP redaction
+	tenantRouter      *tenant.Router                     // nil if no route uses tenant routing
+	responseCache     *cache.ResponseCache               // nil if no route uses response caching
+	ssrfProtection    *proxy.SSRFProtection              // nil if SSRF protection is disabled
+	throttleManager   *throttle.ThrottleManager          // manages all per-route throttlers
+	redisClient       *redis.Client                      // shared Redis client for distributed throttling (nil if not configured)
+	pools             []*loadbalancer.Pool               // tracked for Close() cleanup on reload
+	globalCIDRs       []*net.IPNet                       // parsed global access_control.allow_cidrs
+	hasGlobalACL      bool                               // true if global access_control is configured
+	globalTrustProxy  bool                               // global default for trust_proxy (from access_control)
+	reqIDHeader       string                             // resolved request ID header name (default: "X-Request-ID")
 }
 
 // GetThrottler returns the throttler for a given route key (for observability).

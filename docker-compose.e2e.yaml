@@ -100,6 +100,7 @@ services:
     environment:
       CSAR_URL: "http://csar:8080"
       MOCKAPI_URL: "http://mockapi:9999"
+      CSAR_E2E: "1"
     depends_on:
       csar:
         condition: service_healthy

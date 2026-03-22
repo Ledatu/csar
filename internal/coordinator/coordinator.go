@@ -661,16 +661,20 @@ func cacheToProto(cc *config.CacheConfig) *csarv1.CacheConfigProto {
 
 func authValidateToProto(a *config.AuthValidateConfig) *csarv1.AuthValidateConfigProto {
 	return &csarv1.AuthValidateConfigProto{
-		Use:            a.Use,
-		JwksUrl:        a.JWKSURL,
-		Issuer:         a.Issuer,
-		Audiences:      a.Audiences,
-		HeaderName:     a.HeaderName,
-		TokenPrefix:    a.TokenPrefix,
-		CacheTtl:       durationpb.New(a.CacheTTL.Duration),
-		RequiredClaims: a.RequiredClaims,
-		ForwardClaims:  a.ForwardClaims,
-		CookieName:     a.CookieName,
+		Use:             a.Use,
+		Mode:            a.Mode,
+		JwksUrl:         a.JWKSURL,
+		SessionEndpoint: a.SessionEndpoint,
+		SessionTls:      a.SessionTLS,
+		ForwardHeaders:  a.ForwardHeaders,
+		Issuer:          a.Issuer,
+		Audiences:       a.Audiences,
+		HeaderName:      a.HeaderName,
+		TokenPrefix:     a.TokenPrefix,
+		CacheTtl:        durationpb.New(a.CacheTTL.Duration),
+		RequiredClaims:  a.RequiredClaims,
+		ForwardClaims:   a.ForwardClaims,
+		CookieName:      a.CookieName,
 	}
 }
 

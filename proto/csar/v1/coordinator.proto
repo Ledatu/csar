@@ -239,6 +239,10 @@ message AuthValidateConfigProto {
   map<string, string> required_claims = 8;
   map<string, string> forward_claims = 9;
   string cookie_name = 10;
+  string mode = 11;
+  string session_endpoint = 12;
+  string session_tls = 13;
+  repeated string forward_headers = 14;
 }
 
 // ---------------------------------------------------------------------------

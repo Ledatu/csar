@@ -2,13 +2,17 @@
 // These tests expect:
 //   - CSAR router at CSAR_URL (default http://csar:8080)
 //   - Mock upstream at MOCKAPI_URL (default http://mockapi:9999)
+//
+// Skipped automatically unless CSAR_E2E=1 is set (e.g. by docker-compose).
 package e2e
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -33,9 +37,34 @@ func mockURL() string {
 
 var client = &http.Client{Timeout: 30 * time.Second}
 
+// skipIfNoDocker skips the test immediately when the Docker-based e2e
+// infrastructure is not available. Checks CSAR_E2E env var first (fast path),
+// then falls back to a 2-second TCP dial to the CSAR router.
+func skipIfNoDocker(t *testing.T) {
+	t.Helper()
+	if os.Getenv("CSAR_E2E") == "1" {
+		return
+	}
+	u, err := url.Parse(csarURL())
+	if err != nil {
+		t.Skipf("e2e: bad CSAR_URL: %v", err)
+	}
+	host := u.Host
+	if !strings.Contains(host, ":") {
+		host += ":80"
+	}
+	conn, err := net.DialTimeout("tcp", host, 2*time.Second)
+	if err != nil {
+		t.Skipf("e2e: Docker infrastructure not reachable (%s); set CSAR_E2E=1 to force. Dial error: %v", host, err)
+	}
+	conn.Close()
+}
+
 // waitForReady polls the health endpoints until both services are up.
 func waitForReady(t *testing.T) {
 	t.Helper()
+	skipIfNoDocker(t)
+
 	deadline := time.Now().Add(30 * time.Second)
 
 	for _, svc := range []struct {
