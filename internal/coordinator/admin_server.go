@@ -60,9 +60,11 @@ func (s *AdminServer) ListenAndServe() error {
 	handler = s.timeoutMiddleware(handler)
 	handler = s.bodySizeMiddleware(handler)
 
+	// JWT auth applies only to /admin/ paths; /svc/ paths use
+	// X-Gateway-Subject validated by the csar router (mTLS trust boundary).
 	validator := authn.NewJWTValidator(s.logger.With("component", "admin_jwt"))
 	authMw := AdminAuthMiddleware(validator, s.cfg.Auth, s.logger)
-	handler = authMw(handler)
+	handler = pathScopedAuth(authMw, handler)
 
 	handler = s.auditMiddleware(handler)
 
@@ -119,6 +121,12 @@ func (s *AdminServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /admin/v1/tokens/{tokenRef...}", s.handleDeleteToken)
 	mux.HandleFunc("GET /admin/v1/tokens/{tokenRef...}", s.handleGetToken)
 	mux.HandleFunc("POST /admin/v1/tokens/{tokenRef...}", s.handlePostToken)
+
+	// Service-facing routes: authenticated via X-Gateway-Subject (csar router).
+	if len(s.cfg.Svc.PrefixMap) > 0 {
+		mux.HandleFunc("PUT /svc/tokens/{tokenRef...}", s.handleSvcPutToken)
+		mux.HandleFunc("DELETE /svc/tokens/{tokenRef...}", s.handleSvcDeleteToken)
+	}
 }
 
 // --- Health ---
@@ -524,4 +532,18 @@ func respondJSON(w http.ResponseWriter, status int, v interface{}) {
 func sourceIP(r *http.Request) string {
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
 	return host
+}
+
+// pathScopedAuth applies JWT auth middleware only to /admin/ paths.
+// Requests to /svc/ paths bypass JWT auth — they rely on X-Gateway-Subject
+// set by the csar router after STS JWT validation + mTLS trust.
+func pathScopedAuth(jwtMw func(http.Handler) http.Handler, next http.Handler) http.Handler {
+	jwtProtected := jwtMw(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/svc/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		jwtProtected.ServeHTTP(w, r)
+	})
 }

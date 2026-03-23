@@ -106,6 +106,9 @@ func main() {
 	adminAllowedKMSKeys := flag.String("admin-allowed-kms-keys", "", "server-side allowed KMS key IDs (comma-separated)")
 	adminAllowInsecure := flag.Bool("admin-allow-insecure", false, "allow admin API to start without TLS (local development only)")
 
+	// Service-facing token API flags
+	svcTokenPrefixMap := flag.String("svc-token-prefix-map", "", `service-facing token API prefix map (subject=prefix,...), e.g. "svc:aurumskynet-campaigns=campaigns/"`)
+
 	// KMS flags for coordinator (used when admin API encrypts tokens)
 	adminKMSProvider := flag.String("admin-kms-provider", "local", "KMS provider for admin API encryption: local, yandexapi")
 	adminKMSLocalKeys := flag.String("admin-kms-local-keys", "", "local KMS keys (keyID=passphrase,keyID2=passphrase2)")
@@ -462,6 +465,10 @@ func main() {
 			}
 		}
 
+		svcCfg := coordinator.SvcAPIConfig{
+			PrefixMap: parseSvcPrefixMap(*svcTokenPrefixMap),
+		}
+
 		adminCfg := coordinator.AdminAPIConfig{
 			Enabled:             true,
 			ListenAddr:          *adminListen,
@@ -486,6 +493,7 @@ func main() {
 				MaxTokenSize:   *adminMaxTokenSize,
 				RequestTimeout: *adminRequestTimeout,
 			},
+			Svc: svcCfg,
 		}
 
 		if err := adminCfg.Validate(); err != nil {
@@ -784,6 +792,25 @@ func initCoordinatorKMS(
 	default:
 		return nil, fmt.Errorf("unknown admin KMS provider %q; supported: \"local\", \"yandexapi\"", provider)
 	}
+}
+
+// parseSvcPrefixMap parses "subject1=prefix1,subject2=prefix2" into a map.
+func parseSvcPrefixMap(raw string) map[string]string {
+	result := make(map[string]string)
+	if raw == "" {
+		return result
+	}
+	for _, pair := range strings.Split(raw, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+			result[parts[0]] = parts[1]
+		}
+	}
+	return result
 }
 
 // parseLocalKeys parses "key1=pass1,key2=pass2" into a map.

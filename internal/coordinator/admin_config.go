@@ -15,6 +15,7 @@ type AdminAPIConfig struct {
 	Auth          AdminAuthConfig
 	Authorization AdminAuthzConfig
 	Limits        AdminLimitsConfig
+	Svc           SvcAPIConfig
 
 	// S3ManagesEncryption controls whether the coordinator writes plaintext
 	// to S3 and relies on S3's server-side encryption (SSE-S3, SSE-KMS),
@@ -94,6 +95,10 @@ func (c *AdminAPIConfig) Validate() error {
 	}
 	if c.Limits.RequestTimeout <= 0 {
 		c.Limits.RequestTimeout = 5 * time.Second
+	}
+
+	if err := c.Svc.Validate(); err != nil {
+		return err
 	}
 
 	return nil

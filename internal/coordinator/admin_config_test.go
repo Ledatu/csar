@@ -173,3 +173,26 @@ func TestAdminAPIConfig_Validate_DefaultLimits(t *testing.T) {
 		t.Errorf("RequestTimeout = %v, want 5s", cfg.Limits.RequestTimeout)
 	}
 }
+
+func TestAdminAPIConfig_Validate_BadSvcConfig(t *testing.T) {
+	boolPtr := func(v bool) *bool { return &v }
+
+	cfg := AdminAPIConfig{
+		Enabled:             true,
+		ListenAddr:          ":9443",
+		S3ManagesEncryption: boolPtr(true),
+		AllowInsecure:       true,
+		Auth: AdminAuthConfig{
+			JWKSUrl:   "https://auth/.well-known/jwks.json",
+			Issuer:    "https://auth",
+			Audiences: []string{"csar-coordinator-admin"},
+		},
+		Svc: SvcAPIConfig{
+			PrefixMap: map[string]string{"": "campaigns/"},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Error("expected Validate() to fail for empty subject in SvcAPIConfig.PrefixMap")
+	}
+}
