@@ -139,8 +139,12 @@ github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/ledatu/csar-core v0.1.8 h1:x3jpZ7QenB2HT/6xEeoZZF5Eqt4/iZExl3cLlSkOG2s=
 github.com/ledatu/csar-core v0.1.8/go.mod h1:lP3hrt7uLU6PWKn8M4LzN7K9on7GUwRnSzOjTVmru6w=
+github.com/ledatu/csar-core v0.1.12 h1:4OPmKgDOodS2xd+ukDlcxTth61FQhmnBwfm88TnzYh0=
+github.com/ledatu/csar-core v0.1.12/go.mod h1:Wgdo0I5zFrJiA4ac+PY8h8h47X4djVYJPveb9t5xtTI=
 github.com/ledatu/csar-proto v0.1.0 h1:bG1vIB+41ui3qb5GkUZ2fT/DIkUqiZFIFpKPOt7Aju8=
 github.com/ledatu/csar-proto v0.1.0/go.mod h1:Iw0iroPazdAIT4wuuYMJdL0lRZlo+ecSFLVinN/M/bE=
+github.com/ledatu/csar-proto v0.1.2 h1:mUcy4PWUbCTeekhLoDW1LqVxda3ZeHqau10DpvnsydM=
+github.com/ledatu/csar-proto v0.1.2/go.mod h1:HlqVobOX4ChofAQrwRsiyq62VKTNAuRsNGmZQwHJl7I=
 github.com/lib/pq v1.11.2 h1:x6gxUeu39V0BHZiugWe8LXZYZ+Utk7hSJGThs8sdzfs=
 github.com/lib/pq v1.11.2/go.mod h1:/p+8NSbOcwzAEI7wiMXFlgydTwcgTr3OSKMsD2BitpA=
 github.com/lucasb-eyer/go-colorful v1.3.0 h1:2/yBRLdWBZKrf7gB40FoiKfAWYQ0lqNcbuQwVHXptag=
