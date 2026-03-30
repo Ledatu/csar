@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/ledatu/csar-core/configload"
 	"github.com/ledatu/csar-core/configsource"
+	"github.com/ledatu/csar-core/health"
 	"github.com/ledatu/csar-core/s3store"
 	"github.com/ledatu/csar-core/ycloud"
 
@@ -80,6 +82,8 @@ func main() {
 	etcdPrefix := flag.String("etcd-prefix", "/csar", "etcd key prefix")
 	etcdRouterTTL := flag.Int64("etcd-router-ttl", 30, "etcd lease TTL in seconds for router entries")
 	invalidationBufferSize := flag.Int("invalidation-buffer-size", 1000, "number of token invalidation events to buffer for replay on router reconnect (minimum: 100)")
+
+	healthListen := flag.String("health-listen", "", "plain HTTP health probe listen address (e.g. :9190)")
 
 	// Config source flags — load route configuration from file, S3, HTTP, or manifest.
 	cfgFlags := configload.NewSourceFlags()
@@ -426,6 +430,29 @@ func main() {
 		os.Exit(1)
 	}
 
+	var healthSidecar *health.Sidecar
+	if *healthListen != "" {
+		readiness := health.NewReadinessChecker(version, false)
+		readiness.Register("grpc_server", health.TCPDialCheck(*listenAddr, time.Second))
+		healthSidecar, err = health.NewSidecar(health.SidecarConfig{
+			Addr:      *healthListen,
+			Version:   version,
+			Readiness: readiness,
+			Logger:    logger.With("component", "health"),
+		})
+		if err != nil {
+			logger.Error("health sidecar", "error", err)
+			store.Close()
+			os.Exit(1)
+		}
+		go func() {
+			if err := healthSidecar.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("health sidecar error", "error", err)
+			}
+		}()
+		logger.Info("health probe sidecar started", "addr", *healthListen)
+	}
+
 	// Start periodic token store refresh (if a backing store is configured).
 	// This polls the store for version changes and broadcasts invalidation
 	// events to all connected routers when tokens are rotated or removed.
@@ -565,6 +592,13 @@ func main() {
 
 		logger.Info("received signal, shutting down", "signal", sig)
 		ctxCancel() // stop refresh loop
+		if healthSidecar != nil {
+			hctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := healthSidecar.Shutdown(hctx); err != nil {
+				logger.Error("health sidecar shutdown error", "error", err)
+			}
+			cancel()
+		}
 		if adminSrv != nil {
 			adminSrv.Shutdown() //nolint:errcheck
 		}

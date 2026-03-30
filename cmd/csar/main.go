@@ -16,7 +16,6 @@ import (
 	"github.com/ledatu/csar-core/configload"
 	"github.com/ledatu/csar-core/configsource"
 	"github.com/ledatu/csar-core/health"
-	"github.com/ledatu/csar-core/httpserver"
 	"github.com/ledatu/csar-core/tlsx"
 
 	"github.com/ledatu/csar/internal/authz"
@@ -297,6 +296,7 @@ func run() error {
 	if cfg.Readiness != nil && cfg.Readiness.Enabled {
 		includeDetails := cfg.Readiness.IncludeDetails == nil || *cfg.Readiness.IncludeDetails
 		readinessChecker = health.NewReadinessChecker(Version, includeDetails)
+		readinessChecker.Register("http_server", health.TCPDialCheck(cfg.ListenAddr, time.Second))
 		readinessPath := cfg.Readiness.Path
 		if readinessPath == "" {
 			readinessPath = "/readiness"
@@ -339,31 +339,22 @@ func run() error {
 		logger.Warn(w)
 	}
 
-	// Start metrics server if configured
+	// Start metrics server if configured.
+	var metricsSidecar *health.Sidecar
 	if *metricsAddr != "" {
-		metricsMux := http.NewServeMux()
-		metricsMux.Handle("/metrics", m.Handler())
-		metricsMux.Handle("/health", health.Handler(Version))
-		if readinessChecker != nil {
-			readinessPath := "/readiness"
-			if cfg.Readiness != nil && cfg.Readiness.Path != "" {
-				readinessPath = cfg.Readiness.Path
-			}
-			metricsMux.Handle(readinessPath, readinessChecker.Handler())
-		}
-
-		metricsSrv, err := httpserver.New(&httpserver.Config{
-			Addr:         *metricsAddr,
-			Handler:      metricsMux,
-			ReadTimeout:  10 * time.Second,
-			WriteTimeout: 10 * time.Second,
-		}, logger.With("component", "metrics"))
+		metricsSidecar, err = health.NewSidecar(health.SidecarConfig{
+			Addr:      *metricsAddr,
+			Version:   Version,
+			Readiness: readinessChecker,
+			Metrics:   m.Handler(),
+			Logger:    logger.With("component", "metrics"),
+		})
 		if err != nil {
-			return fmt.Errorf("creating metrics server: %w", err)
+			return fmt.Errorf("creating metrics sidecar: %w", err)
 		}
 		go func() {
-			if err := metricsSrv.ListenAndServe(); err != nil {
-				logger.Error("metrics server error", "error", err)
+			if err := metricsSidecar.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("metrics sidecar error", "error", err)
 			}
 		}()
 	}
@@ -521,6 +512,13 @@ func run() error {
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("graceful shutdown failed: %w", err)
+	}
+	if metricsSidecar != nil {
+		sidecarCtx, sidecarCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer sidecarCancel()
+		if err := metricsSidecar.Shutdown(sidecarCtx); err != nil {
+			logger.Error("metrics sidecar shutdown error", "error", err)
+		}
 	}
 
 	logger.Info("server stopped gracefully")
