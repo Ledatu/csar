@@ -46,6 +46,7 @@ type route struct {
 	originalPath        string                     // the original path definition (e.g. "/api/v1/users/{id:[0-9]+}")
 	pathVarNames        []string                   // ordered variable names extracted from originalPath (e.g. ["id"])
 	jwtConfig           *authn.Config              // nil if no inbound JWT validation
+	jwtValidator        *authn.JWTValidator        // per-route ref to the validator for this route's TLS profile
 	sessionConfig       *authn.SessionConfig       // nil if no session-based validation
 	sessionValidator    *authn.SessionValidator    // per-route ref to the validator for this route's TLS profile
 	dlpConfig           *dlp.Config                // nil if no response redaction
@@ -74,7 +75,7 @@ type Router struct {
 	metrics           *metrics.Metrics                   // nil if no metrics
 	telemetry         *telemetry.Provider                // nil if no telemetry
 	authInjector      *middleware.AuthInjector           // nil if no auth injection configured
-	jwtValidator      *authn.JWTValidator                // nil if no route uses JWT validation
+	jwtValidators     map[string]*authn.JWTValidator     // keyed by jwks_tls policy name ("" = default)
 	sessionValidators map[string]*authn.SessionValidator // keyed by session_tls policy name ("" = default)
 	authzClient       *authz.Client                      // nil if no route uses authz
 	dlpRedactor       *dlp.Redactor                      // nil if no route uses DLP redaction

@@ -29,6 +29,9 @@ func (c *Config) ResolveAuthValidatePolicies() error {
 			if route.AuthValidate.JWKSURL != "" {
 				merged.JWKSURL = route.AuthValidate.JWKSURL
 			}
+			if route.AuthValidate.JWKSTLS != "" {
+				merged.JWKSTLS = route.AuthValidate.JWKSTLS
+			}
 			if route.AuthValidate.SessionEndpoint != "" {
 				merged.SessionEndpoint = route.AuthValidate.SessionEndpoint
 			}

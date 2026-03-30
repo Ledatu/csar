@@ -280,6 +280,7 @@ func protoToAuthValidateConfig(a *csarv1.AuthValidateConfigProto) *config.AuthVa
 		Use:             a.GetUse(),
 		Mode:            a.GetMode(),
 		JWKSURL:         a.GetJwksUrl(),
+		JWKSTLS:         a.GetJwksTls(),
 		SessionEndpoint: a.GetSessionEndpoint(),
 		SessionTLS:      a.GetSessionTls(),
 		ForwardHeaders:  a.GetForwardHeaders(),

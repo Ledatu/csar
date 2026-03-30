@@ -819,6 +819,10 @@
           "description": "Endpoint serving the JSON Web Key Set.",
           "examples": ["https://auth.example.com/.well-known/jwks.json"]
         },
+        "jwks_tls": {
+          "type": "string",
+          "description": "Reference to a backend_tls_policies entry for the JWKS fetch client."
+        },
         "issuer": {
           "type": "string",
           "description": "Validates the \"iss\" claim matches this value."

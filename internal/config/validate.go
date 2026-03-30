@@ -258,6 +258,12 @@ func (c *Config) Validate() error {
 					if !strings.HasPrefix(route.AuthValidate.JWKSURL, "https://") && !strings.HasPrefix(route.AuthValidate.JWKSURL, "http://") {
 						return fmt.Errorf("path %s method %s: x-csar-authn-validate.jwks_url must start with http:// or https://", path, method)
 					}
+					if route.AuthValidate.JWKSTLS != "" {
+						if _, ok := c.BackendTLSPolicies[route.AuthValidate.JWKSTLS]; !ok {
+							return fmt.Errorf("path %s method %s: x-csar-authn-validate.jwks_tls policy %q not found in backend_tls_policies",
+								path, method, route.AuthValidate.JWKSTLS)
+						}
+					}
 				default:
 					return fmt.Errorf("path %s method %s: x-csar-authn-validate.mode %q is not recognized (expected \"jwt\" or \"session\")", path, method, route.AuthValidate.Mode)
 				}

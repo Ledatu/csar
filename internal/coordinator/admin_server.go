@@ -62,7 +62,7 @@ func (s *AdminServer) ListenAndServe() error {
 
 	// JWT auth applies only to /admin/ paths; /svc/ paths use
 	// X-Gateway-Subject validated by the csar router (mTLS trust boundary).
-	validator := authn.NewJWTValidator(s.logger.With("component", "admin_jwt"))
+	validator := authn.NewJWTValidator(s.logger.With("component", "admin_jwt"), nil)
 	authMw := AdminAuthMiddleware(validator, s.cfg.Auth, s.logger)
 	handler = pathScopedAuth(authMw, handler)
 

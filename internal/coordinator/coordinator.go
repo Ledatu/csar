@@ -664,6 +664,7 @@ func authValidateToProto(a *config.AuthValidateConfig) *csarv1.AuthValidateConfi
 		Use:             a.Use,
 		Mode:            a.Mode,
 		JwksUrl:         a.JWKSURL,
+		JwksTls:         a.JWKSTLS,
 		SessionEndpoint: a.SessionEndpoint,
 		SessionTls:      a.SessionTLS,
 		ForwardHeaders:  a.ForwardHeaders,

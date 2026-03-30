@@ -243,6 +243,7 @@ message AuthValidateConfigProto {
   string session_endpoint = 12;
   string session_tls = 13;
   repeated string forward_headers = 14;
+  string jwks_tls = 15;
 }
 
 // ---------------------------------------------------------------------------

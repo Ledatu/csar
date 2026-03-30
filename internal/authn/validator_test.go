@@ -42,7 +42,7 @@ func TestJWTValidator_ValidToken(t *testing.T) {
 		key,
 	)
 
-	validator := NewJWTValidator(newTestLogger())
+	validator := NewJWTValidator(newTestLogger(), nil)
 
 	nextCalled := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -71,7 +71,7 @@ func TestJWTValidator_ValidToken(t *testing.T) {
 }
 
 func TestJWTValidator_MissingToken(t *testing.T) {
-	validator := NewJWTValidator(newTestLogger())
+	validator := NewJWTValidator(newTestLogger(), nil)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("next handler should not be called")
 	})
@@ -106,7 +106,7 @@ func TestJWTValidator_ExpiredToken(t *testing.T) {
 		key,
 	)
 
-	validator := NewJWTValidator(newTestLogger())
+	validator := NewJWTValidator(newTestLogger(), nil)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("next handler should not be called for expired token")
 	})
@@ -142,7 +142,7 @@ func TestJWTValidator_WrongIssuer(t *testing.T) {
 		key,
 	)
 
-	validator := NewJWTValidator(newTestLogger())
+	validator := NewJWTValidator(newTestLogger(), nil)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("next should not be called")
 	})
@@ -168,7 +168,7 @@ func TestJWTValidator_AlgNone_Rejected(t *testing.T) {
 	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"sub":"attacker","exp":99999999999}`))
 	token := header + "." + payload + "."
 
-	validator := NewJWTValidator(newTestLogger())
+	validator := NewJWTValidator(newTestLogger(), nil)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("next should not be called for alg=none")
 	})
@@ -204,7 +204,7 @@ func TestJWTValidator_ForwardClaims(t *testing.T) {
 		key,
 	)
 
-	validator := NewJWTValidator(newTestLogger())
+	validator := NewJWTValidator(newTestLogger(), nil)
 
 	var capturedSub, capturedEmail string
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -254,7 +254,7 @@ func TestJWTValidator_RequiredClaims(t *testing.T) {
 		key,
 	)
 
-	validator := NewJWTValidator(newTestLogger())
+	validator := NewJWTValidator(newTestLogger(), nil)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("next should not be called")
 	})
@@ -322,7 +322,7 @@ func TestJWTValidator_ECDSA(t *testing.T) {
 
 	token := signingInput + "." + base64.RawURLEncoding.EncodeToString(sigBytes)
 
-	validator := NewJWTValidator(newTestLogger())
+	validator := NewJWTValidator(newTestLogger(), nil)
 	nextCalled := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		nextCalled = true
@@ -356,7 +356,7 @@ func TestJWTValidator_MalformedToken(t *testing.T) {
 		{"bad base64", "!!!.!!!.!!!"},
 	}
 
-	validator := NewJWTValidator(newTestLogger())
+	validator := NewJWTValidator(newTestLogger(), nil)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("next should not be called")
 	})

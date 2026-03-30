@@ -49,7 +49,12 @@ listen_addr: ":8080"
 auth_validate_policies:
   jwt-base:
     jwks_url: "https://auth.example.com/.well-known/jwks.json"
+    jwks_tls: "authn-mtls"
     issuer: "auth.example.com"
+
+backend_tls_policies:
+  authn-mtls:
+    insecure_skip_verify: true
 
 paths:
   /api/v1/products:
@@ -72,6 +77,9 @@ paths:
 	}
 	if av.JWKSURL != "https://auth.example.com/.well-known/jwks.json" {
 		t.Errorf("JWKSURL should come from policy")
+	}
+	if av.JWKSTLS != "authn-mtls" {
+		t.Errorf("JWKSTLS = %q, want authn-mtls from policy", av.JWKSTLS)
 	}
 }
 

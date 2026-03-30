@@ -1454,6 +1454,7 @@ type AuthValidateConfigProto struct {
 	SessionEndpoint string                 `protobuf:"bytes,12,opt,name=session_endpoint,json=sessionEndpoint,proto3" json:"session_endpoint,omitempty"`
 	SessionTls      string                 `protobuf:"bytes,13,opt,name=session_tls,json=sessionTls,proto3" json:"session_tls,omitempty"`
 	ForwardHeaders  []string               `protobuf:"bytes,14,rep,name=forward_headers,json=forwardHeaders,proto3" json:"forward_headers,omitempty"`
+	JwksTls         string                 `protobuf:"bytes,15,opt,name=jwks_tls,json=jwksTls,proto3" json:"jwks_tls,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1584,6 +1585,13 @@ func (x *AuthValidateConfigProto) GetForwardHeaders() []string {
 		return x.ForwardHeaders
 	}
 	return nil
+}
+
+func (x *AuthValidateConfigProto) GetJwksTls() string {
+	if x != nil {
+		return x.JwksTls
+	}
+	return ""
 }
 
 type RetryConfigProto struct {
@@ -2788,7 +2796,7 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x13GlobalThrottleProto\x12\x10\n" +
 	"\x03rps\x18\x01 \x01(\x01R\x03rps\x12\x14\n" +
 	"\x05burst\x18\x02 \x01(\x05R\x05burst\x124\n" +
-	"\bmax_wait\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\amaxWait\"\xe2\x05\n" +
+	"\bmax_wait\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\amaxWait\"\xfd\x05\n" +
 	"\x17AuthValidateConfigProto\x12\x10\n" +
 	"\x03use\x18\x01 \x01(\tR\x03use\x12\x19\n" +
 	"\bjwks_url\x18\x02 \x01(\tR\ajwksUrl\x12\x16\n" +
@@ -2807,7 +2815,8 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x10session_endpoint\x18\f \x01(\tR\x0fsessionEndpoint\x12\x1f\n" +
 	"\vsession_tls\x18\r \x01(\tR\n" +
 	"sessionTls\x12'\n" +
-	"\x0fforward_headers\x18\x0e \x03(\tR\x0eforwardHeaders\x1aA\n" +
+	"\x0fforward_headers\x18\x0e \x03(\tR\x0eforwardHeaders\x12\x19\n" +
+	"\bjwks_tls\x18\x0f \x01(\tR\ajwksTls\x1aA\n" +
 	"\x13RequiredClaimsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a@\n" +

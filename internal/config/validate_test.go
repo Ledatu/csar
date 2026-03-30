@@ -220,6 +220,29 @@ func TestFlatRoutes(t *testing.T) {
 	}
 }
 
+func TestValidate_AuthValidateJWT_UnknownJWKSTLSPolicy(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Paths: map[string]PathConfig{
+			"/svc/test": {
+				"get": RouteConfig{
+					Backend: BackendConfig{TargetURL: "https://upstream.example.com"},
+					AuthValidate: &AuthValidateConfig{
+						Mode:    "jwt",
+						JWKSURL: "https://auth.example.com/.well-known/jwks.json",
+						JWKSTLS: "missing-policy",
+					},
+				},
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should fail for undefined jwks_tls policy")
+	}
+}
+
 func TestDuration_UnmarshalYAML(t *testing.T) {
 	tests := []struct {
 		yaml string

@@ -854,6 +854,11 @@ type AuthValidateConfig struct {
 	// Example: "https://auth.example.com/.well-known/jwks.json"
 	JWKSURL string `yaml:"jwks_url,omitempty" json:"jwks_url,omitempty"`
 
+	// JWKSTLS is a reference to a backend_tls_policies entry for the
+	// JWKS fetch HTTP client (jwt mode). Required when the JWKS endpoint
+	// uses an internal CA (e.g. authn behind mTLS).
+	JWKSTLS string `yaml:"jwks_tls,omitempty" json:"jwks_tls,omitempty"`
+
 	// SessionEndpoint is the URL called via subrequest in session mode.
 	// Example: "https://authn:8081/auth/validate"
 	SessionEndpoint string `yaml:"session_endpoint,omitempty" json:"session_endpoint,omitempty"`

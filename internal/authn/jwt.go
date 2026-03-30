@@ -90,10 +90,14 @@ type jwksResponse struct {
 }
 
 // NewJWTValidator creates a new JWTValidator.
-func NewJWTValidator(logger *slog.Logger) *JWTValidator {
+// If client is nil a default HTTP client with a 10s timeout is used.
+func NewJWTValidator(logger *slog.Logger, client *http.Client) *JWTValidator {
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
 	return &JWTValidator{
 		logger: logger,
-		client: &http.Client{Timeout: 10 * time.Second},
+		client: client,
 		cache:  make(map[string]*jwksCache),
 	}
 }

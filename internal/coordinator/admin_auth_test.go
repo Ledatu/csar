@@ -55,7 +55,7 @@ func TestAdminAuthMiddleware_AllowedKMSKeys_Array(t *testing.T) {
 	)
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	validator := authn.NewJWTValidator(logger)
+	validator := authn.NewJWTValidator(logger, nil)
 
 	cfg := AdminAuthConfig{
 		JWKSUrl:   jwksServer.URL,

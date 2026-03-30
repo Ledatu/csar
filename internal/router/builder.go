@@ -202,7 +202,9 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 				return err
 			}
 		case "", "jwt":
-			r.setupJWT(rt, fr, key, logger)
+			if err := r.setupJWT(rt, fr, cfg, key, logger); err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("route %s: unknown auth_validate mode %q", key, fr.Route.AuthValidate.Mode)
 		}
@@ -574,10 +576,32 @@ func (r *Router) setupBackpressure(rt *route, fr config.FlatRoute, key string, l
 }
 
 // setupJWT configures JWT validation for a route.
-func (r *Router) setupJWT(rt *route, fr config.FlatRoute, key string, logger *slog.Logger) {
-	if r.jwtValidator == nil {
-		r.jwtValidator = authn.NewJWTValidator(logger)
+func (r *Router) setupJWT(rt *route, fr config.FlatRoute, cfg *config.Config, key string, logger *slog.Logger) error {
+	tlsRef := fr.Route.AuthValidate.JWKSTLS
+
+	if r.jwtValidators == nil {
+		r.jwtValidators = make(map[string]*authn.JWTValidator)
 	}
+
+	jv, exists := r.jwtValidators[tlsRef]
+	if !exists {
+		var client *http.Client
+		if tlsRef != "" {
+			policy, ok := cfg.BackendTLSPolicies[tlsRef]
+			if !ok {
+				return fmt.Errorf("route %s: jwks_tls policy %q not found in backend_tls_policies", key, tlsRef)
+			}
+			transport, err := buildSessionTransport(&policy)
+			if err != nil {
+				return fmt.Errorf("route %s: failed to build JWKS TLS transport for policy %q: %w", key, tlsRef, err)
+			}
+			client = &http.Client{Transport: transport, Timeout: 10 * time.Second}
+		}
+		jv = authn.NewJWTValidator(logger, client)
+		r.jwtValidators[tlsRef] = jv
+	}
+
+	rt.jwtValidator = jv
 	rt.jwtConfig = &authn.Config{
 		JWKSURL:        fr.Route.AuthValidate.JWKSURL,
 		Issuer:         fr.Route.AuthValidate.Issuer,
@@ -592,7 +616,9 @@ func (r *Router) setupJWT(rt *route, fr config.FlatRoute, key string, logger *sl
 	logger.Info("JWT validation enabled",
 		"route", key,
 		"jwks_url", fr.Route.AuthValidate.JWKSURL,
+		"tls_policy", tlsRef,
 	)
+	return nil
 }
 
 // setupSession configures session-based auth validation for a route.

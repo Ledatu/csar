@@ -21,7 +21,7 @@ func TestJWTValidator_JWKSCaching(t *testing.T) {
 	}))
 	defer jwksServer.Close()
 
-	validator := NewJWTValidator(newTestLogger())
+	validator := NewJWTValidator(newTestLogger(), nil)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
