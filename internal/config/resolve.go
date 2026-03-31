@@ -16,6 +16,7 @@ func (c *Config) resolveAndValidate() error {
 		{"retry policies", c.ResolveRetryPolicies},
 		{"redact policies", c.ResolveRedactPolicies},
 		{"auth-validate policies", c.ResolveAuthValidatePolicies},
+		{"authz policies", c.ResolveAuthzPolicies},
 		{"backend TLS policies", c.ResolveBackendTLSPolicies},
 	}
 	for _, step := range steps {
