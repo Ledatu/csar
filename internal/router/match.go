@@ -16,19 +16,29 @@ const maxRegexLength = 1024
 var dangerousPatterns = regexp.MustCompile(`\([^)]*[+*][^)]*\)[+*]|\(\?[^)]*\)[+*]`)
 
 // matchRoute finds the best matching route for the given method and path.
-// Priority order: exact match → prefix match → regex match.
+// Priority order: exact match → regex match → longest prefix match.
 func (r *Router) matchRoute(method, path string) (*route, []string) {
 	method = strings.ToUpper(method)
 
-	// Try exact match first
+	// 1. Exact match (highest priority)
 	key := throttle.RouteKey(method, path)
 	if rt, ok := r.routes[key]; ok {
 		return rt, nil
 	}
 
-	// Try prefix match: check if any registered path is a prefix
-	// e.g. "/api/v1" matches a route registered as "/api/v1"
-	// and "/api/v1/foo" matches "/api/v1" if it's a prefix route
+	// 2. Regex/parameterised routes — these define specific path structures
+	// (e.g. /admin/sessions/{session_id}/revoke) and must be evaluated before
+	// generic prefix routes so that broad prefixes like /admin don't shadow them.
+	for _, rt := range r.regexRoutes {
+		if rt.method != method {
+			continue
+		}
+		if matches := rt.pathPattern.FindStringSubmatch(path); matches != nil {
+			return rt, matches
+		}
+	}
+
+	// 3. Longest prefix match (fallback)
 	var bestMatch *route
 	bestLen := 0
 
@@ -54,16 +64,6 @@ func (r *Router) matchRoute(method, path string) (*route, []string) {
 
 	if bestMatch != nil {
 		return bestMatch, nil
-	}
-
-	// Try regex routes (audit §3.2: path rewriting & regex matching)
-	for _, rt := range r.regexRoutes {
-		if rt.method != method {
-			continue
-		}
-		if matches := rt.pathPattern.FindStringSubmatch(path); matches != nil {
-			return rt, matches
-		}
 	}
 
 	return nil, nil

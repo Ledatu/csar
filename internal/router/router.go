@@ -71,7 +71,7 @@ type vipOverride struct {
 // the pipeline: ip_check -> cors -> security_inject -> throttle.Wait -> circuit_breaker -> proxy.Forward.
 type Router struct {
 	routes            map[string]*route // keyed by "METHOD:PATH" (exact/prefix routes)
-	regexRoutes       []*route          // routes with {var:regex} patterns (checked after exact match)
+	regexRoutes       []*route          // routes with {var:regex} patterns (checked after exact, before prefix)
 	cfg               *config.Config
 	logger            *slog.Logger
 	metrics           *metrics.Metrics                   // nil if no metrics

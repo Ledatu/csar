@@ -4,8 +4,8 @@
 //
 // Matching precedence mirrors internal/router:
 //  1. Exact match (METHOD:PATH key lookup)
-//  2. Longest prefix match (path boundary aware)
-//  3. Regex/parameterised routes (first match in sorted order)
+//  2. Regex/parameterised routes (first match in sorted order)
+//  3. Longest prefix match (path boundary aware)
 package simulate
 
 import (
@@ -100,10 +100,10 @@ func buildRouteTable(cfg *config.Config) (exact map[string]*compiledRoute, prefi
 // ─── Simulate ──────────────────────────────────────────────────────────────────
 
 // Simulate runs a local route match against the config.
-// Matching precedence mirrors internal/router/router.go matchRoute:
+// Matching precedence mirrors internal/router/match.go matchRoute:
 //  1. Exact key match
-//  2. Longest prefix match (path-boundary aware)
-//  3. Regex pattern match
+//  2. Regex pattern match
+//  3. Longest prefix match (path-boundary aware)
 func Simulate(cfg *config.Config, req Request) *MatchResult {
 	method := strings.ToUpper(req.Method)
 	result := &MatchResult{}
@@ -119,7 +119,22 @@ func Simulate(cfg *config.Config, req Request) *MatchResult {
 		return result
 	}
 
-	// 2. Longest prefix match (path-boundary aware, like the router)
+	// 2. Regex routes — evaluated before prefix so that specific parameterised
+	// paths (e.g. /admin/sessions/{id}/revoke) are not shadowed by broad
+	// prefix routes (e.g. /admin).
+	for _, cr := range regex {
+		if cr.method != method {
+			continue
+		}
+		if cr.pattern != nil && cr.pattern.MatchString(req.Path) {
+			fillResult(result, cr, "regex")
+			result.Middlewares = resolveMiddlewares(cfg, cr.route, cr.path)
+			result.Decision = buildDecision(result)
+			return result
+		}
+	}
+
+	// 3. Longest prefix match (path-boundary aware, fallback)
 	for _, cr := range prefix {
 		if cr.method != method {
 			continue
@@ -127,19 +142,6 @@ func Simulate(cfg *config.Config, req Request) *MatchResult {
 		if strings.HasPrefix(req.Path, cr.path) &&
 			(len(req.Path) == len(cr.path) || req.Path[len(cr.path)] == '/') {
 			fillResult(result, cr, "prefix")
-			result.Middlewares = resolveMiddlewares(cfg, cr.route, cr.path)
-			result.Decision = buildDecision(result)
-			return result
-		}
-	}
-
-	// 3. Regex routes
-	for _, cr := range regex {
-		if cr.method != method {
-			continue
-		}
-		if cr.pattern != nil && cr.pattern.MatchString(req.Path) {
-			fillResult(result, cr, "regex")
 			result.Middlewares = resolveMiddlewares(cfg, cr.route, cr.path)
 			result.Decision = buildDecision(result)
 			return result

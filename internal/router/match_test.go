@@ -266,3 +266,71 @@ func TestRouter_GetThrottler(t *testing.T) {
 		t.Error("GetThrottler(/nonexistent) returned non-nil, want nil")
 	}
 }
+
+func TestRouter_RegexBeatsPrefix(t *testing.T) {
+	prefixUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("prefix"))
+	}))
+	defer prefixUpstream.Close()
+
+	regexUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("regex"))
+	}))
+	defer regexUpstream.Close()
+
+	cfg := newTestConfig(map[string]config.PathConfig{
+		"/admin": {
+			"post": config.RouteConfig{
+				Backend: config.BackendConfig{TargetURL: prefixUpstream.URL},
+			},
+		},
+		"/admin/sessions/{session_id}/revoke": {
+			"post": config.RouteConfig{
+				Backend: config.BackendConfig{TargetURL: regexUpstream.URL},
+			},
+		},
+	})
+
+	r, err := New(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/sessions/abc123/revoke", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	body, _ := io.ReadAll(rec.Result().Body)
+	if string(body) != "regex" {
+		t.Errorf("body = %q, want %q — regex route must beat prefix route", string(body), "regex")
+	}
+}
+
+func TestRouter_PrefixStillMatchesWhenNoRegex(t *testing.T) {
+	prefixUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte("prefix"))
+	}))
+	defer prefixUpstream.Close()
+
+	cfg := newTestConfig(map[string]config.PathConfig{
+		"/admin": {
+			"post": config.RouteConfig{
+				Backend: config.BackendConfig{TargetURL: prefixUpstream.URL},
+			},
+		},
+	})
+
+	r, err := New(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/some/other/path", nil)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	body, _ := io.ReadAll(rec.Result().Body)
+	if string(body) != "prefix" {
+		t.Errorf("body = %q, want %q — prefix should match when no regex route exists", string(body), "prefix")
+	}
+}
