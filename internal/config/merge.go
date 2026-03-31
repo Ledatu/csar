@@ -93,6 +93,11 @@ func mergeConfigs(base, overlay *Config, overlayFile string) error {
 		return err
 	}
 
+	// AuthzPolicies
+	if err := mergeMap(base.AuthzPolicies, overlay.AuthzPolicies, &base.AuthzPolicies, overlayFile, "authz_policies"); err != nil {
+		return err
+	}
+
 	// BackendTLSPolicies
 	if err := mergeMap(base.BackendTLSPolicies, overlay.BackendTLSPolicies, &base.BackendTLSPolicies, overlayFile, "backend_tls_policies"); err != nil {
 		return err
