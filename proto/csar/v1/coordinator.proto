@@ -89,6 +89,7 @@ message FullConfigSnapshot {
   map<string, RedactConfigProto> redact_policies = 7;
   map<string, AuthValidateConfigProto> auth_validate_policies = 8;
   map<string, AuthzRouteConfigProto> authz_policies = 12;
+  map<string, BackendTLSConfigProto> backend_tls_policies = 13;
 
   // Global settings.
   GlobalThrottleProto global_throttle = 9;

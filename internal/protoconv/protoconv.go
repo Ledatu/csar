@@ -39,6 +39,7 @@ func FullSnapshotToConfig(snap *csarv1.FullConfigSnapshot) *config.Config {
 	cfg.RedactPolicies = protoToRedactPolicies(snap.GetRedactPolicies())
 	cfg.AuthValidatePolicies = protoToAuthValidatePolicies(snap.GetAuthValidatePolicies())
 	cfg.AuthzPolicies = protoToAuthzPolicies(snap.GetAuthzPolicies())
+	cfg.BackendTLSPolicies = protoToBackendTLSPolicies(snap.GetBackendTlsPolicies())
 
 	if gt := snap.GetGlobalThrottle(); gt != nil {
 		cfg.GlobalThrottle = &config.GlobalThrottleConfig{
@@ -454,6 +455,22 @@ func protoToAuthzPolicies(policies map[string]*csarv1.AuthzRouteConfigProto) map
 	out := make(map[string]config.AuthzRouteConfig, len(policies))
 	for name, a := range policies {
 		out[name] = *protoToAuthzRouteConfig(a)
+	}
+	return out
+}
+
+func protoToBackendTLSPolicies(policies map[string]*csarv1.BackendTLSConfigProto) map[string]config.BackendTLSPolicy {
+	if len(policies) == 0 {
+		return nil
+	}
+	out := make(map[string]config.BackendTLSPolicy, len(policies))
+	for name, p := range policies {
+		out[name] = config.BackendTLSPolicy{
+			InsecureSkipVerify: p.GetInsecureSkipVerify(),
+			CAFile:             p.GetCaFile(),
+			CertFile:           p.GetCertFile(),
+			KeyFile:            p.GetKeyFile(),
+		}
 	}
 	return out
 }

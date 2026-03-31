@@ -324,6 +324,7 @@ func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_Su
 		snapshot.RedactPolicies = redactPoliciesMapToProto(cfg.RedactPolicies)
 		snapshot.AuthValidatePolicies = authValidatePoliciesMapToProto(cfg.AuthValidatePolicies)
 		snapshot.AuthzPolicies = authzPoliciesMapToProto(cfg.AuthzPolicies)
+		snapshot.BackendTlsPolicies = backendTLSPoliciesToProto(cfg.BackendTLSPolicies)
 
 		if cfg.GlobalThrottle != nil {
 			snapshot.GlobalThrottle = &csarv1.GlobalThrottleProto{
@@ -844,6 +845,22 @@ func authzPoliciesMapToProto(policies map[string]config.AuthzRouteConfig) map[st
 	for name := range policies {
 		a := policies[name]
 		out[name] = authzToProto(&a)
+	}
+	return out
+}
+
+func backendTLSPoliciesToProto(policies map[string]config.BackendTLSPolicy) map[string]*csarv1.BackendTLSConfigProto {
+	if len(policies) == 0 {
+		return nil
+	}
+	out := make(map[string]*csarv1.BackendTLSConfigProto, len(policies))
+	for name, p := range policies {
+		out[name] = &csarv1.BackendTLSConfigProto{
+			InsecureSkipVerify: p.InsecureSkipVerify,
+			CaFile:             p.CAFile,
+			CertFile:           p.CertFile,
+			KeyFile:            p.KeyFile,
+		}
 	}
 	return out
 }
