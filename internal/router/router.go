@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ledatu/csar/internal/audit"
 	"github.com/ledatu/csar/internal/authn"
 	"github.com/ledatu/csar/internal/authz"
 	"github.com/ledatu/csar/internal/cache"
@@ -54,6 +55,7 @@ type route struct {
 	corsConfig          *config.CORSConfig         // nil if no CORS configuration
 	cacheConfig         *cache.Config              // nil if no response caching
 	authzConfig         *config.AuthzRouteConfig   // nil if no authz authorization
+	auditEnabled        bool                       // resolved from x-csar-audit + method default
 	excludeIPs          []*net.IPNet               // IPs/CIDRs that bypass this route's throttle
 	vipOverrides        []vipOverride              // header-based throttle policy swaps
 }
@@ -78,6 +80,7 @@ type Router struct {
 	jwtValidators     map[string]*authn.JWTValidator     // keyed by jwks_tls policy name ("" = default)
 	sessionValidators map[string]*authn.SessionValidator // keyed by session_tls policy name ("" = default)
 	authzClient       *authz.Client                      // nil if no route uses authz
+	auditClient       *audit.Client                      // nil if audit ingest is not configured
 	dlpRedactor       *dlp.Redactor                      // nil if no route uses DLP redaction
 	tenantRouter      *tenant.Router                     // nil if no route uses tenant routing
 	responseCache     *cache.ResponseCache               // nil if no route uses response caching

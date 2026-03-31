@@ -79,6 +79,7 @@
     "readiness": { "$ref": "#/$defs/ReadinessConfig" },
     "debug_headers": { "$ref": "#/$defs/DebugHeadersConfig" },
     "authz": { "$ref": "#/$defs/AuthzClientConfig" },
+    "audit": { "$ref": "#/$defs/AuditClientConfig" },
     "paths": {
       "type": "object",
       "description": "Route definitions using OpenAPI-style x-csar-* extensions. Keys are URL path patterns.",
@@ -1111,6 +1112,41 @@
         }
       }
     },
+    "AuditClientConfig": {
+      "type": "object",
+      "description": "Connection settings for the csar-audit gRPC ingest service.",
+      "additionalProperties": false,
+      "required": ["address"],
+      "properties": {
+        "address": {
+          "type": "string",
+          "description": "gRPC address of the csar-audit service.",
+          "examples": ["localhost:9084", "audit.internal:443"]
+        },
+        "ca_file": {
+          "type": "string",
+          "description": "CA certificate for verifying the csar-audit server."
+        },
+        "cert_file": {
+          "type": "string",
+          "description": "Client certificate (PEM) for mTLS to csar-audit."
+        },
+        "key_file": {
+          "type": "string",
+          "description": "Client private key (PEM) for mTLS to csar-audit."
+        },
+        "allow_insecure": {
+          "type": "boolean",
+          "description": "Allow plaintext gRPC to csar-audit. Development only.",
+          "default": false
+        },
+        "timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "Per-call timeout for RecordEvents RPCs. Default: 500ms.",
+          "default": "500ms"
+        }
+      }
+    },
     "AuthzRouteConfig": {
       "oneOf": [
         { "type": "string", "description": "Reference to a named authz_policies entry." },
@@ -1187,7 +1223,11 @@
           "minimum": 0
         },
         "x-csar-protocol": { "$ref": "#/$defs/ProtocolPolicyConfig" },
-        "x-csar-authz": { "$ref": "#/$defs/AuthzRouteConfig" }
+        "x-csar-authz": { "$ref": "#/$defs/AuthzRouteConfig" },
+        "x-csar-audit": {
+          "type": "boolean",
+          "description": "Emit access audit events for this route. When omitted, POST/PUT/PATCH/DELETE default to on (if audit client is configured); GET/HEAD/OPTIONS default to off."
+        }
       }
     },
     "PathConfig": {

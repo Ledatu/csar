@@ -504,7 +504,7 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 // Streaming protocol bypass (audit §3.2): WebSocket upgrades and SSE
 // connections skip DLP and Retry middleware to avoid buffering breakage.
 func (r *Router) upstreamHandler(rt *route) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	inner := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		// Streaming protocol bypass: skip buffering middleware for WebSocket/SSE.
 		if isStreamingRequest(req) {
 			r.logger.Debug("streaming protocol detected, bypassing DLP/Retry",
@@ -537,6 +537,7 @@ func (r *Router) upstreamHandler(rt *route) http.Handler {
 
 		handler.ServeHTTP(w, req)
 	})
+	return r.wrapUpstreamWithAudit(rt, inner)
 }
 
 // baseProxy returns the base proxy handler (tenant routing or direct proxy).

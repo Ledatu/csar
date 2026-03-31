@@ -1,6 +1,7 @@
 package router
 
 import (
+	"github.com/ledatu/csar/internal/audit"
 	"github.com/ledatu/csar/internal/authz"
 	"github.com/ledatu/csar/internal/metrics"
 	"github.com/ledatu/csar/internal/proxy"
@@ -50,4 +51,9 @@ func WithRedisClient(client *redis.Client) Option {
 // WithAuthzClient sets the csar-authz gRPC client for routes with x-csar-authz config.
 func WithAuthzClient(c *authz.Client) Option {
 	return func(r *Router) { r.authzClient = c }
+}
+
+// WithAuditClient sets the csar-audit gRPC client for routes that emit audit events.
+func WithAuditClient(c *audit.Client) Option {
+	return func(r *Router) { r.auditClient = c }
 }

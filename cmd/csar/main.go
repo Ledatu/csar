@@ -18,6 +18,7 @@ import (
 	"github.com/ledatu/csar-core/health"
 	"github.com/ledatu/csar-core/tlsx"
 
+	"github.com/ledatu/csar/internal/audit"
 	"github.com/ledatu/csar/internal/authz"
 	"github.com/ledatu/csar/internal/config"
 	"github.com/ledatu/csar/internal/coordclient"
@@ -191,6 +192,18 @@ func run() error {
 		if authzClient != nil {
 			defer authzClient.Close()
 			routerOpts = append(routerOpts, router.WithAuthzClient(authzClient))
+		}
+	}
+
+	// --- Audit client (csar-audit gRPC ingest) ---
+	if cfg.Audit != nil && cfg.Audit.Address != "" {
+		auditClient, err := audit.New(cfg.Audit, logger)
+		if err != nil {
+			return fmt.Errorf("creating audit client: %w", err)
+		}
+		if auditClient != nil {
+			defer auditClient.Close()
+			routerOpts = append(routerOpts, router.WithAuditClient(auditClient))
 		}
 	}
 

@@ -250,6 +250,25 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 		)
 	}
 
+	// Access audit (csar-audit): explicit x-csar-audit or default by HTTP method.
+	if fr.Route.Audit != nil {
+		if *fr.Route.Audit {
+			if r.auditClient == nil {
+				return fmt.Errorf("route %s has x-csar-audit: true but no audit client is configured — "+
+					"provide WithAuditClient() or set audit.address in config", key)
+			}
+			rt.auditEnabled = true
+		}
+	} else {
+		rt.auditEnabled = defaultAuditForMutatingMethod(fr.Method)
+		if rt.auditEnabled && r.auditClient == nil {
+			rt.auditEnabled = false
+		}
+	}
+	if rt.auditEnabled && fr.Route.Audit != nil {
+		logger.Info("route audit enabled (explicit x-csar-audit)", "route", key)
+	}
+
 	// Apply max_response_size to DLP config if set (audit §2.3.4).
 	if fr.Route.MaxResponseSize > 0 && rt.dlpConfig != nil {
 		rt.dlpConfig.MaxResponseSize = fr.Route.MaxResponseSize

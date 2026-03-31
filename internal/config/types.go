@@ -165,6 +165,10 @@ type Config struct {
 	// When set, routes with x-csar-authz can evaluate access policies.
 	Authz *AuthzClientConfig `yaml:"authz,omitempty" json:"authz,omitempty"`
 
+	// Audit configures the connection to the csar-audit gRPC ingest service.
+	// When set, routes may emit access audit events via x-csar-audit.
+	Audit *AuditClientConfig `yaml:"audit,omitempty" json:"audit,omitempty"`
+
 	// Paths holds the OpenAPI-style route definitions with x-csar-* extensions.
 	Paths map[string]PathConfig `yaml:"paths" json:"paths"`
 
@@ -299,6 +303,10 @@ type RouteConfig struct {
 	// When present, CSAR strips spoofable headers, evaluates the access policy
 	// against csar-authz, and injects trusted headers (e.g. X-User-Roles).
 	Authz *AuthzRouteConfig `yaml:"x-csar-authz,omitempty" json:"x-csar-authz,omitempty"`
+
+	// Audit toggles router access audit for this route. When nil, POST/PUT/PATCH/DELETE
+	// are audited and GET/HEAD/OPTIONS are not. When true, audit requires a configured audit client.
+	Audit *bool `yaml:"x-csar-audit,omitempty" json:"x-csar-audit,omitempty"`
 
 	// SourceInfo records which file and line each field was declared in.
 	// Populated during multi-file loading for diagnostics. Not serialized.
@@ -1209,6 +1217,23 @@ type AuthzClientConfig struct {
 	AllowInsecure bool `yaml:"allow_insecure,omitempty" json:"allow_insecure,omitempty"`
 
 	// Timeout is the per-call deadline for CheckAccess RPCs. Default: "500ms".
+	Timeout Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+}
+
+// AuditClientConfig configures the gRPC connection to the csar-audit ingest service.
+type AuditClientConfig struct {
+	// Address is the gRPC address of csar-audit (e.g. "localhost:9084").
+	Address string `yaml:"address" json:"address"`
+
+	// TLS settings for the csar → csar-audit gRPC connection.
+	CAFile   string `yaml:"ca_file,omitempty" json:"ca_file,omitempty"`
+	CertFile string `yaml:"cert_file,omitempty" json:"cert_file,omitempty"`
+	KeyFile  string `yaml:"key_file,omitempty" json:"key_file,omitempty"`
+
+	// AllowInsecure permits plaintext gRPC to csar-audit (dev only).
+	AllowInsecure bool `yaml:"allow_insecure,omitempty" json:"allow_insecure,omitempty"`
+
+	// Timeout is the per-call deadline for RecordEvents RPCs. Default: "500ms".
 	Timeout Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 }
 
