@@ -4,17 +4,13 @@ package grpcclient
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"log/slog"
-	"os"
 	"time"
 
+	"github.com/ledatu/csar-core/grpcdial"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // AdminClient connects to the CSAR Coordinator for management operations.
@@ -57,48 +53,17 @@ func Connect(opts ConnectOptions) (*AdminClient, error) {
 		opts.Timeout = 10 * time.Second
 	}
 
-	var dialOpts []grpc.DialOption
-
-	if opts.Insecure {
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	} else {
-		tlsCfg := &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		}
-
-		// Load CA
-		if opts.CAFile != "" {
-			caCert, err := os.ReadFile(opts.CAFile)
-			if err != nil {
-				return nil, fmt.Errorf("reading CA file: %w", err)
-			}
-			pool := x509.NewCertPool()
-			if !pool.AppendCertsFromPEM(caCert) {
-				return nil, fmt.Errorf("failed to parse CA certificate")
-			}
-			tlsCfg.RootCAs = pool
-		}
-
-		// Load client cert for mTLS
-		if opts.CertFile != "" && opts.KeyFile != "" {
-			cert, err := tls.LoadX509KeyPair(opts.CertFile, opts.KeyFile)
-			if err != nil {
-				return nil, fmt.Errorf("loading client certificate: %w", err)
-			}
-			tlsCfg.Certificates = []tls.Certificate{cert}
-		}
-
-		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
-	}
-
-	opts.Logger.Info("creating gRPC client for coordinator", "address", opts.Address)
-
-	conn, err := grpc.NewClient(opts.Address, dialOpts...)
+	conn, err := grpcdial.Dial(&grpcdial.Config{
+		Address:        opts.Address,
+		Insecure:       opts.Insecure,
+		CAFile:         opts.CAFile,
+		CertFile:       opts.CertFile,
+		KeyFile:        opts.KeyFile,
+		DefaultTimeout: opts.Timeout,
+	}, opts.Logger)
 	if err != nil {
-		return nil, fmt.Errorf("creating gRPC client for coordinator at %s: %w", opts.Address, err)
+		return nil, fmt.Errorf("grpcclient: %w", err)
 	}
-
-	opts.Logger.Info("gRPC client created (connection is lazy)", "address", opts.Address)
 
 	return &AdminClient{
 		conn:   conn,
