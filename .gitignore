@@ -44,6 +44,4 @@ config.yml
 
 docs/
 
-audit*
-
 **/csar-mcp/schema.json
