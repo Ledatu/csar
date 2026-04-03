@@ -58,14 +58,14 @@ func svcRequest(method, path, body, subject string) *http.Request {
 
 func TestSvcPutToken_HappyPath(t *testing.T) {
 	srv, store := newTestSvcServer(true, map[string]string{
-		"svc:campaigns": "campaigns/",
+		"svc:aurumskynet-campaigns": "accounts/",
 	})
 
 	mux := http.NewServeMux()
 	srv.registerRoutes(mux)
 
-	req := svcRequest(http.MethodPut, "/svc/tokens/campaigns/wb/s1/api_token",
-		`{"value":"secret-tok"}`, "svc:campaigns")
+	req := svcRequest(http.MethodPut, "/svc/tokens/accounts/wildberries/s1/api_token",
+		`{"value":"secret-tok"}`, "svc:aurumskynet-campaigns")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -77,13 +77,13 @@ func TestSvcPutToken_HappyPath(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if resp.TokenRef != "campaigns/wb/s1/api_token" {
-		t.Errorf("token_ref = %q, want %q", resp.TokenRef, "campaigns/wb/s1/api_token")
+	if resp.TokenRef != "accounts/wildberries/s1/api_token" {
+		t.Errorf("token_ref = %q, want %q", resp.TokenRef, "accounts/wildberries/s1/api_token")
 	}
 	if resp.Status != "updated" {
 		t.Errorf("status = %q, want %q", resp.Status, "updated")
 	}
-	if _, ok := store.entries["campaigns/wb/s1/api_token"]; !ok {
+	if _, ok := store.entries["accounts/wildberries/s1/api_token"]; !ok {
 		t.Error("token not stored")
 	}
 	if srv.authSvc.TokenCount() != 1 {
@@ -93,27 +93,27 @@ func TestSvcPutToken_HappyPath(t *testing.T) {
 
 func TestSvcDeleteToken_HappyPath(t *testing.T) {
 	srv, store := newTestSvcServer(true, map[string]string{
-		"svc:campaigns": "campaigns/",
+		"svc:aurumskynet-campaigns": "accounts/",
 	})
-	store.entries["campaigns/wb/s1/api_token"] = TokenEntry{
+	store.entries["accounts/wildberries/s1/api_token"] = TokenEntry{
 		EncryptedToken: []byte("old"), Version: "v1",
 	}
-	srv.authSvc.LoadToken("campaigns/wb/s1/api_token", TokenEntry{
+	srv.authSvc.LoadToken("accounts/wildberries/s1/api_token", TokenEntry{
 		EncryptedToken: []byte("old"), Version: "v1",
 	})
 
 	mux := http.NewServeMux()
 	srv.registerRoutes(mux)
 
-	req := svcRequest(http.MethodDelete, "/svc/tokens/campaigns/wb/s1/api_token",
-		"", "svc:campaigns")
+	req := svcRequest(http.MethodDelete, "/svc/tokens/accounts/wildberries/s1/api_token",
+		"", "svc:aurumskynet-campaigns")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("DELETE status = %d, want 200, body: %s", rec.Code, rec.Body.String())
 	}
-	if _, ok := store.entries["campaigns/wb/s1/api_token"]; ok {
+	if _, ok := store.entries["accounts/wildberries/s1/api_token"]; ok {
 		t.Error("token still in store after delete")
 	}
 	if srv.authSvc.TokenCount() != 0 {
@@ -123,13 +123,13 @@ func TestSvcDeleteToken_HappyPath(t *testing.T) {
 
 func TestSvcPutToken_MissingSubject(t *testing.T) {
 	srv, _ := newTestSvcServer(true, map[string]string{
-		"svc:campaigns": "campaigns/",
+		"svc:aurumskynet-campaigns": "accounts/",
 	})
 
 	mux := http.NewServeMux()
 	srv.registerRoutes(mux)
 
-	req := svcRequest(http.MethodPut, "/svc/tokens/campaigns/wb/s1/api_token",
+	req := svcRequest(http.MethodPut, "/svc/tokens/accounts/wildberries/s1/api_token",
 		`{"value":"tok"}`, "")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -141,13 +141,13 @@ func TestSvcPutToken_MissingSubject(t *testing.T) {
 
 func TestSvcPutToken_UnknownSubject(t *testing.T) {
 	srv, _ := newTestSvcServer(true, map[string]string{
-		"svc:campaigns": "campaigns/",
+		"svc:aurumskynet-campaigns": "accounts/",
 	})
 
 	mux := http.NewServeMux()
 	srv.registerRoutes(mux)
 
-	req := svcRequest(http.MethodPut, "/svc/tokens/campaigns/wb/s1/api_token",
+	req := svcRequest(http.MethodPut, "/svc/tokens/accounts/wildberries/s1/api_token",
 		`{"value":"tok"}`, "svc:unknown")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -159,14 +159,14 @@ func TestSvcPutToken_UnknownSubject(t *testing.T) {
 
 func TestSvcPutToken_PrefixEnforced(t *testing.T) {
 	srv, _ := newTestSvcServer(true, map[string]string{
-		"svc:campaigns": "campaigns/",
+		"svc:aurumskynet-campaigns": "accounts/",
 	})
 
 	mux := http.NewServeMux()
 	srv.registerRoutes(mux)
 
 	req := svcRequest(http.MethodPut, "/svc/tokens/other/wb/s1/api_token",
-		`{"value":"tok"}`, "svc:campaigns")
+		`{"value":"tok"}`, "svc:aurumskynet-campaigns")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -177,14 +177,14 @@ func TestSvcPutToken_PrefixEnforced(t *testing.T) {
 
 func TestSvcPutToken_InvalidTokenRef(t *testing.T) {
 	srv, _ := newTestSvcServer(true, map[string]string{
-		"svc:campaigns": "campaigns/",
+		"svc:aurumskynet-campaigns": "accounts/",
 	})
 
 	mux := http.NewServeMux()
 	srv.registerRoutes(mux)
 
-	req := svcRequest(http.MethodPut, "/svc/tokens/campaigns/wb/../etc",
-		`{"value":"tok"}`, "svc:campaigns")
+	req := svcRequest(http.MethodPut, "/svc/tokens/accounts/wildberries/../etc",
+		`{"value":"tok"}`, "svc:aurumskynet-campaigns")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -195,14 +195,14 @@ func TestSvcPutToken_InvalidTokenRef(t *testing.T) {
 
 func TestSvcPutToken_EmptyValue(t *testing.T) {
 	srv, _ := newTestSvcServer(true, map[string]string{
-		"svc:campaigns": "campaigns/",
+		"svc:aurumskynet-campaigns": "accounts/",
 	})
 
 	mux := http.NewServeMux()
 	srv.registerRoutes(mux)
 
-	req := svcRequest(http.MethodPut, "/svc/tokens/campaigns/wb/s1/api_token",
-		`{"value":""}`, "svc:campaigns")
+	req := svcRequest(http.MethodPut, "/svc/tokens/accounts/wildberries/s1/api_token",
+		`{"value":""}`, "svc:aurumskynet-campaigns")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -213,14 +213,14 @@ func TestSvcPutToken_EmptyValue(t *testing.T) {
 
 func TestSvcPutToken_RejectsKMSMode(t *testing.T) {
 	srv, _ := newTestSvcServer(false, map[string]string{
-		"svc:campaigns": "campaigns/",
+		"svc:aurumskynet-campaigns": "accounts/",
 	})
 
 	mux := http.NewServeMux()
 	srv.registerRoutes(mux)
 
-	req := svcRequest(http.MethodPut, "/svc/tokens/campaigns/wb/s1/api_token",
-		`{"value":"tok"}`, "svc:campaigns")
+	req := svcRequest(http.MethodPut, "/svc/tokens/accounts/wildberries/s1/api_token",
+		`{"value":"tok"}`, "svc:aurumskynet-campaigns")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
@@ -235,8 +235,8 @@ func TestSvcPutToken_NoPrefixMapDisablesRoutes(t *testing.T) {
 	mux := http.NewServeMux()
 	srv.registerRoutes(mux)
 
-	req := svcRequest(http.MethodPut, "/svc/tokens/campaigns/wb/s1/api_token",
-		`{"value":"tok"}`, "svc:campaigns")
+	req := svcRequest(http.MethodPut, "/svc/tokens/accounts/wildberries/s1/api_token",
+		`{"value":"tok"}`, "svc:aurumskynet-campaigns")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 

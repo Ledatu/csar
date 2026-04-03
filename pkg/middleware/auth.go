@@ -11,11 +11,12 @@ import (
 	"time"
 
 	"github.com/ledatu/csar/internal/kms"
+	"github.com/ledatu/csar/pkg/middleware/authzmw"
 )
 
 // placeholderRe matches dynamic interpolation patterns in token_ref.
-// Supported sources: {query.param_name} and {header.Header-Name}.
-var placeholderRe = regexp.MustCompile(`\{(query|header)\.([^}]+)\}`)
+// Supported sources: {query.param_name}, {header.Header-Name}, and {path.var_name}.
+var placeholderRe = regexp.MustCompile(`\{(query|header|path)\.([^}]+)\}`)
 
 // TokenFetcher fetches encrypted tokens by reference.
 // This matches the AuthService proto contract but can be implemented
@@ -113,8 +114,8 @@ func NewAuthInjector(fetcher TokenFetcher, provider kms.Provider, logger *slog.L
 // Wrap returns an http.Handler that injects the decrypted token into
 // the request before forwarding to the next handler.
 //
-// Dynamic token_ref: If TokenRef contains placeholders like {query.seller_id}
-// or {header.X-Seller-ID}, they are resolved from the incoming request at
+// Dynamic token_ref: If TokenRef contains placeholders like {query.seller_id},
+// {header.X-Seller-ID}, or {path.external_id}, they are resolved from the incoming request at
 // runtime. This enables a single route to serve hundreds of per-seller tokens
 // without duplicating config entries.
 func (a *AuthInjector) Wrap(cfg AuthInjectorConfig, next http.Handler) http.Handler {
@@ -228,8 +229,9 @@ func (a *AuthInjector) Wrap(cfg AuthInjectorConfig, next http.Handler) http.Hand
 
 // resolveTokenRef replaces dynamic placeholders in a token_ref string.
 // Supported patterns:
-//   - {query.param_name}  → extracted from URL query parameters
+//   - {query.param_name}   → extracted from URL query parameters
 //   - {header.Header-Name} → extracted from request headers
+//   - {path.var_name}      → extracted from route path variables
 //
 // Returns an error if a referenced parameter is missing or empty.
 func resolveTokenRef(tokenRef string, r *http.Request) (string, error) {
@@ -237,6 +239,7 @@ func resolveTokenRef(tokenRef string, r *http.Request) (string, error) {
 		return tokenRef, nil
 	}
 
+	pathVars := authzmw.PathVarsFromContext(r.Context())
 	var resolveErr error
 	resolved := placeholderRe.ReplaceAllStringFunc(tokenRef, func(match string) string {
 		if resolveErr != nil {
@@ -252,6 +255,8 @@ func resolveTokenRef(tokenRef string, r *http.Request) (string, error) {
 			val = r.URL.Query().Get(key)
 		case "header":
 			val = r.Header.Get(key)
+		case "path":
+			val = pathVars[key]
 		default:
 			resolveErr = fmt.Errorf("unknown placeholder source %q in token_ref %q", source, tokenRef)
 			return match

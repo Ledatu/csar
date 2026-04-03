@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/ledatu/csar/pkg/middleware/authzmw"
 )
 
 func TestResolveTokenRef_Static(t *testing.T) {
@@ -41,11 +43,37 @@ func TestResolveTokenRef_HeaderPlaceholder(t *testing.T) {
 	}
 }
 
+func TestResolveTokenRef_PathPlaceholder(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/svc/wb/wildberries/s1/stats", nil)
+	req = req.WithContext(authzmw.WithPathVars(req.Context(), map[string]string{
+		"marketplace": "wildberries",
+		"external_id": "s1",
+	}))
+	ref, err := resolveTokenRef("accounts/{path.marketplace}/{path.external_id}/api_token", req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ref != "accounts/wildberries/s1/api_token" {
+		t.Errorf("ref = %q, want %q", ref, "accounts/wildberries/s1/api_token")
+	}
+}
+
 func TestResolveTokenRef_MissingParam_Error(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/test", nil) // no query params
 	_, err := resolveTokenRef("token_{query.seller_id}", req)
 	if err == nil {
 		t.Fatal("expected error for missing query param")
+	}
+}
+
+func TestResolveTokenRef_MissingPathParam_Error(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/svc/wb/wildberries/s1/stats", nil)
+	req = req.WithContext(authzmw.WithPathVars(req.Context(), map[string]string{
+		"marketplace": "wildberries",
+	}))
+	_, err := resolveTokenRef("accounts/{path.marketplace}/{path.external_id}/api_token", req)
+	if err == nil {
+		t.Fatal("expected error for missing path param")
 	}
 }
 

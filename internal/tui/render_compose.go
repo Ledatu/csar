@@ -125,15 +125,11 @@ func renderDockerCompose(r *GenerateResult) string {
 	b.WriteString("    command: >\n")
 	b.WriteString("      -config /etc/csar/config.yaml\n")
 	b.WriteString("      -kms-provider ${CSAR_KMS_PROVIDER:-local}\n")
-	b.WriteString("      -metrics-addr :9100\n")
+	b.WriteString("      -health-addr :9100\n")
 
-	// Self-healing healthcheck: use HTTPS when TLS is enabled
+	// Probe the plain health sidecar so TLS on the main listener is irrelevant.
 	b.WriteString("    healthcheck:\n")
-	if r.EnableTLS {
-		b.WriteString("      test: [\"CMD\", \"wget\", \"--no-check-certificate\", \"-q\", \"--spider\", \"https://localhost:8080/health\"]\n")
-	} else {
-		b.WriteString("      test: [\"CMD\", \"wget\", \"-q\", \"--spider\", \"http://localhost:8080/health\"]\n")
-	}
+	b.WriteString("      test: [\"CMD\", \"wget\", \"-q\", \"--spider\", \"http://127.0.0.1:9100/health\"]\n")
 	b.WriteString("      interval: 10s\n")
 	b.WriteString("      timeout: 3s\n")
 	b.WriteString("      retries: 3\n")

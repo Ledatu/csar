@@ -84,12 +84,13 @@ func (hc *HealthCheckConfig) applyDefaults() {
 
 // Pool manages a set of upstream targets and distributes requests.
 type Pool struct {
-	targets  []*url.URL
-	proxies  []*httputil.ReverseProxy
-	strategy Strategy
-	counter  atomic.Uint64
-	logger   *slog.Logger
-	pathMode string // "replace" (default) or "append"
+	targets   []*url.URL
+	proxies   []*httputil.ReverseProxy
+	strategy  Strategy
+	counter   atomic.Uint64
+	logger    *slog.Logger
+	pathMode  string // "replace" (default) or "append"
+	transport http.RoundTripper
 
 	// Health checking state (parallel arrays to targets/proxies).
 	healthy   []atomic.Bool      // true = target is healthy (default: all true)
@@ -107,6 +108,12 @@ type PoolOption func(*Pool)
 // "append": incoming request path is appended to target_url path.
 func WithPathMode(mode string) PoolOption {
 	return func(p *Pool) { p.pathMode = mode }
+}
+
+// WithTransport sets the shared outbound transport used by reverse proxies and
+// active health checks.
+func WithTransport(rt http.RoundTripper) PoolOption {
+	return func(p *Pool) { p.transport = rt }
 }
 
 // New creates a new load balancer Pool from the given target URLs.
@@ -146,6 +153,7 @@ func New(targetURLs []string, strategy Strategy, logger *slog.Logger, opts ...Po
 				fmt.Fprintf(w, `{"error":"upstream error","detail":%q}`, err.Error())
 			},
 		}
+		rp.Transport = p.transport
 		proxies = append(proxies, rp)
 	}
 
@@ -163,6 +171,7 @@ func New(targetURLs []string, strategy Strategy, logger *slog.Logger, opts ...Po
 		proxies:   proxies,
 		strategy:  strategy,
 		logger:    logger,
+		transport: p.transport,
 		healthy:   healthy,
 		failures:  failures,
 		successes: successes,
@@ -258,7 +267,8 @@ func (p *Pool) probeHTTP(ctx context.Context, target *url.URL, path string) bool
 	req.Header.Set("User-Agent", "csar-healthcheck/1.0")
 
 	client := &http.Client{
-		Timeout: 0, // Timeout managed via context
+		Transport: p.transport,
+		Timeout:   0, // Timeout managed via context
 	}
 	resp, err := client.Do(req)
 	if err != nil {

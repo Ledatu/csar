@@ -1,11 +1,14 @@
 package loadbalancer
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"testing"
+	"time"
 )
 
 // newTestLogger returns a minimal slog.Logger suitable for tests.
@@ -180,5 +183,67 @@ func TestJoinPaths(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("joinPaths(%q, %q) = %q, want %q", tt.base, tt.reqPath, got, tt.want)
 		}
+	}
+}
+
+func TestProbeHTTP_UsesConfiguredTransport(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			t.Fatalf("path = %q, want /health", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	target, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatalf("url.Parse() error: %v", err)
+	}
+
+	pool, err := New(
+		[]string{upstream.URL},
+		RoundRobin,
+		newTestLogger(),
+		WithTransport(upstream.Client().Transport),
+	)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	if !pool.probeHTTP(context.Background(), target, "/health") {
+		t.Fatal("probeHTTP() = false, want true with configured TLS transport")
+	}
+}
+
+func TestStartHealthChecks_UsesConfiguredTransport(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	pool, err := New(
+		[]string{upstream.URL},
+		RoundRobin,
+		newTestLogger(),
+		WithTransport(upstream.Client().Transport),
+	)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pool.StartHealthChecks(ctx, HealthCheckConfig{
+		Mode:               "http",
+		Path:               "/health",
+		Interval:           10 * time.Millisecond,
+		Timeout:            100 * time.Millisecond,
+		UnhealthyThreshold: 1,
+		HealthyThreshold:   1,
+	})
+
+	time.Sleep(50 * time.Millisecond)
+	if !pool.IsHealthy(0) {
+		t.Fatal("target marked unhealthy despite configured TLS transport")
 	}
 }

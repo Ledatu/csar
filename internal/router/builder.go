@@ -102,17 +102,21 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *resilience.CircuitBreakerManager, logger *slog.Logger) error {
 	// Build proxy options (TLS, SSRF protection, etc.)
 	var proxyOpts []proxy.Option
+	var tlsCfg *proxy.TLSConfig
 	if bt := fr.Route.Backend.TLS; bt != nil {
-		proxyOpts = append(proxyOpts, proxy.WithTLS(&proxy.TLSConfig{
+		tlsCfg = &proxy.TLSConfig{
 			InsecureSkipVerify: bt.InsecureSkipVerify,
 			CAFile:             bt.CAFile,
 			CertFile:           bt.CertFile,
 			KeyFile:            bt.KeyFile,
-		}))
+		}
 	}
-	// Apply SSRF protection to all outbound connections (audit §2.3.2).
-	if r.ssrfProtection != nil {
-		proxyOpts = append(proxyOpts, proxy.WithSSRFProtection(r.ssrfProtection))
+	backendTransport, err := proxy.BuildTransport(tlsCfg, r.ssrfProtection)
+	if err != nil {
+		return fmt.Errorf("building outbound transport for %s %s: %w", fr.Method, fr.Path, err)
+	}
+	if backendTransport != nil {
+		proxyOpts = append(proxyOpts, proxy.WithTransport(backendTransport))
 	}
 	// Apply path_mode: "append" preserves old join behaviour; "replace" (default)
 	// makes the target_url path the exact upstream path.
@@ -138,7 +142,7 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 	// Set up load balancing if multiple targets are configured (audit §3.2 Criticism 3).
 	allTargets := fr.Route.Backend.AllTargets()
 	if len(allTargets) > 1 {
-		if err := r.setupLoadBalancer(rt, fr, allTargets, key, logger); err != nil {
+		if err := r.setupLoadBalancer(rt, fr, allTargets, key, logger, backendTransport); err != nil {
 			return err
 		}
 	}
@@ -288,12 +292,15 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 }
 
 // setupLoadBalancer configures load balancing for a route with multiple targets.
-func (r *Router) setupLoadBalancer(rt *route, fr config.FlatRoute, allTargets []string, key string, logger *slog.Logger) error {
+func (r *Router) setupLoadBalancer(rt *route, fr config.FlatRoute, allTargets []string, key string, logger *slog.Logger, transport http.RoundTripper) error {
 	strategy := loadbalancer.RoundRobin
 	if fr.Route.Backend.LoadBalancer == "random" {
 		strategy = loadbalancer.Random
 	}
 	var lbOpts []loadbalancer.PoolOption
+	if transport != nil {
+		lbOpts = append(lbOpts, loadbalancer.WithTransport(transport))
+	}
 	if fr.Route.Backend.IsAppendPathMode() {
 		lbOpts = append(lbOpts, loadbalancer.WithPathMode("append"))
 	}

@@ -34,7 +34,7 @@ services:
     command: >
       -config /etc/csar/config.yaml
       -kms-provider ${CSAR_KMS_PROVIDER}
-      -metrics-addr :9100
+      -health-addr :9100
 
   postgres:
     image: postgres:16-alpine

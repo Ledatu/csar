@@ -107,6 +107,24 @@ func WithPathMode(mode string) Option {
 	return func(o *options) { o.pathMode = mode }
 }
 
+// BuildTransport constructs the outbound HTTP transport used for proxying and
+// active health checks. It applies TLS and SSRF settings when configured.
+func BuildTransport(tlsCfg *TLSConfig, ssrf *SSRFProtection) (http.RoundTripper, error) {
+	switch {
+	case tlsCfg != nil:
+		return buildTLSTransport(tlsCfg, ssrf)
+	case ssrf != nil:
+		return &http.Transport{
+			DialContext:         safeDialContext(ssrf),
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 20,
+			IdleConnTimeout:     90 * time.Second,
+		}, nil
+	default:
+		return nil, nil
+	}
+}
+
 // New creates a new ReverseProxy for the given target URL.
 func New(targetURL string, opts ...Option) (*ReverseProxy, error) {
 	target, err := url.Parse(targetURL)
@@ -134,20 +152,12 @@ func New(targetURL string, opts ...Option) (*ReverseProxy, error) {
 	switch {
 	case o.transport != nil:
 		proxy.Transport = o.transport
-	case o.tls != nil:
-		transport, err := buildTLSTransport(o.tls, o.ssrfProtection)
+	default:
+		transport, err := BuildTransport(o.tls, o.ssrfProtection)
 		if err != nil {
-			return nil, fmt.Errorf("building TLS transport for %q: %w", targetURL, err)
+			return nil, fmt.Errorf("building transport for %q: %w", targetURL, err)
 		}
 		proxy.Transport = transport
-	case o.ssrfProtection != nil:
-		// No TLS, but SSRF protection is enabled — use a plain transport with safe dialer.
-		proxy.Transport = &http.Transport{
-			DialContext:         safeDialContext(o.ssrfProtection),
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 20,
-			IdleConnTimeout:     90 * time.Second,
-		}
 	}
 
 	rp.proxy = proxy

@@ -74,7 +74,7 @@ services:
       - ./tests/e2e/csar-e2e.yaml:/etc/csar/config.yaml:ro
     command: [
       "-config", "/etc/csar/config.yaml",
-      "-metrics-addr", "",
+      "-health-addr", "",
       "-kms-provider", "local",
       "-kms-local-keys", "e2e-key-1=e2e-test-passphrase"
     ]

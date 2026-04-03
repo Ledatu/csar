@@ -48,7 +48,7 @@ func main() {
 
 func run() error {
 	// CLI flags
-	metricsAddr := flag.String("metrics-addr", ":9100", "Prometheus metrics listen address (empty to disable)")
+	healthAddr := flag.String("health-addr", ":9100", "plain HTTP health/readiness/metrics sidecar listen address (empty to disable)")
 	otlpEndpoint := flag.String("otlp-endpoint", "", "OTLP gRPC endpoint for tracing (empty to disable)")
 	otlpInsecure := flag.Bool("otlp-insecure", false, "use insecure connection for OTLP (default: TLS required)")
 
@@ -352,22 +352,22 @@ func run() error {
 		logger.Warn(w)
 	}
 
-	// Start metrics server if configured.
+	// Start health/metrics sidecar if configured.
 	var metricsSidecar *health.Sidecar
-	if *metricsAddr != "" {
+	if *healthAddr != "" {
 		metricsSidecar, err = health.NewSidecar(health.SidecarConfig{
-			Addr:      *metricsAddr,
+			Addr:      *healthAddr,
 			Version:   Version,
 			Readiness: readinessChecker,
 			Metrics:   m.Handler(),
-			Logger:    logger.With("component", "metrics"),
+			Logger:    logger.With("component", "health"),
 		})
 		if err != nil {
-			return fmt.Errorf("creating metrics sidecar: %w", err)
+			return fmt.Errorf("creating health sidecar: %w", err)
 		}
 		go func() {
 			if err := metricsSidecar.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				logger.Error("metrics sidecar error", "error", err)
+				logger.Error("health sidecar error", "error", err)
 			}
 		}()
 	}
@@ -530,7 +530,7 @@ func run() error {
 		sidecarCtx, sidecarCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer sidecarCancel()
 		if err := metricsSidecar.Shutdown(sidecarCtx); err != nil {
-			logger.Error("metrics sidecar shutdown error", "error", err)
+			logger.Error("health sidecar shutdown error", "error", err)
 		}
 	}
 

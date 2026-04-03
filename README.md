@@ -539,7 +539,7 @@ When the coordinator is enabled, the router automatically subscribes to its gRPC
 | Flag | Default | Description |
 |---|---|---|
 | `-config` | `config.example.yaml` | Path to config file |
-| `-metrics-addr` | `:9100` | Prometheus metrics address (empty to disable) |
+| `-health-addr` | `:9100` | Plain HTTP health/readiness/metrics sidecar address (empty to disable) |
 | `-otlp-endpoint` | *(empty)* | OTLP gRPC endpoint for tracing |
 | `-otlp-insecure` | `false` | Allow insecure OTLP connection |
 | `-kms-provider` | *(empty)* | KMS provider: `"local"` or `"yandexapi"` |
