@@ -1,7 +1,6 @@
 package router
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,14 +30,10 @@ func TestRouter_WBProxy_RewritesPathAndInjectsReadTokenFromPathVars(t *testing.T
 	if err != nil {
 		t.Fatalf("NewLocalProvider() error: %v", err)
 	}
-	encrypted, err := provider.Encrypt(context.Background(), "k", []byte("wb-secret"))
-	if err != nil {
-		t.Fatalf("Encrypt() error: %v", err)
-	}
 
 	fetcher := middleware.NewStaticTokenFetcher()
-	fetcher.Add("accounts/wildberries/s1/content/read", encrypted, "k")
-	fetcher.Add("shared/wildberries/client_secret", encrypted, "k")
+	fetcher.Add("accounts/wildberries/s1/content/read", []byte("wb-secret"), "")
+	fetcher.Add("shared/wildberries/client_secret", []byte("wb-secret"), "")
 	injector := middleware.NewAuthInjector(fetcher, provider, newTestLogger())
 
 	cfg := newTestConfig(map[string]config.PathConfig{
@@ -51,14 +46,12 @@ func TestRouter_WBProxy_RewritesPathAndInjectsReadTokenFromPathVars(t *testing.T
 				},
 				Security: config.SecurityConfigs{
 					{
-						KMSKeyID:         "k",
 						TokenRef:         "accounts/{path.marketplace}/{path.external_id}/content/read",
 						InjectHeader:     "Authorization",
 						InjectFormat:     "Bearer {token}",
 						StripTokenParams: boolPtr(false),
 					},
 					{
-						KMSKeyID:         "k",
 						TokenRef:         "shared/wildberries/client_secret",
 						InjectHeader:     "X-Client-Secret",
 						StripTokenParams: boolPtr(false),
@@ -108,14 +101,10 @@ func TestRouter_WBProxy_UsesWriteAliasForMutatingMethods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalProvider() error: %v", err)
 	}
-	encrypted, err := provider.Encrypt(context.Background(), "k", []byte("wb-write-secret"))
-	if err != nil {
-		t.Fatalf("Encrypt() error: %v", err)
-	}
 
 	fetcher := middleware.NewStaticTokenFetcher()
-	fetcher.Add("accounts/wildberries/s1/content/write", encrypted, "k")
-	fetcher.Add("shared/wildberries/client_secret", encrypted, "k")
+	fetcher.Add("accounts/wildberries/s1/content/write", []byte("wb-write-secret"), "")
+	fetcher.Add("shared/wildberries/client_secret", []byte("wb-write-secret"), "")
 	injector := middleware.NewAuthInjector(fetcher, provider, newTestLogger())
 
 	cfg := newTestConfig(map[string]config.PathConfig{
@@ -128,14 +117,12 @@ func TestRouter_WBProxy_UsesWriteAliasForMutatingMethods(t *testing.T) {
 				},
 				Security: config.SecurityConfigs{
 					{
-						KMSKeyID:         "k",
 						TokenRef:         "accounts/{path.marketplace}/{path.external_id}/content/write",
 						InjectHeader:     "Authorization",
 						InjectFormat:     "Bearer {token}",
 						StripTokenParams: boolPtr(false),
 					},
 					{
-						KMSKeyID:         "k",
 						TokenRef:         "shared/wildberries/client_secret",
 						InjectHeader:     "X-Client-Secret",
 						StripTokenParams: boolPtr(false),

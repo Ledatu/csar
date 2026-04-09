@@ -329,7 +329,7 @@ func TestValidate_Security_MissingInjectHeader(t *testing.T) {
 	}
 }
 
-func TestValidate_Security_MissingKMSKeyID(t *testing.T) {
+func TestValidate_Security_MissingKMSKeyID_OKForPassthrough(t *testing.T) {
 	cfg := &Config{
 		ListenAddr: ":8080",
 		Paths: map[string]PathConfig{
@@ -346,11 +346,8 @@ func TestValidate_Security_MissingKMSKeyID(t *testing.T) {
 		},
 	}
 	err := cfg.Validate()
-	if err == nil {
-		t.Fatal("Validate() should fail when kms_key_id is empty")
-	}
-	if !containsStr(err.Error(), "kms_key_id") {
-		t.Errorf("error should mention kms_key_id, got: %v", err)
+	if err != nil {
+		t.Fatalf("Validate() should allow empty kms_key_id for passthrough tokens: %v", err)
 	}
 }
 

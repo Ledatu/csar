@@ -218,9 +218,6 @@ func (c *Config) Validate() error {
 				if sec.InjectHeader == "" {
 					return fmt.Errorf("path %s method %s: x-csar-security%s.inject_header is required when security config is present", path, method, idx)
 				}
-				if sec.KMSKeyID == "" {
-					return fmt.Errorf("path %s method %s: x-csar-security%s.kms_key_id is required when security config is present", path, method, idx)
-				}
 				if oe := sec.OnKMSError; oe != "" && oe != "fail_closed" && oe != "serve_stale" {
 					return fmt.Errorf("path %s method %s: x-csar-security%s.on_kms_error must be \"fail_closed\" or \"serve_stale\", got %q", path, method, idx, oe)
 				}

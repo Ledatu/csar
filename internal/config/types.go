@@ -462,15 +462,16 @@ func (bt *BackendTLSConfig) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// SecurityConfig configures token injection via KMS.
+// SecurityConfig configures token injection from the token store.
 type SecurityConfig struct {
 	// Profile is an optional reference to a named security_profiles entry.
 	// When set, all other fields are inherited from the profile; any
 	// inline fields override the profile's values (merge, not replace).
 	Profile string `yaml:"profile,omitempty" json:"profile,omitempty"`
 
-	// KMSKeyID is the KMS key identifier for decryption.
-	KMSKeyID string `yaml:"kms_key_id" json:"kms_key_id"`
+	// KMSKeyID is the optional KMS key identifier for decryption.
+	// Leave empty for passthrough tokens, such as S3 SSE-managed plaintext objects.
+	KMSKeyID string `yaml:"kms_key_id,omitempty" json:"kms_key_id,omitempty"`
 
 	// TokenRef is the reference passed to AuthService to fetch the encrypted token.
 	TokenRef string `yaml:"token_ref" json:"token_ref"`
