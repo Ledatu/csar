@@ -121,6 +121,83 @@ func TestSvcDeleteToken_HappyPath(t *testing.T) {
 	}
 }
 
+func TestSvcCopyToken_HappyPath(t *testing.T) {
+	srv, store := newTestSvcServer(true, map[string]string{
+		"svc:aurumskynet-campaigns": "accounts/",
+	})
+	store.entries["accounts/wildberries/s1/preadds/p1/n1/content/read"] = TokenEntry{
+		EncryptedToken: []byte("secret"),
+		Version:        "v1",
+	}
+
+	mux := http.NewServeMux()
+	srv.registerRoutes(mux)
+
+	req := svcRequest(
+		http.MethodPost,
+		"/svc/tokens/accounts/wildberries/s1/content/read",
+		`{"source_ref":"accounts/wildberries/s1/preadds/p1/n1/content/read"}`,
+		"svc:aurumskynet-campaigns",
+	)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST status = %d, want 200, body: %s", rec.Code, rec.Body.String())
+	}
+	entry, ok := store.entries["accounts/wildberries/s1/content/read"]
+	if !ok {
+		t.Fatal("copied token not stored")
+	}
+	if string(entry.EncryptedToken) != "secret" {
+		t.Fatalf("encrypted token = %q, want %q", entry.EncryptedToken, "secret")
+	}
+}
+
+func TestSvcCopyToken_RejectsMissingSource(t *testing.T) {
+	srv, _ := newTestSvcServer(true, map[string]string{
+		"svc:aurumskynet-campaigns": "accounts/",
+	})
+
+	mux := http.NewServeMux()
+	srv.registerRoutes(mux)
+
+	req := svcRequest(
+		http.MethodPost,
+		"/svc/tokens/accounts/wildberries/s1/content/read",
+		`{"source_ref":""}`,
+		"svc:aurumskynet-campaigns",
+	)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST status = %d, want 400, body: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSvcCopyToken_EnforcesSourcePrefix(t *testing.T) {
+	srv, _ := newTestSvcServer(true, map[string]string{
+		"svc:aurumskynet-campaigns": "accounts/",
+	})
+
+	mux := http.NewServeMux()
+	srv.registerRoutes(mux)
+
+	req := svcRequest(
+		http.MethodPost,
+		"/svc/tokens/accounts/wildberries/s1/content/read",
+		`{"source_ref":"other/wildberries/s1/content/read"}`,
+		"svc:aurumskynet-campaigns",
+	)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("POST status = %d, want 403, body: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestSvcPutToken_MissingSubject(t *testing.T) {
 	srv, _ := newTestSvcServer(true, map[string]string{
 		"svc:aurumskynet-campaigns": "accounts/",

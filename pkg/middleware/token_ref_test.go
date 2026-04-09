@@ -44,17 +44,17 @@ func TestResolveTokenRef_HeaderPlaceholder(t *testing.T) {
 }
 
 func TestResolveTokenRef_PathPlaceholder(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/svc/wb/wildberries/s1/stats", nil)
+	req := httptest.NewRequest(http.MethodGet, "/svc/wb/wildberries/s1/content/stats", nil)
 	req = req.WithContext(authzmw.WithPathVars(req.Context(), map[string]string{
 		"marketplace": "wildberries",
 		"external_id": "s1",
 	}))
-	ref, err := resolveTokenRef("accounts/{path.marketplace}/{path.external_id}/api_token", req)
+	ref, err := resolveTokenRef("accounts/{path.marketplace}/{path.external_id}/content/read", req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if ref != "accounts/wildberries/s1/api_token" {
-		t.Errorf("ref = %q, want %q", ref, "accounts/wildberries/s1/api_token")
+	if ref != "accounts/wildberries/s1/content/read" {
+		t.Errorf("ref = %q, want %q", ref, "accounts/wildberries/s1/content/read")
 	}
 }
 
@@ -67,11 +67,11 @@ func TestResolveTokenRef_MissingParam_Error(t *testing.T) {
 }
 
 func TestResolveTokenRef_MissingPathParam_Error(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/svc/wb/wildberries/s1/stats", nil)
+	req := httptest.NewRequest(http.MethodGet, "/svc/wb/wildberries/s1/content/stats", nil)
 	req = req.WithContext(authzmw.WithPathVars(req.Context(), map[string]string{
 		"marketplace": "wildberries",
 	}))
-	_, err := resolveTokenRef("accounts/{path.marketplace}/{path.external_id}/api_token", req)
+	_, err := resolveTokenRef("accounts/{path.marketplace}/{path.external_id}/content/read", req)
 	if err == nil {
 		t.Fatal("expected error for missing path param")
 	}

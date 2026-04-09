@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 )
@@ -68,6 +69,85 @@ func (s *AdminServer) handleSvcPutToken(w http.ResponseWriter, r *http.Request) 
 	)
 
 	s.metrics.RequestsTotal.WithLabelValues("svc_put", "success").Inc()
+	respondJSON(w, http.StatusOK, tokenMutationResponse{
+		TokenRef: tokenRef,
+		Version:  version,
+		Status:   "updated",
+	})
+}
+
+type copyTokenRequest struct {
+	SourceRef string `json:"source_ref"`
+}
+
+// handleSvcCopyToken handles POST /svc/tokens/{tokenRef...} and copies an
+// existing encrypted token object to a new token_ref without exposing plaintext.
+func (s *AdminServer) handleSvcCopyToken(w http.ResponseWriter, r *http.Request) {
+	tokenRef := r.PathValue("tokenRef")
+
+	subject, ok := s.validateSvcRequest(w, r, tokenRef, "svc_copy")
+	if !ok {
+		return
+	}
+
+	var req copyTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		s.metrics.FailuresTotal.WithLabelValues("svc_copy", "validation").Inc()
+		adminRejectJSON(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.SourceRef == "" {
+		s.metrics.FailuresTotal.WithLabelValues("svc_copy", "validation").Inc()
+		adminRejectJSON(w, http.StatusBadRequest, "source_ref is required")
+		return
+	}
+	if _, ok := s.validateSvcRequest(w, r, req.SourceRef, "svc_copy"); !ok {
+		return
+	}
+
+	entry, err := s.store.FetchOne(r.Context(), req.SourceRef)
+	if err != nil {
+		if errors.Is(err, ErrTokenNotFound) {
+			s.metrics.FailuresTotal.WithLabelValues("svc_copy", "not_found").Inc()
+			adminRejectJSON(w, http.StatusNotFound, "source token not found")
+			return
+		}
+		s.logger.Error("svc token copy: fetch failed",
+			"source_ref", req.SourceRef,
+			"token_ref", tokenRef,
+			"error", err,
+		)
+		s.metrics.FailuresTotal.WithLabelValues("svc_copy", "fetch").Inc()
+		adminRejectJSON(w, http.StatusInternalServerError, "storage read failed")
+		return
+	}
+
+	version, err := s.store.UpsertToken(r.Context(), tokenRef, entry, TokenMetadata{UpdatedBy: subject})
+	if err != nil {
+		s.logger.Error("svc token copy: write failed",
+			"source_ref", req.SourceRef,
+			"token_ref", tokenRef,
+			"error", err,
+		)
+		s.metrics.FailuresTotal.WithLabelValues("svc_copy", "write").Inc()
+		adminRejectJSON(w, http.StatusInternalServerError, "storage write failed")
+		return
+	}
+
+	entry.Version = version
+	s.authSvc.LoadToken(tokenRef, entry)
+	s.metrics.CacheEntries.Set(float64(s.authSvc.TokenCount()))
+	s.coord.BroadcastTokenInvalidation([]string{tokenRef})
+	s.metrics.InvalidationBroadcasts.Inc()
+
+	s.logger.Info("svc token copied",
+		"source_ref", req.SourceRef,
+		"token_ref", tokenRef,
+		"caller", subject,
+		"source_ip", sourceIP(r),
+	)
+
+	s.metrics.RequestsTotal.WithLabelValues("svc_copy", "success").Inc()
 	respondJSON(w, http.StatusOK, tokenMutationResponse{
 		TokenRef: tokenRef,
 		Version:  version,

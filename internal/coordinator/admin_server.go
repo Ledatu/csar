@@ -125,6 +125,7 @@ func (s *AdminServer) registerRoutes(mux *http.ServeMux) {
 	// Service-facing routes: authenticated via X-Gateway-Subject (csar router).
 	if len(s.cfg.Svc.PrefixMap) > 0 {
 		mux.HandleFunc("PUT /svc/tokens/{tokenRef...}", s.handleSvcPutToken)
+		mux.HandleFunc("POST /svc/tokens/{tokenRef...}", s.handleSvcCopyToken)
 		mux.HandleFunc("DELETE /svc/tokens/{tokenRef...}", s.handleSvcDeleteToken)
 	}
 }
