@@ -238,6 +238,10 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 		r.setupCache(rt, fr, key, logger)
 	}
 
+	if fr.Route.CacheInvalidate != nil && fr.Route.CacheInvalidate.IsEnabled() {
+		r.setupCacheInvalidation(rt, fr, key, logger)
+	}
+
 	// Set up authz authorization if authz config is present.
 	if fr.Route.Authz != nil {
 		if r.authzClient == nil {
@@ -726,13 +730,40 @@ func (r *Router) setupTenant(rt *route, fr config.FlatRoute, key string, logger 
 
 // setupCache configures response caching for a route.
 func (r *Router) setupCache(rt *route, fr config.FlatRoute, key string, logger *slog.Logger) {
-	if r.responseCache == nil {
-		r.responseCache = cache.NewResponseCache(logger)
-	}
+	r.ensureResponseCache(logger)
 	cacheCfg := &cache.Config{
-		TTL:         fr.Route.Cache.TTL.Duration,
-		MaxEntries:  fr.Route.Cache.MaxEntries,
-		MaxBodySize: fr.Route.Cache.MaxBodySize,
+		RouteKey:             key,
+		Store:                fr.Route.Cache.Store,
+		KeyTemplate:          fr.Route.Cache.Key,
+		FailMode:             fr.Route.Cache.FailMode,
+		OperationTimeout:     fr.Route.Cache.OperationTimeout.Duration,
+		TTL:                  fr.Route.Cache.TTL.Duration,
+		TTLJitter:            fr.Route.Cache.TTLJitter,
+		KeyQuery:             buildCacheKeyQuery(fr.Route.Cache.KeyQuery),
+		StaleIfError:         fr.Route.Cache.StaleIfError.Duration,
+		StaleWhileRevalidate: fr.Route.Cache.StaleWhileRevalidate.Duration,
+		ContentTypes:         fr.Route.Cache.ContentTypes,
+		ResponseTTLRules:     buildResponseTTLRules(fr.Route.Cache.ResponseTTLRules),
+		ResponseTags:         buildResponseTags(fr.Route.Cache.ResponseTags),
+		Namespaces:           fr.Route.Cache.Namespaces,
+		Bypass:               buildCacheBypass(fr.Route.Cache.Bypass),
+		Coalesce:             buildCacheCoalesce(fr.Route.Cache.Coalesce),
+		MaxEntries:           fr.Route.Cache.MaxEntries,
+		MaxBodySize:          fr.Route.Cache.MaxBodySize,
+		Tags:                 fr.Route.Cache.Tags,
+		VaryHeaders:          fr.Route.Cache.VaryHeaders,
+		CacheStatuses:        fr.Route.Cache.CacheStatuses,
+	}
+	if len(fr.Route.Cache.TTLRules) > 0 {
+		cacheCfg.TTLRules = make([]cache.TTLRule, 0, len(fr.Route.Cache.TTLRules))
+		for _, rule := range fr.Route.Cache.TTLRules {
+			cacheCfg.TTLRules = append(cacheCfg.TTLRules, cache.TTLRule{
+				When: rule.When,
+				From: rule.From,
+				To:   rule.To,
+				TTL:  rule.TTL.Duration,
+			})
+		}
 	}
 	if len(fr.Route.Cache.Methods) > 0 {
 		cacheCfg.Methods = make(map[string]struct{}, len(fr.Route.Cache.Methods))
@@ -743,9 +774,110 @@ func (r *Router) setupCache(rt *route, fr config.FlatRoute, key string, logger *
 	rt.cacheConfig = cacheCfg
 	logger.Info("response caching enabled",
 		"route", key,
+		"store", cacheCfg.Store,
 		"ttl", cacheCfg.TTL,
 		"max_entries", cacheCfg.MaxEntries,
 	)
+}
+
+func (r *Router) setupCacheInvalidation(rt *route, fr config.FlatRoute, key string, logger *slog.Logger) {
+	r.ensureResponseCache(logger)
+	rt.cacheInvalidation = &cache.InvalidationConfig{
+		RouteKey:         key,
+		Store:            fr.Route.CacheInvalidate.Store,
+		OperationTimeout: fr.Route.CacheInvalidate.OperationTimeout.Duration,
+		Tags:             fr.Route.CacheInvalidate.Tags,
+		BumpNamespaces:   fr.Route.CacheInvalidate.BumpNamespaces,
+		Debounce:         fr.Route.CacheInvalidate.Debounce.Duration,
+		OnStatus:         fr.Route.CacheInvalidate.OnStatus,
+	}
+	logger.Info("response cache invalidation enabled",
+		"route", key,
+		"store", rt.cacheInvalidation.Store,
+		"tags", len(rt.cacheInvalidation.Tags),
+	)
+}
+
+func buildCacheKeyQuery(cfg *config.CacheKeyQueryConfig) *cache.KeyQueryConfig {
+	if cfg == nil {
+		return nil
+	}
+	return &cache.KeyQueryConfig{
+		Include:   append([]string(nil), cfg.Include...),
+		Exclude:   append([]string(nil), cfg.Exclude...),
+		Sort:      cfg.Sort,
+		DropEmpty: cfg.DropEmpty,
+	}
+}
+
+func buildResponseTTLRules(rules []config.CacheResponseTTLRule) []cache.ResponseTTLRule {
+	out := make([]cache.ResponseTTLRule, 0, len(rules))
+	for _, rule := range rules {
+		out = append(out, cache.ResponseTTLRule{
+			When:   rule.When,
+			Header: rule.Header,
+			Value:  rule.Value,
+			TTL:    rule.TTL.Duration,
+		})
+	}
+	return out
+}
+
+func buildResponseTags(tags []config.CacheResponseTag) []cache.ResponseTag {
+	out := make([]cache.ResponseTag, 0, len(tags))
+	for _, tag := range tags {
+		out = append(out, cache.ResponseTag{
+			Header: tag.Header,
+			Prefix: tag.Prefix,
+		})
+	}
+	return out
+}
+
+func buildCacheBypass(cfg *config.CacheBypassConfig) *cache.BypassConfig {
+	if cfg == nil {
+		return nil
+	}
+	out := &cache.BypassConfig{
+		Headers: make([]cache.BypassHeader, 0, len(cfg.Headers)),
+	}
+	for _, h := range cfg.Headers {
+		out.Headers = append(out.Headers, cache.BypassHeader{
+			Name:                h.Name,
+			Value:               h.Value,
+			RequireGatewayScope: h.RequireGatewayScope,
+		})
+	}
+	return out
+}
+
+func buildCacheCoalesce(cfg *config.CacheCoalesceConfig) *cache.CoalesceConfig {
+	if cfg == nil {
+		return nil
+	}
+	return &cache.CoalesceConfig{
+		Enabled:           cfg.Enabled,
+		Wait:              cfg.Wait.Duration,
+		WaitTimeoutStatus: cfg.WaitTimeoutStatus,
+	}
+}
+
+func (r *Router) ensureResponseCache(logger *slog.Logger) {
+	if r.responseCache != nil {
+		return
+	}
+	var opts []cache.Option
+	if r.metrics != nil {
+		opts = append(opts, cache.WithStatsRecorder(r.metrics))
+	}
+	if r.redisClient != nil {
+		keyPrefix := "csar:"
+		if r.cfg != nil && r.cfg.Redis != nil && r.cfg.Redis.KeyPrefix != "" {
+			keyPrefix = r.cfg.Redis.KeyPrefix
+		}
+		opts = append(opts, cache.WithRedisStore(cache.NewRedisStore(r.redisClient, keyPrefix)))
+	}
+	r.responseCache = cache.NewResponseCache(logger, opts...)
 }
 
 func buildSessionTransport(policy *config.BackendTLSPolicy) (*http.Transport, error) {

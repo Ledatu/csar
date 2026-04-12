@@ -3,6 +3,7 @@ module github.com/ledatu/csar
 go 1.25.0
 
 require (
+	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.96.4
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10

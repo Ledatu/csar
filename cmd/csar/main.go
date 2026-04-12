@@ -167,7 +167,7 @@ func run() error {
 	var routerOpts []router.Option
 	routerOpts = append(routerOpts, router.WithMetrics(m), router.WithTelemetry(tp), router.WithSSRFProtection(ssrfP), router.WithThrottleManager(sharedTM))
 
-	// --- Redis client for distributed throttling ---
+	// --- Redis client for distributed router policies (throttling/cache) ---
 	if cfg.Redis != nil && cfg.Redis.Address != "" {
 		redisClient := throttle.NewRedisClient(throttle.RedisConfig{
 			Address:   cfg.Redis.Address,
@@ -177,7 +177,7 @@ func run() error {
 		})
 		defer redisClient.Close()
 		routerOpts = append(routerOpts, router.WithRedisClient(redisClient))
-		logger.Info("Redis client for distributed throttling configured",
+		logger.Info("Redis client for distributed router policies configured",
 			"address", cfg.Redis.Address,
 			"db", cfg.Redis.DB,
 		)

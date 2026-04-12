@@ -76,6 +76,61 @@ func TestValidate_ValidCircuitBreakerRef(t *testing.T) {
 	}
 }
 
+func TestValidate_CacheRedisRequiresTopLevelRedis(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Paths: map[string]PathConfig{
+			"/analytics": {"get": RouteConfig{
+				Backend: BackendConfig{TargetURL: "http://localhost"},
+				Cache:   &CacheConfig{Store: "redis"},
+			}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() should fail when redis cache has no top-level redis config")
+	}
+}
+
+func TestValidate_AuthenticatedCacheRequiresAuthBoundary(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Paths: map[string]PathConfig{
+			"/analytics": {"get": RouteConfig{
+				Backend:      BackendConfig{TargetURL: "http://localhost"},
+				AuthValidate: &AuthValidateConfig{JWKSURL: "http://authn/.well-known/jwks.json"},
+				Cache:        &CacheConfig{Key: "analytics:{query.marketplace}"},
+			}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() should fail when authenticated cache key lacks tenant or subject")
+	}
+
+	cfg.Paths["/analytics"]["get"] = RouteConfig{
+		Backend:      BackendConfig{TargetURL: "http://localhost"},
+		AuthValidate: &AuthValidateConfig{JWKSURL: "http://authn/.well-known/jwks.json"},
+		Cache:        &CacheConfig{Key: "analytics:{tenant}:{query.marketplace}"},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error with tenant boundary: %v", err)
+	}
+}
+
+func TestValidate_CacheInvalidationRequiresTags(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Paths: map[string]PathConfig{
+			"/skus/{sku_id}": {"patch": RouteConfig{
+				Backend:         BackendConfig{TargetURL: "http://localhost"},
+				CacheInvalidate: &CacheInvalidationConfig{},
+			}},
+		},
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() should fail when cache invalidation has no tags")
+	}
+}
+
 func TestValidate_TLS_RequiresBothFiles(t *testing.T) {
 	cfg := &Config{
 		ListenAddr: ":8443",

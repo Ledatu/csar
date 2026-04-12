@@ -535,6 +535,10 @@ func (r *Router) upstreamHandler(rt *route) http.Handler {
 			handler = r.responseCache.Wrap(*rt.cacheConfig, handler)
 		}
 
+		if rt.cacheInvalidation != nil && r.responseCache != nil {
+			handler = r.responseCache.WrapInvalidation(*rt.cacheInvalidation, handler)
+		}
+
 		handler.ServeHTTP(w, req)
 	})
 	return r.wrapUpstreamWithAudit(rt, inner)

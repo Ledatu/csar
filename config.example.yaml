@@ -71,14 +71,71 @@ listen_addr: ":8080"
 #   #   key1: "passphrase1"
 #   #   key2: "passphrase2"
 
-# --- Redis (Distributed Rate Limiting) ---
-# Optional Redis backend for globally coordinated rate limiting across pods.
-# Required when any route uses traffic.backend: "redis".
+# --- Redis (Distributed Router Policies) ---
+# Optional Redis backend for globally coordinated rate limiting and response
+# caching across pods. Required when any route uses traffic.backend: "redis"
+# or x-csar-cache.store: "redis".
 # redis:
 #   address: "redis.internal:6379"
 #   password: ""                    # Redis AUTH password (optional)
 #   db: 0                           # Redis database number (default: 0)
-#   key_prefix: "csar:rl:"          # prefix for all rate limiting keys
+#   key_prefix: "csar:"             # prefix for Redis-backed router policy keys
+
+# --- Named Cache Policies ---
+# cache_policies:
+#   analytics-skus:
+#     store: "redis"
+#     fail_mode: "bypass"
+#     operation_timeout: "75ms"
+#     key: "analytics:skus:{tenant}"
+#     key_query:
+#       include: ["marketplace", "date_from", "date_to", "page", "limit"]
+#       exclude: ["utm_source", "cache_bust"]
+#       sort: true
+#       drop_empty: true
+#     ttl: "20m"
+#     ttl_jitter: "10%"
+#     stale_if_error: "1h"
+#     stale_while_revalidate: "2m"
+#     content_types: ["application/json"]
+#     ttl_rules:
+#       - when: "query.date_range_contains_today"
+#         from: "date_from"
+#         to: "date_to"
+#         ttl: "20m"
+#     response_ttl_rules:
+#       - when: "response.header_equals"
+#         header: "X-Data-Freshness"
+#         value: "final"
+#         ttl: "3h"
+#     response_tags:
+#       - header: "X-CSAR-Cache-Tags"
+#         prefix: "analytics:{tenant}:"
+#     namespaces:
+#       - "analytics:skus:{tenant}"
+#     bypass:
+#       headers:
+#         - name: "X-CSAR-Cache-Bypass"
+#           value: "true"
+#           require_gateway_scope: "cache:bypass"
+#     coalesce:
+#       enabled: true
+#       wait: "30s"
+#       wait_timeout_status: 503
+#     tags:
+#       - "analytics:skus:{tenant}"
+#       - "analytics:skus:{tenant}:{query.marketplace}"
+#     max_body_size: 1048576
+#     methods: ["GET", "HEAD"]
+#
+# cache_invalidation_policies:
+#   analytics-skus-tenant:
+#     on_status: ["2xx"]
+#     tags:
+#       - "analytics:skus:{tenant}"
+#     bump_namespaces:
+#       - "analytics:skus:{tenant}"
+#     debounce: "2s"
 
 coordinator:
   enabled: false
@@ -542,16 +599,25 @@ paths:
   #       max_age: 86400                   # 24 hours
 
   # --- Response Caching ---
-  # RFC-compliant in-memory response caching for idempotent routes.
-  # /api/v1/catalog:
+  # Fail-open response caching for idempotent routes. Redis-backed routes bypass
+  # cache when Redis is unavailable instead of failing the proxied request.
+  # /analytics/skus:
   #   get:
   #     x-csar-backend:
-  #       target_url: "https://catalog-api.internal"
+  #       target_url: "https://analytics-api.internal"
   #     x-csar-cache:
-  #       ttl: "5m"                         # default TTL (overridden by Cache-Control max-age)
-  #       max_entries: 1000                 # LRU cache capacity
-  #       max_body_size: 1048576            # max response size to cache (1MB)
-  #       methods: ["GET", "HEAD"]          # HTTP methods to cache
+  #       use: "analytics-skus"             # or x-csar-cache: "analytics-skus"
+  #       tags:
+  #         - "analytics:skus:{tenant}:route-specific"  # additive inline tag
+  #
+  # /skus/{sku_id}:
+  #   patch:
+  #     x-csar-backend:
+  #       target_url: "https://catalog-api.internal"
+  #     x-csar-cache-invalidate:
+  #       use: "analytics-skus-tenant"      # or x-csar-cache-invalidate: "analytics-skus-tenant"
+  #       tags:
+  #         - "analytics:skus:{tenant}:{path.sku_id}"  # additive inline tag
 
   # --- Policy Reference Syntax (string shorthand) ---
   # Reference a named throttling policy by name instead of inline config:

@@ -54,6 +54,7 @@ type route struct {
 	tenantConfig        *tenant.Config             // nil if no multi-tenant routing
 	corsConfig          *config.CORSConfig         // nil if no CORS configuration
 	cacheConfig         *cache.Config              // nil if no response caching
+	cacheInvalidation   *cache.InvalidationConfig  // nil if no cache invalidation
 	authzConfig         *config.AuthzRouteConfig   // nil if no authz authorization
 	auditEnabled        bool                       // resolved from x-csar-audit + method default
 	excludeIPs          []*net.IPNet               // IPs/CIDRs that bypass this route's throttle

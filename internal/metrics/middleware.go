@@ -96,6 +96,11 @@ func (m *Metrics) RecordKMSDecrypt(keyID string, duration time.Duration, cacheHi
 	}
 }
 
+// RecordResponseCache records a response-cache event.
+func (m *Metrics) RecordResponseCache(route, event string) {
+	m.ResponseCacheEvents.WithLabelValues(route, event).Inc()
+}
+
 // responseRecorder captures the HTTP status code from the response.
 type responseRecorder struct {
 	http.ResponseWriter

@@ -50,6 +50,16 @@
       "description": "Named reusable CORS configurations. Routes reference them via x-csar-cors: \"policy_name\".",
       "additionalProperties": { "$ref": "#/$defs/CORSConfigObject" }
     },
+    "cache_policies": {
+      "type": "object",
+      "description": "Named reusable response cache configurations. Routes reference them via x-csar-cache: \"policy_name\" or x-csar-cache.use.",
+      "additionalProperties": { "$ref": "#/$defs/CacheConfigObject" }
+    },
+    "cache_invalidation_policies": {
+      "type": "object",
+      "description": "Named reusable cache invalidation configurations. Routes reference them via x-csar-cache-invalidate: \"policy_name\" or x-csar-cache-invalidate.use.",
+      "additionalProperties": { "$ref": "#/$defs/CacheInvalidationConfigObject" }
+    },
     "retry_policies": {
       "type": "object",
       "description": "Named reusable retry configurations. Routes reference them via x-csar-retry: \"policy_name\".",
@@ -866,19 +876,115 @@
       }
     },
     "CacheConfig": {
+      "description": "HTTP response caching. Supports a policy name (string) or an inline object.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Named cache policy reference."
+        },
+        {
+          "$ref": "#/$defs/CacheConfigObject"
+        }
+      ]
+    },
+    "CacheConfigObject": {
       "type": "object",
-      "description": "HTTP response caching for idempotent requests. Respects Cache-Control and ETag.",
+      "description": "HTTP response caching for idempotent requests. Supports memory or Redis stores, dynamic keys, TTL rules, tags, and fail-open behavior.",
       "additionalProperties": false,
       "properties": {
+        "use": {
+          "type": "string",
+          "description": "Reference to a cache_policies entry. Scalar inline fields override policy values; list fields are additive."
+        },
         "enabled": {
           "type": "boolean",
           "description": "Toggle caching without removing the config.",
           "default": true
         },
+        "store": {
+          "type": "string",
+          "enum": ["memory", "redis"],
+          "description": "Cache backend.",
+          "default": "memory"
+        },
+        "key": {
+          "type": "string",
+          "description": "Cache key template. Supports {method}, {path}, {raw_path}, {query.name}, {path.name}, {header.Name}, {tenant}, and {subject}."
+        },
+        "fail_mode": {
+          "type": "string",
+          "enum": ["bypass"],
+          "description": "Failure behavior when the cache store is unavailable.",
+          "default": "bypass"
+        },
+        "operation_timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "Maximum time spent on each cache store operation.",
+          "default": "75ms"
+        },
         "ttl": {
           "$ref": "#/$defs/Duration",
           "description": "Default cache TTL if no Cache-Control header is present.",
           "default": "5m"
+        },
+        "ttl_jitter": {
+          "type": "string",
+          "description": "Maximum bounded TTL reduction as a duration or percentage. Jitter never extends TTL."
+        },
+        "ttl_rules": {
+          "type": "array",
+          "description": "Ordered conditional TTL overrides.",
+          "items": { "$ref": "#/$defs/CacheTTLRule" }
+        },
+        "key_query": {
+          "$ref": "#/$defs/CacheKeyQuery",
+          "description": "Normalized query-string component included in the cache key."
+        },
+        "stale_if_error": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long expired entries may be served when an upstream refresh fails."
+        },
+        "stale_while_revalidate": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long expired entries may be served while one refresh is in progress."
+        },
+        "content_types": {
+          "type": "array",
+          "description": "Response Content-Type values eligible for cache writes.",
+          "items": { "type": "string" }
+        },
+        "response_ttl_rules": {
+          "type": "array",
+          "description": "Ordered conditional TTL overrides based on trusted upstream response headers.",
+          "items": { "$ref": "#/$defs/CacheResponseTTLRule" }
+        },
+        "response_tags": {
+          "type": "array",
+          "description": "Cache tags derived from trusted upstream response headers with CSAR-controlled prefixes.",
+          "items": { "$ref": "#/$defs/CacheResponseTag" }
+        },
+        "namespaces": {
+          "type": "array",
+          "description": "Namespace templates whose current versions are included in cache keys.",
+          "items": { "type": "string" }
+        },
+        "bypass": {
+          "$ref": "#/$defs/CacheBypass",
+          "description": "Authorized cache bypass controls."
+        },
+        "coalesce": {
+          "$ref": "#/$defs/CacheCoalesce",
+          "description": "Request coalescing settings for cache misses."
+        },
+        "tags": {
+          "type": "array",
+          "description": "Dynamic cache invalidation tags attached to stored responses.",
+          "items": { "type": "string" }
+        },
+        "vary_headers": {
+          "type": "array",
+          "description": "Explicit request headers included in the cache key.",
+          "items": { "type": "string" }
         },
         "max_entries": {
           "type": "integer",
@@ -895,6 +1001,218 @@
           "description": "HTTP methods to cache.",
           "items": { "type": "string" },
           "default": ["GET", "HEAD"]
+        },
+        "cache_statuses": {
+          "type": "array",
+          "description": "Upstream response statuses eligible for caching. Supports exact statuses like \"200\" and classes like \"2xx\".",
+          "items": { "type": "string" },
+          "default": ["200"]
+        }
+      }
+    },
+    "CacheTTLRule": {
+      "type": "object",
+      "description": "Conditional TTL override for response caching.",
+      "additionalProperties": false,
+      "required": ["when", "ttl"],
+      "properties": {
+        "when": {
+          "type": "string",
+          "enum": ["query.date_range_contains_today"],
+          "description": "Condition for the TTL override."
+        },
+        "from": {
+          "type": "string",
+          "description": "Query parameter containing the start date.",
+          "default": "date_from"
+        },
+        "to": {
+          "type": "string",
+          "description": "Query parameter containing the end date.",
+          "default": "date_to"
+        },
+        "ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "TTL applied when the rule matches."
+        }
+      }
+    },
+    "CacheKeyQuery": {
+      "type": "object",
+      "description": "Normalized query-string cache-key controls.",
+      "additionalProperties": false,
+      "properties": {
+        "include": {
+          "type": "array",
+          "description": "Query parameters included in the normalized key component. Empty means include all except excluded names.",
+          "items": { "type": "string" }
+        },
+        "exclude": {
+          "type": "array",
+          "description": "Query parameters ignored when building the normalized key component.",
+          "items": { "type": "string" }
+        },
+        "sort": {
+          "type": "boolean",
+          "description": "Sort query parameter names and repeated values before encoding.",
+          "default": false
+        },
+        "drop_empty": {
+          "type": "boolean",
+          "description": "Drop empty query parameter values from the normalized component.",
+          "default": false
+        }
+      }
+    },
+    "CacheResponseTTLRule": {
+      "type": "object",
+      "description": "Conditional TTL override based on trusted upstream response metadata.",
+      "additionalProperties": false,
+      "required": ["when", "header", "ttl"],
+      "properties": {
+        "when": {
+          "type": "string",
+          "enum": ["response.header_equals"],
+          "description": "Condition for the TTL override."
+        },
+        "header": {
+          "type": "string",
+          "description": "Upstream response header to inspect."
+        },
+        "value": {
+          "type": "string",
+          "description": "Expected header value."
+        },
+        "ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "TTL applied when the rule matches."
+        }
+      }
+    },
+    "CacheResponseTag": {
+      "type": "object",
+      "description": "Cache tag derivation from a trusted upstream response header.",
+      "additionalProperties": false,
+      "required": ["header"],
+      "properties": {
+        "header": {
+          "type": "string",
+          "description": "Upstream response header containing comma-separated tag suffixes or values."
+        },
+        "prefix": {
+          "type": "string",
+          "description": "CSAR-controlled tag prefix template. Supports cache placeholders such as {tenant}, {subject}, {path.name}, and {query.name}."
+        }
+      }
+    },
+    "CacheBypass": {
+      "type": "object",
+      "description": "Authorized cache bypass request headers.",
+      "additionalProperties": false,
+      "properties": {
+        "headers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/CacheBypassHeader" }
+        }
+      }
+    },
+    "CacheBypassHeader": {
+      "type": "object",
+      "description": "One authorized cache bypass request header.",
+      "additionalProperties": false,
+      "required": ["name", "require_gateway_scope"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Request header name."
+        },
+        "value": {
+          "type": "string",
+          "description": "Optional exact header value required for bypass."
+        },
+        "require_gateway_scope": {
+          "type": "string",
+          "description": "Trusted gateway scope required before this bypass is honored."
+        }
+      }
+    },
+    "CacheCoalesce": {
+      "type": "object",
+      "description": "Per-key cache miss coalescing settings.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable request coalescing.",
+          "default": false
+        },
+        "wait": {
+          "$ref": "#/$defs/Duration",
+          "description": "Maximum follower wait for the leader response.",
+          "default": "30s"
+        },
+        "wait_timeout_status": {
+          "type": "integer",
+          "description": "HTTP status returned to followers when the wait expires.",
+          "default": 503
+        }
+      }
+    },
+    "CacheInvalidationConfig": {
+      "description": "Tag-based response cache invalidation. Supports a policy name (string) or an inline object.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "Named cache invalidation policy reference."
+        },
+        {
+          "$ref": "#/$defs/CacheInvalidationConfigObject"
+        }
+      ]
+    },
+    "CacheInvalidationConfigObject": {
+      "type": "object",
+      "description": "Tag-based response cache invalidation after successful upstream mutation responses.",
+      "additionalProperties": false,
+      "properties": {
+        "use": {
+          "type": "string",
+          "description": "Reference to a cache_invalidation_policies entry. Inline tags and status patterns are additive."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Toggle invalidation without removing the config.",
+          "default": true
+        },
+        "store": {
+          "type": "string",
+          "enum": ["memory", "redis"],
+          "description": "Cache store to invalidate. Omit to invalidate all configured stores."
+        },
+        "operation_timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "Maximum time spent on each invalidation operation.",
+          "default": "75ms"
+        },
+        "tags": {
+          "type": "array",
+          "description": "Dynamic cache invalidation tag templates.",
+          "items": { "type": "string" }
+        },
+        "bump_namespaces": {
+          "type": "array",
+          "description": "Namespace templates whose versions are incremented after matching mutation responses.",
+          "items": { "type": "string" }
+        },
+        "debounce": {
+          "$ref": "#/$defs/Duration",
+          "description": "Window for batching repeated invalidations of the same rendered tag or namespace."
+        },
+        "on_status": {
+          "type": "array",
+          "description": "Upstream response statuses that trigger invalidation. Supports exact statuses like \"200\" and classes like \"2xx\".",
+          "items": { "type": "string" },
+          "default": ["2xx"]
         }
       }
     },
@@ -1217,6 +1535,7 @@
         "x-csar-tenant": { "$ref": "#/$defs/TenantConfig" },
         "x-csar-cors": { "$ref": "#/$defs/CORSConfig" },
         "x-csar-cache": { "$ref": "#/$defs/CacheConfig" },
+        "x-csar-cache-invalidate": { "$ref": "#/$defs/CacheInvalidationConfig" },
         "max_response_size": {
           "type": "integer",
           "description": "Maximum response body size (bytes) for DLP/retry buffering. Prevents DoS. Default: 0 (unlimited).",

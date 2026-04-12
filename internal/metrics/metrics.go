@@ -57,6 +57,11 @@ type Metrics struct {
 	// KMSCacheMisses counts cache misses for KMS decryption.
 	KMSCacheMisses prometheus.Counter
 
+	// --- Response cache metrics ---
+
+	// ResponseCacheEvents counts response-cache outcomes by route and event.
+	ResponseCacheEvents *prometheus.CounterVec
+
 	// --- Coordinator metrics ---
 
 	// ConnectedRouters is a gauge of currently connected routers.
@@ -197,6 +202,14 @@ func New(registry *prometheus.Registry) *Metrics {
 			Name:      "cache_misses_total",
 			Help:      "Number of KMS cache misses.",
 		}),
+
+		// --- Response cache ---
+		ResponseCacheEvents: factory.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "csar",
+			Subsystem: "response_cache",
+			Name:      "events_total",
+			Help:      "Response cache events by route and event.",
+		}, []string{"route", "event"}),
 
 		// --- Coordinator ---
 		ConnectedRouters: factory.NewGauge(prometheus.GaugeOpts{

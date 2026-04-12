@@ -13,6 +13,8 @@ func (c *Config) resolveAndValidate() error {
 		{"security profiles", c.ResolveSecurityProfiles},
 		{"throttle policies", c.ResolveThrottlePolicies},
 		{"CORS policies", c.ResolveCORSPolicies},
+		{"cache policies", c.ResolveCachePolicies},
+		{"cache invalidation policies", c.ResolveCacheInvalidationPolicies},
 		{"retry policies", c.ResolveRetryPolicies},
 		{"redact policies", c.ResolveRedactPolicies},
 		{"auth-validate policies", c.ResolveAuthValidatePolicies},

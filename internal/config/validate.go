@@ -3,7 +3,9 @@ package config
 import (
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Validate checks the configuration for required fields and consistency.
@@ -300,9 +302,131 @@ func (c *Config) Validate() error {
 			}
 
 			// Validate cache config
-			if route.Cache != nil && route.Cache.IsEnabled() {
+			if route.Cache != nil && route.Cache.IsEnabled() && route.Cache.Use == "" {
+				switch route.Cache.Store {
+				case "", "memory", "redis":
+					// valid
+				default:
+					return fmt.Errorf("path %s method %s: x-csar-cache.store must be \"memory\" or \"redis\", got %q",
+						path, method, route.Cache.Store)
+				}
+				if route.Cache.Store == "redis" && c.Redis == nil {
+					return fmt.Errorf("path %s method %s: x-csar-cache.store is \"redis\" but no top-level redis config is provided",
+						path, method)
+				}
+				if route.Cache.Store == "redis" && c.Redis != nil && c.Redis.Address == "" {
+					return fmt.Errorf("path %s method %s: x-csar-cache.store is \"redis\" but redis.address is empty",
+						path, method)
+				}
+				switch route.Cache.FailMode {
+				case "", "bypass":
+					// valid
+				default:
+					return fmt.Errorf("path %s method %s: x-csar-cache.fail_mode only supports \"bypass\", got %q",
+						path, method, route.Cache.FailMode)
+				}
 				if route.Cache.MaxEntries < 0 {
 					return fmt.Errorf("path %s method %s: x-csar-cache.max_entries must be >= 0", path, method)
+				}
+				if route.Cache.MaxBodySize < 0 {
+					return fmt.Errorf("path %s method %s: x-csar-cache.max_body_size must be >= 0", path, method)
+				}
+				if err := validateCacheTTLJitter(route.Cache.TTLJitter); err != nil {
+					return fmt.Errorf("path %s method %s: x-csar-cache.ttl_jitter: %w", path, method, err)
+				}
+				if route.Cache.StaleIfError.Duration < 0 {
+					return fmt.Errorf("path %s method %s: x-csar-cache.stale_if_error must be >= 0", path, method)
+				}
+				if route.Cache.StaleWhileRevalidate.Duration < 0 {
+					return fmt.Errorf("path %s method %s: x-csar-cache.stale_while_revalidate must be >= 0", path, method)
+				}
+				for _, rule := range route.Cache.TTLRules {
+					if rule.When != "query.date_range_contains_today" {
+						return fmt.Errorf("path %s method %s: x-csar-cache.ttl_rules.when unsupported value %q",
+							path, method, rule.When)
+					}
+					if rule.TTL.Duration <= 0 {
+						return fmt.Errorf("path %s method %s: x-csar-cache.ttl_rules.ttl must be greater than zero",
+							path, method)
+					}
+				}
+				for _, rule := range route.Cache.ResponseTTLRules {
+					if rule.When != "response.header_equals" {
+						return fmt.Errorf("path %s method %s: x-csar-cache.response_ttl_rules.when unsupported value %q",
+							path, method, rule.When)
+					}
+					if strings.TrimSpace(rule.Header) == "" {
+						return fmt.Errorf("path %s method %s: x-csar-cache.response_ttl_rules.header is required",
+							path, method)
+					}
+					if rule.TTL.Duration <= 0 {
+						return fmt.Errorf("path %s method %s: x-csar-cache.response_ttl_rules.ttl must be greater than zero",
+							path, method)
+					}
+				}
+				for _, tag := range route.Cache.ResponseTags {
+					if strings.TrimSpace(tag.Header) == "" {
+						return fmt.Errorf("path %s method %s: x-csar-cache.response_tags.header is required",
+							path, method)
+					}
+				}
+				if route.Cache.Bypass != nil {
+					for _, h := range route.Cache.Bypass.Headers {
+						if strings.TrimSpace(h.Name) == "" {
+							return fmt.Errorf("path %s method %s: x-csar-cache.bypass.headers.name is required",
+								path, method)
+						}
+						if strings.TrimSpace(h.RequireGatewayScope) == "" {
+							return fmt.Errorf("path %s method %s: x-csar-cache.bypass.headers.require_gateway_scope is required",
+								path, method)
+						}
+					}
+				}
+				if route.Cache.Coalesce != nil {
+					if route.Cache.Coalesce.Wait.Duration < 0 {
+						return fmt.Errorf("path %s method %s: x-csar-cache.coalesce.wait must be >= 0", path, method)
+					}
+					if route.Cache.Coalesce.WaitTimeoutStatus != 0 && !validHTTPStatus(route.Cache.Coalesce.WaitTimeoutStatus) {
+						return fmt.Errorf("path %s method %s: x-csar-cache.coalesce.wait_timeout_status contains invalid status %d",
+							path, method, route.Cache.Coalesce.WaitTimeoutStatus)
+					}
+				}
+				for _, status := range route.Cache.CacheStatuses {
+					if !validStatusPattern(status) {
+						return fmt.Errorf("path %s method %s: x-csar-cache.cache_statuses contains invalid status %q",
+							path, method, status)
+					}
+				}
+				if (route.AuthValidate != nil || route.Authz != nil) && !cacheHasAuthBoundary(route.Cache) {
+					return fmt.Errorf("path %s method %s: authenticated x-csar-cache routes must include {tenant} or {subject} in key or tags",
+						path, method)
+				}
+			}
+
+			if route.CacheInvalidate != nil && route.CacheInvalidate.IsEnabled() && route.CacheInvalidate.Use == "" {
+				switch route.CacheInvalidate.Store {
+				case "", "memory", "redis":
+					// valid
+				default:
+					return fmt.Errorf("path %s method %s: x-csar-cache-invalidate.store must be \"memory\", \"redis\", or empty, got %q",
+						path, method, route.CacheInvalidate.Store)
+				}
+				if route.CacheInvalidate.Store == "redis" && c.Redis == nil {
+					return fmt.Errorf("path %s method %s: x-csar-cache-invalidate.store is \"redis\" but no top-level redis config is provided",
+						path, method)
+				}
+				if len(route.CacheInvalidate.Tags) == 0 && len(route.CacheInvalidate.BumpNamespaces) == 0 {
+					return fmt.Errorf("path %s method %s: x-csar-cache-invalidate.tags or bump_namespaces must contain at least one entry",
+						path, method)
+				}
+				if route.CacheInvalidate.Debounce.Duration < 0 {
+					return fmt.Errorf("path %s method %s: x-csar-cache-invalidate.debounce must be >= 0", path, method)
+				}
+				for _, status := range route.CacheInvalidate.OnStatus {
+					if !validStatusPattern(status) {
+						return fmt.Errorf("path %s method %s: x-csar-cache-invalidate.on_status contains invalid status %q",
+							path, method, status)
+					}
 				}
 			}
 
@@ -355,6 +479,18 @@ func (c *Config) Validate() error {
 			if route.CORS != nil && route.CORS.Use != "" {
 				return fmt.Errorf("path %s method %s: x-csar-cors has unresolved policy reference %q — "+
 					"call ResolveCORSPolicies() before Validate()", path, method, route.CORS.Use)
+			}
+
+			// Validate unresolved cache policy references.
+			if route.Cache != nil && route.Cache.Use != "" {
+				return fmt.Errorf("path %s method %s: x-csar-cache has unresolved policy reference %q — "+
+					"call ResolveCachePolicies() before Validate()", path, method, route.Cache.Use)
+			}
+
+			// Validate unresolved cache invalidation policy references.
+			if route.CacheInvalidate != nil && route.CacheInvalidate.Use != "" {
+				return fmt.Errorf("path %s method %s: x-csar-cache-invalidate has unresolved policy reference %q — "+
+					"call ResolveCacheInvalidationPolicies() before Validate()", path, method, route.CacheInvalidate.Use)
 			}
 
 			// Validate unresolved retry policy references.
@@ -473,4 +609,53 @@ func validateCIDROrIP(s string) error {
 		return fmt.Errorf("invalid IP address %q", s)
 	}
 	return nil
+}
+
+func validStatusPattern(s string) bool {
+	s = strings.TrimSpace(strings.ToLower(s))
+	switch s {
+	case "2xx", "3xx":
+		return true
+	}
+	code, err := strconv.Atoi(s)
+	return err == nil && validHTTPStatus(code)
+}
+
+func validHTTPStatus(code int) bool {
+	return code >= 100 && code <= 599
+}
+
+func validateCacheTTLJitter(spec string) error {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return nil
+	}
+	if strings.HasSuffix(spec, "%") {
+		pctRaw := strings.TrimSpace(strings.TrimSuffix(spec, "%"))
+		pct, err := strconv.ParseFloat(pctRaw, 64)
+		if err != nil || pct < 0 {
+			return fmt.Errorf("must be a non-negative percentage or duration")
+		}
+		return nil
+	}
+	d, err := time.ParseDuration(spec)
+	if err != nil || d < 0 {
+		return fmt.Errorf("must be a non-negative percentage or duration")
+	}
+	return nil
+}
+
+func cacheHasAuthBoundary(cc *CacheConfig) bool {
+	if cc == nil {
+		return false
+	}
+	templates := []string{cc.Key}
+	templates = append(templates, cc.Tags...)
+	templates = append(templates, cc.Namespaces...)
+	for _, tmpl := range templates {
+		if strings.Contains(tmpl, "{tenant}") || strings.Contains(tmpl, "{subject}") {
+			return true
+		}
+	}
+	return false
 }

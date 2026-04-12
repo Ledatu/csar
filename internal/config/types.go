@@ -108,9 +108,9 @@ type Config struct {
 	// Coordinator settings for the control plane connection.
 	Coordinator CoordinatorConfig `yaml:"coordinator" json:"coordinator"`
 
-	// Redis configures an optional Redis backend for distributed rate limiting.
-	// When set, routes with traffic.backend = "redis" use this connection
-	// for globally coordinated rate limiting across all CSAR pods.
+	// Redis configures an optional Redis backend for distributed router policies.
+	// When set, Redis-backed throttling and response caching use this connection
+	// for globally coordinated state across all CSAR pods.
 	Redis *RedisConfig `yaml:"redis,omitempty" json:"redis,omitempty"`
 
 	// SecurityProfiles defines named, reusable security configurations.
@@ -128,6 +128,14 @@ type Config struct {
 	// CORSPolicies defines named, reusable CORS configurations.
 	// Routes reference them via x-csar-cors: "policy_name".
 	CORSPolicies map[string]CORSConfig `yaml:"cors_policies,omitempty" json:"cors_policies,omitempty"`
+
+	// CachePolicies defines named, reusable response cache configurations.
+	// Routes reference them via x-csar-cache: "policy_name" or x-csar-cache.use.
+	CachePolicies map[string]CacheConfig `yaml:"cache_policies,omitempty" json:"cache_policies,omitempty"`
+
+	// CacheInvalidationPolicies defines named, reusable cache invalidation configurations.
+	// Routes reference them via x-csar-cache-invalidate: "policy_name" or x-csar-cache-invalidate.use.
+	CacheInvalidationPolicies map[string]CacheInvalidationConfig `yaml:"cache_invalidation_policies,omitempty" json:"cache_invalidation_policies,omitempty"`
 
 	// RetryPolicies defines named, reusable retry configurations.
 	// Routes reference them via x-csar-retry: "policy_name".
@@ -290,6 +298,9 @@ type RouteConfig struct {
 
 	// Cache configures HTTP response caching for this route.
 	Cache *CacheConfig `yaml:"x-csar-cache,omitempty" json:"x-csar-cache,omitempty"`
+
+	// CacheInvalidate configures cache invalidation after successful mutation responses.
+	CacheInvalidate *CacheInvalidationConfig `yaml:"x-csar-cache-invalidate,omitempty" json:"x-csar-cache-invalidate,omitempty"`
 
 	// MaxResponseSize limits the maximum response body size in bytes for this route.
 	// If the upstream response exceeds this, it is truncated and an error is returned.
@@ -1043,13 +1054,70 @@ func (cc *CORSConfig) UnmarshalYAML(value *yaml.Node) error {
 // CacheConfig configures HTTP response caching for a route.
 // Caches responses from idempotent methods respecting Cache-Control / ETag.
 type CacheConfig struct {
+	// Use is an optional reference to a named cache_policies entry.
+	Use string `yaml:"use,omitempty" json:"use,omitempty"`
+
 	// Enabled allows disabling caching without removing the config.
 	// Default: true (if the block is present, caching is on).
 	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
 
+	// Store selects the cache backend: "memory" (default) or "redis".
+	Store string `yaml:"store,omitempty" json:"store,omitempty"`
+
+	// Key is a dynamic cache-key template. Supports {method}, {path},
+	// {raw_path}, {query.*}, {path.*}, {header.*}, {tenant}, and {subject}.
+	Key string `yaml:"key,omitempty" json:"key,omitempty"`
+
+	// FailMode controls cache store failure behavior. Only "bypass" is supported.
+	// Default: "bypass".
+	FailMode string `yaml:"fail_mode,omitempty" json:"fail_mode,omitempty"`
+
+	// OperationTimeout bounds cache store operations. Default: "75ms".
+	OperationTimeout Duration `yaml:"operation_timeout,omitempty" json:"operation_timeout,omitempty"`
+
 	// TTL is the default cache TTL if no Cache-Control header is present.
 	// Default: "5m".
 	TTL Duration `yaml:"ttl,omitempty" json:"ttl,omitempty"`
+
+	// TTLJitter reduces the selected TTL by a bounded amount to avoid synchronized expiry.
+	// Supports a duration ("5m") or percentage ("10%"). Jitter never extends TTL.
+	TTLJitter string `yaml:"ttl_jitter,omitempty" json:"ttl_jitter,omitempty"`
+
+	// TTLRules conditionally override TTL for specific request patterns.
+	TTLRules []CacheTTLRule `yaml:"ttl_rules,omitempty" json:"ttl_rules,omitempty"`
+
+	// KeyQuery adds a normalized query-string component to the cache key.
+	KeyQuery *CacheKeyQueryConfig `yaml:"key_query,omitempty" json:"key_query,omitempty"`
+
+	// StaleIfError serves expired entries for this duration when upstream refresh fails.
+	StaleIfError Duration `yaml:"stale_if_error,omitempty" json:"stale_if_error,omitempty"`
+
+	// StaleWhileRevalidate serves expired entries for this duration while refreshing.
+	StaleWhileRevalidate Duration `yaml:"stale_while_revalidate,omitempty" json:"stale_while_revalidate,omitempty"`
+
+	// ContentTypes limits cache writes to matching response Content-Type values.
+	ContentTypes []string `yaml:"content_types,omitempty" json:"content_types,omitempty"`
+
+	// ResponseTTLRules conditionally override TTL based on upstream response headers.
+	ResponseTTLRules []CacheResponseTTLRule `yaml:"response_ttl_rules,omitempty" json:"response_ttl_rules,omitempty"`
+
+	// ResponseTags adds tags derived from trusted upstream response headers.
+	ResponseTags []CacheResponseTag `yaml:"response_tags,omitempty" json:"response_tags,omitempty"`
+
+	// Namespaces are dynamic namespace templates. Their versions are included in cache keys.
+	Namespaces []string `yaml:"namespaces,omitempty" json:"namespaces,omitempty"`
+
+	// Bypass configures authorized cache bypass headers.
+	Bypass *CacheBypassConfig `yaml:"bypass,omitempty" json:"bypass,omitempty"`
+
+	// Coalesce configures request coalescing on cache misses.
+	Coalesce *CacheCoalesceConfig `yaml:"coalesce,omitempty" json:"coalesce,omitempty"`
+
+	// Tags are dynamic invalidation tags attached to stored responses.
+	Tags []string `yaml:"tags,omitempty" json:"tags,omitempty"`
+
+	// VaryHeaders is the explicit set of request headers included in the cache key.
+	VaryHeaders []string `yaml:"vary_headers,omitempty" json:"vary_headers,omitempty"`
 
 	// MaxEntries is the maximum number of cached responses.
 	// Default: 1000. Uses LRU eviction.
@@ -1062,6 +1130,25 @@ type CacheConfig struct {
 	// Methods is the set of HTTP methods to cache.
 	// Default: ["GET", "HEAD"].
 	Methods []string `yaml:"methods,omitempty" json:"methods,omitempty"`
+
+	// CacheStatuses is the set of upstream response statuses eligible for caching.
+	// Supports exact statuses ("200") and classes ("2xx"). Default: ["200"].
+	CacheStatuses []string `yaml:"cache_statuses,omitempty" json:"cache_statuses,omitempty"`
+}
+
+// UnmarshalYAML handles bare string (policy reference) and inline object syntax for CacheConfig.
+func (cc *CacheConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		cc.Use = value.Value
+		return nil
+	}
+	type cacheAlias CacheConfig
+	var alias cacheAlias
+	if err := value.Decode(&alias); err != nil {
+		return err
+	}
+	*cc = CacheConfig(alias)
+	return nil
 }
 
 // IsEnabled returns true if caching is active.
@@ -1070,6 +1157,114 @@ func (cc *CacheConfig) IsEnabled() bool {
 		return true
 	}
 	return *cc.Enabled
+}
+
+// CacheTTLRule conditionally overrides cache TTL.
+type CacheTTLRule struct {
+	// When is the supported condition. Currently: "query.date_range_contains_today".
+	When string `yaml:"when" json:"when"`
+
+	// From is the query parameter containing the start date. Default: "date_from".
+	From string `yaml:"from,omitempty" json:"from,omitempty"`
+
+	// To is the query parameter containing the end date. Default: "date_to".
+	To string `yaml:"to,omitempty" json:"to,omitempty"`
+
+	// TTL is the TTL used when the rule matches.
+	TTL Duration `yaml:"ttl" json:"ttl"`
+}
+
+// CacheKeyQueryConfig configures normalized query params appended to the cache key.
+type CacheKeyQueryConfig struct {
+	Include   []string `yaml:"include,omitempty" json:"include,omitempty"`
+	Exclude   []string `yaml:"exclude,omitempty" json:"exclude,omitempty"`
+	Sort      bool     `yaml:"sort,omitempty" json:"sort,omitempty"`
+	DropEmpty bool     `yaml:"drop_empty,omitempty" json:"drop_empty,omitempty"`
+}
+
+// CacheResponseTTLRule conditionally overrides TTL based on upstream response metadata.
+type CacheResponseTTLRule struct {
+	When   string   `yaml:"when" json:"when"`
+	Header string   `yaml:"header,omitempty" json:"header,omitempty"`
+	Value  string   `yaml:"value,omitempty" json:"value,omitempty"`
+	TTL    Duration `yaml:"ttl" json:"ttl"`
+}
+
+// CacheResponseTag derives cache tags from upstream response headers.
+type CacheResponseTag struct {
+	Header string `yaml:"header" json:"header"`
+	Prefix string `yaml:"prefix,omitempty" json:"prefix,omitempty"`
+}
+
+// CacheBypassConfig configures authorized cache bypass controls.
+type CacheBypassConfig struct {
+	Headers []CacheBypassHeader `yaml:"headers,omitempty" json:"headers,omitempty"`
+}
+
+// CacheBypassHeader configures one cache-bypass request header.
+type CacheBypassHeader struct {
+	Name                string `yaml:"name" json:"name"`
+	Value               string `yaml:"value,omitempty" json:"value,omitempty"`
+	RequireGatewayScope string `yaml:"require_gateway_scope,omitempty" json:"require_gateway_scope,omitempty"`
+}
+
+// CacheCoalesceConfig configures request coalescing for cache misses.
+type CacheCoalesceConfig struct {
+	Enabled           bool     `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+	Wait              Duration `yaml:"wait,omitempty" json:"wait,omitempty"`
+	WaitTimeoutStatus int      `yaml:"wait_timeout_status,omitempty" json:"wait_timeout_status,omitempty"`
+}
+
+// CacheInvalidationConfig configures tag-based response cache invalidation.
+type CacheInvalidationConfig struct {
+	// Use is an optional reference to a named cache_invalidation_policies entry.
+	Use string `yaml:"use,omitempty" json:"use,omitempty"`
+
+	// Enabled allows disabling invalidation without removing the config.
+	// Default: true (if the block is present, invalidation is on).
+	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+
+	// Store limits invalidation to a store: "memory", "redis", or empty for all stores.
+	Store string `yaml:"store,omitempty" json:"store,omitempty"`
+
+	// OperationTimeout bounds cache store operations. Default: "75ms".
+	OperationTimeout Duration `yaml:"operation_timeout,omitempty" json:"operation_timeout,omitempty"`
+
+	// Tags are dynamic invalidation tag templates.
+	Tags []string `yaml:"tags,omitempty" json:"tags,omitempty"`
+
+	// BumpNamespaces are dynamic namespace templates whose versions are incremented on invalidation.
+	BumpNamespaces []string `yaml:"bump_namespaces,omitempty" json:"bump_namespaces,omitempty"`
+
+	// Debounce batches duplicate invalidations for the same rendered tag or namespace.
+	Debounce Duration `yaml:"debounce,omitempty" json:"debounce,omitempty"`
+
+	// OnStatus controls which upstream statuses trigger invalidation.
+	// Supports exact statuses ("200") and classes ("2xx"). Default: ["2xx"].
+	OnStatus []string `yaml:"on_status,omitempty" json:"on_status,omitempty"`
+}
+
+// UnmarshalYAML handles bare string (policy reference) and inline object syntax for CacheInvalidationConfig.
+func (ci *CacheInvalidationConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		ci.Use = value.Value
+		return nil
+	}
+	type invalidationAlias CacheInvalidationConfig
+	var alias invalidationAlias
+	if err := value.Decode(&alias); err != nil {
+		return err
+	}
+	*ci = CacheInvalidationConfig(alias)
+	return nil
+}
+
+// IsEnabled returns true if cache invalidation is active.
+func (ci *CacheInvalidationConfig) IsEnabled() bool {
+	if ci.Enabled == nil {
+		return true
+	}
+	return *ci.Enabled
 }
 
 // SSRFConfig configures SSRF protection for the proxy.
@@ -1126,7 +1321,7 @@ func (s *SSRFConfig) IsBlockMetadata() bool {
 	return *s.BlockMetadata
 }
 
-// RedisConfig configures a Redis connection for distributed rate limiting.
+// RedisConfig configures a Redis connection for distributed router policies.
 type RedisConfig struct {
 	// Address is the Redis server address (e.g. "localhost:6379").
 	Address string `yaml:"address" json:"address"`
@@ -1137,7 +1332,8 @@ type RedisConfig struct {
 	// DB is the Redis database number (default: 0).
 	DB int `yaml:"db,omitempty" json:"db,omitempty"`
 
-	// KeyPrefix is the prefix for all rate limiting keys (default: "csar:rl:").
+	// KeyPrefix is the prefix for all Redis-backed router policy keys.
+	// Rate limiting and response caching add their own sub-prefixes.
 	KeyPrefix string `yaml:"key_prefix,omitempty" json:"key_prefix,omitempty"`
 }
 

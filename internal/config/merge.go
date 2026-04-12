@@ -78,6 +78,16 @@ func mergeConfigs(base, overlay *Config, overlayFile string) error {
 		return err
 	}
 
+	// CachePolicies
+	if err := mergeMap(base.CachePolicies, overlay.CachePolicies, &base.CachePolicies, overlayFile, "cache_policies"); err != nil {
+		return err
+	}
+
+	// CacheInvalidationPolicies
+	if err := mergeMap(base.CacheInvalidationPolicies, overlay.CacheInvalidationPolicies, &base.CacheInvalidationPolicies, overlayFile, "cache_invalidation_policies"); err != nil {
+		return err
+	}
+
 	// RetryPolicies
 	if err := mergeMap(base.RetryPolicies, overlay.RetryPolicies, &base.RetryPolicies, overlayFile, "retry_policies"); err != nil {
 		return err

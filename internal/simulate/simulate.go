@@ -281,10 +281,22 @@ func resolveMiddlewares(cfg *config.Config, route config.RouteConfig, path strin
 		if ttl == 0 {
 			ttl = 5 * time.Minute
 		}
+		store := route.Cache.Store
+		if store == "" {
+			store = "memory"
+		}
 		mws = append(mws, MiddlewareInfo{
 			Name:    "Response Cache",
-			Details: fmt.Sprintf("ttl=%s, max_entries=%d", ttl, route.Cache.MaxEntries),
+			Details: fmt.Sprintf("store=%s, ttl=%s, max_entries=%d", store, ttl, route.Cache.MaxEntries),
 			Impact:  "observes",
+		})
+	}
+
+	if route.CacheInvalidate != nil && route.CacheInvalidate.IsEnabled() {
+		mws = append(mws, MiddlewareInfo{
+			Name:    "Response Cache Invalidation",
+			Details: fmt.Sprintf("tags=%d", len(route.CacheInvalidate.Tags)),
+			Impact:  "modifies",
 		})
 	}
 
