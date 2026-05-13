@@ -159,6 +159,10 @@ type Config struct {
 	// Policy definitions are terminal — they do not support the "use" field.
 	BackendTLSPolicies map[string]BackendTLSPolicy `yaml:"backend_tls_policies,omitempty" json:"backend_tls_policies,omitempty"`
 
+	// BackendPools defines named outbound HTTP transport pools. Routes reference
+	// them via x-csar-backend.pool to isolate upstream failure domains.
+	BackendPools map[string]BackendPoolConfig `yaml:"backend_pools,omitempty" json:"backend_pools,omitempty"`
+
 	// GlobalThrottle defines a global rate limit applied to ALL routes as a safety net.
 	// Checked before per-route throttle. Uses a fast in-memory atomic counter.
 	GlobalThrottle *GlobalThrottleConfig `yaml:"global_throttle,omitempty" json:"global_throttle,omitempty"`
@@ -353,8 +357,45 @@ type BackendConfig struct {
 	// "append": incoming request path is appended to target_url path.
 	PathMode string `yaml:"path_mode,omitempty" json:"path_mode,omitempty"`
 
+	// Pool selects a named backend_pools entry for outbound connection reuse and
+	// connection-budget isolation. Empty uses the built-in default pool.
+	Pool string `yaml:"pool,omitempty" json:"pool,omitempty"`
+
+	// Timeout is the maximum duration CSAR will wait for this upstream request.
+	// Streaming requests (WebSocket/SSE) bypass this route timeout.
+	Timeout Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+
 	// TLS configures the outbound TLS connection to this upstream.
 	TLS *BackendTLSConfig `yaml:"tls,omitempty" json:"tls,omitempty"`
+}
+
+// BackendPoolConfig configures one outbound HTTP transport pool.
+type BackendPoolConfig struct {
+	// MaxIdleConns limits idle connections across all hosts in the pool.
+	MaxIdleConns int `yaml:"max_idle_conns,omitempty" json:"max_idle_conns,omitempty"`
+
+	// MaxIdleConnsPerHost limits idle connections retained for a single host.
+	MaxIdleConnsPerHost int `yaml:"max_idle_conns_per_host,omitempty" json:"max_idle_conns_per_host,omitempty"`
+
+	// MaxConnsPerHost limits total connections per host, including active,
+	// dialing, and idle connections. Zero means unlimited.
+	MaxConnsPerHost int `yaml:"max_conns_per_host,omitempty" json:"max_conns_per_host,omitempty"`
+
+	// DialTimeout bounds TCP connection establishment.
+	DialTimeout Duration `yaml:"dial_timeout,omitempty" json:"dial_timeout,omitempty"`
+
+	// TLSHandshakeTimeout bounds TLS handshakes.
+	TLSHandshakeTimeout Duration `yaml:"tls_handshake_timeout,omitempty" json:"tls_handshake_timeout,omitempty"`
+
+	// ResponseHeaderTimeout bounds the wait for upstream response headers.
+	// Zero disables the transport-level response-header timeout.
+	ResponseHeaderTimeout Duration `yaml:"response_header_timeout,omitempty" json:"response_header_timeout,omitempty"`
+
+	// IdleConnTimeout controls how long idle keep-alive connections stay open.
+	IdleConnTimeout Duration `yaml:"idle_conn_timeout,omitempty" json:"idle_conn_timeout,omitempty"`
+
+	// ExpectContinueTimeout bounds waiting for a 100-continue response.
+	ExpectContinueTimeout Duration `yaml:"expect_continue_timeout,omitempty" json:"expect_continue_timeout,omitempty"`
 }
 
 // IsAppendPathMode returns true if path_mode is explicitly "append".

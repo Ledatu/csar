@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestNew_ValidURL(t *testing.T) {
@@ -267,6 +268,63 @@ func TestBuildTLSTransport_InvalidCert(t *testing.T) {
 	_, err := buildTLSTransport(&TLSConfig{CertFile: "/nonexistent/cert.pem", KeyFile: "/nonexistent/key.pem"}, nil)
 	if err == nil {
 		t.Fatal("buildTLSTransport should fail for nonexistent cert files")
+	}
+}
+
+func TestBuildTransport_DefaultIsExplicit(t *testing.T) {
+	rt, err := BuildTransport(nil, nil)
+	if err != nil {
+		t.Fatalf("BuildTransport() error: %v", err)
+	}
+	tr, ok := rt.(*http.Transport)
+	if !ok {
+		t.Fatalf("BuildTransport() type = %T, want *http.Transport", rt)
+	}
+	if tr == http.DefaultTransport {
+		t.Fatal("BuildTransport() should not return http.DefaultTransport")
+	}
+	if tr.MaxIdleConns != 100 {
+		t.Errorf("MaxIdleConns = %d, want 100", tr.MaxIdleConns)
+	}
+	if tr.MaxIdleConnsPerHost != 20 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want 20", tr.MaxIdleConnsPerHost)
+	}
+}
+
+func TestBuildTransportWithConfig_AppliesPoolLimits(t *testing.T) {
+	tr, err := BuildTransportWithConfig(nil, nil, TransportConfig{
+		MaxIdleConns:          64,
+		MaxIdleConnsPerHost:   16,
+		MaxConnsPerHost:       32,
+		DialTimeout:           300 * time.Millisecond,
+		TLSHandshakeTimeout:   500 * time.Millisecond,
+		ResponseHeaderTimeout: 800 * time.Millisecond,
+		IdleConnTimeout:       30 * time.Second,
+		ExpectContinueTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("BuildTransportWithConfig() error: %v", err)
+	}
+	if tr.MaxIdleConns != 64 {
+		t.Errorf("MaxIdleConns = %d, want 64", tr.MaxIdleConns)
+	}
+	if tr.MaxIdleConnsPerHost != 16 {
+		t.Errorf("MaxIdleConnsPerHost = %d, want 16", tr.MaxIdleConnsPerHost)
+	}
+	if tr.MaxConnsPerHost != 32 {
+		t.Errorf("MaxConnsPerHost = %d, want 32", tr.MaxConnsPerHost)
+	}
+	if tr.TLSHandshakeTimeout != 500*time.Millisecond {
+		t.Errorf("TLSHandshakeTimeout = %s, want 500ms", tr.TLSHandshakeTimeout)
+	}
+	if tr.ResponseHeaderTimeout != 800*time.Millisecond {
+		t.Errorf("ResponseHeaderTimeout = %s, want 800ms", tr.ResponseHeaderTimeout)
+	}
+	if tr.IdleConnTimeout != 30*time.Second {
+		t.Errorf("IdleConnTimeout = %s, want 30s", tr.IdleConnTimeout)
+	}
+	if tr.ExpectContinueTimeout != time.Second {
+		t.Errorf("ExpectContinueTimeout = %s, want 1s", tr.ExpectContinueTimeout)
 	}
 }
 

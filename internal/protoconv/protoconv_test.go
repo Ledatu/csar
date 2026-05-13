@@ -2,8 +2,10 @@ package protoconv
 
 import (
 	"testing"
+	"time"
 
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 func TestProtoToAuthValidateConfig_PreservesJWKSTLS(t *testing.T) {
@@ -70,6 +72,54 @@ func TestFullSnapshotToConfig_BackendTLSPoliciesNil(t *testing.T) {
 
 	if cfg.BackendTLSPolicies != nil {
 		t.Fatalf("BackendTLSPolicies = %v, want nil for empty snapshot", cfg.BackendTLSPolicies)
+	}
+}
+
+func TestFullSnapshotToConfig_BackendPoolsAndRouteTimeout(t *testing.T) {
+	snap := &csarv1.FullConfigSnapshot{
+		BackendPools: map[string]*csarv1.BackendPoolConfigProto{
+			"identity-critical": {
+				MaxIdleConns:          128,
+				MaxIdleConnsPerHost:   32,
+				MaxConnsPerHost:       128,
+				DialTimeout:           durationpb.New(500 * time.Millisecond),
+				TlsHandshakeTimeout:   durationpb.New(time.Second),
+				ResponseHeaderTimeout: durationpb.New(10 * time.Second),
+				IdleConnTimeout:       durationpb.New(30 * time.Second),
+				ExpectContinueTimeout: durationpb.New(time.Second),
+			},
+		},
+		Routes: []*csarv1.RouteConfig{
+			{
+				Path:   "/svc",
+				Method: "POST",
+				Backend: &csarv1.BackendConfigProto{
+					TargetUrl: "https://authz:9092",
+					PathMode:  "append",
+					Pool:      "identity-critical",
+					Timeout:   durationpb.New(1200 * time.Millisecond),
+				},
+			},
+		},
+	}
+
+	cfg := FullSnapshotToConfig(snap)
+	pool, ok := cfg.BackendPools["identity-critical"]
+	if !ok {
+		t.Fatal("BackendPools missing identity-critical")
+	}
+	if pool.MaxConnsPerHost != 128 {
+		t.Errorf("MaxConnsPerHost = %d, want 128", pool.MaxConnsPerHost)
+	}
+	if pool.ResponseHeaderTimeout.Duration != 10*time.Second {
+		t.Errorf("ResponseHeaderTimeout = %s, want 10s", pool.ResponseHeaderTimeout.Duration)
+	}
+	route := cfg.Paths["/svc"]["post"]
+	if route.Backend.Pool != "identity-critical" {
+		t.Errorf("route pool = %q, want identity-critical", route.Backend.Pool)
+	}
+	if route.Backend.Timeout.Duration != 1200*time.Millisecond {
+		t.Errorf("route timeout = %s, want 1200ms", route.Backend.Timeout.Duration)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/ledatu/csar/internal/audit"
 	"github.com/ledatu/csar/internal/authn"
@@ -36,6 +37,7 @@ type route struct {
 	circuitBreaker      *resilience.CircuitBreaker // nil if no resilience configured
 	backpressureHandler http.Handler               // proxy wrapped with backpressure middleware (nil = disabled)
 	retryHandler        http.Handler               // proxy wrapped with retry middleware (nil = use proxy directly)
+	upstreamTimeout     time.Duration              // per-route upstream request timeout; zero = disabled
 	routeKey            string                     // "METHOD:PATH"
 	injectHeaders       []string                   // headers to strip/inject for security (e.g. ["Authorization", "X-Client-Secret"])
 	allowCIDRs          []*net.IPNet               // nil = use global; empty after init = deny all (shouldn't happen)
@@ -86,6 +88,7 @@ type Router struct {
 	tenantRouter      *tenant.Router                     // nil if no route uses tenant routing
 	responseCache     *cache.ResponseCache               // nil if no route uses response caching
 	ssrfProtection    *proxy.SSRFProtection              // nil if SSRF protection is disabled
+	transportRegistry *transportRegistry                 // explicit outbound transport pools
 	throttleManager   *throttle.ThrottleManager          // manages all per-route throttlers
 	redisClient       *redis.Client                      // shared Redis client for distributed throttling (nil if not configured)
 	pools             []*loadbalancer.Pool               // tracked for Close() cleanup on reload

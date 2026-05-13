@@ -11,6 +11,7 @@ import (
 	"github.com/ledatu/csar-core/configutil"
 	"github.com/ledatu/csar/internal/config"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // FullSnapshotToConfig converts a FullConfigSnapshot proto message into
@@ -40,6 +41,7 @@ func FullSnapshotToConfig(snap *csarv1.FullConfigSnapshot) *config.Config {
 	cfg.AuthValidatePolicies = protoToAuthValidatePolicies(snap.GetAuthValidatePolicies())
 	cfg.AuthzPolicies = protoToAuthzPolicies(snap.GetAuthzPolicies())
 	cfg.BackendTLSPolicies = protoToBackendTLSPolicies(snap.GetBackendTlsPolicies())
+	cfg.BackendPools = protoToBackendPools(snap.GetBackendPools())
 
 	if gt := snap.GetGlobalThrottle(); gt != nil {
 		cfg.GlobalThrottle = &config.GlobalThrottleConfig{
@@ -139,6 +141,8 @@ func protoToBackend(b *csarv1.BackendConfigProto) config.BackendConfig {
 		LoadBalancer: b.GetLoadBalancer(),
 		PathRewrite:  b.GetPathRewrite(),
 		PathMode:     b.GetPathMode(),
+		Pool:         b.GetPool(),
+		Timeout:      durationFromProto(b.GetTimeout()),
 	}
 	if hc := b.GetHealthCheck(); hc != nil {
 		bc.HealthCheck = &config.HealthCheckConfig{
@@ -473,4 +477,31 @@ func protoToBackendTLSPolicies(policies map[string]*csarv1.BackendTLSConfigProto
 		}
 	}
 	return out
+}
+
+func protoToBackendPools(policies map[string]*csarv1.BackendPoolConfigProto) map[string]config.BackendPoolConfig {
+	if len(policies) == 0 {
+		return nil
+	}
+	out := make(map[string]config.BackendPoolConfig, len(policies))
+	for name, p := range policies {
+		out[name] = config.BackendPoolConfig{
+			MaxIdleConns:          int(p.GetMaxIdleConns()),
+			MaxIdleConnsPerHost:   int(p.GetMaxIdleConnsPerHost()),
+			MaxConnsPerHost:       int(p.GetMaxConnsPerHost()),
+			DialTimeout:           durationFromProto(p.GetDialTimeout()),
+			TLSHandshakeTimeout:   durationFromProto(p.GetTlsHandshakeTimeout()),
+			ResponseHeaderTimeout: durationFromProto(p.GetResponseHeaderTimeout()),
+			IdleConnTimeout:       durationFromProto(p.GetIdleConnTimeout()),
+			ExpectContinueTimeout: durationFromProto(p.GetExpectContinueTimeout()),
+		}
+	}
+	return out
+}
+
+func durationFromProto(d *durationpb.Duration) configutil.Duration {
+	if d == nil {
+		return configutil.Duration{}
+	}
+	return configutil.Duration{Duration: d.AsDuration()}
 }

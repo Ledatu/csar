@@ -233,16 +233,36 @@ func TestRouter_ProxyCaching(t *testing.T) {
 	tr := NewRouter(newTestLogger())
 
 	// Call getOrCreateProxy twice — should reuse the same proxy
-	p1, err := tr.getOrCreateProxy(server.URL)
+	p1, err := tr.getOrCreateProxy(server.URL, http.DefaultTransport, "test-transport")
 	if err != nil {
 		t.Fatal(err)
 	}
-	p2, err := tr.getOrCreateProxy(server.URL)
+	p2, err := tr.getOrCreateProxy(server.URL, http.DefaultTransport, "test-transport")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if p1 != p2 {
 		t.Error("expected same proxy instance for same URL")
+	}
+}
+
+func TestRouter_ProxyCaching_IsolatesTransportKeys(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	tr := NewRouter(newTestLogger())
+	p1, err := tr.getOrCreateProxy(server.URL, http.DefaultTransport, "identity")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := tr.getOrCreateProxy(server.URL, http.DefaultTransport, "external")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p1 == p2 {
+		t.Fatal("expected different proxy instances for different transport keys")
 	}
 }

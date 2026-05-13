@@ -66,11 +66,14 @@ func mustParseCIDR(s string) *net.IPNet {
 	return n
 }
 
-// safeDialContext returns a DialContext function that validates resolved IPs
-// against SSRF protection rules before establishing a connection.
-func safeDialContext(protection *SSRFProtection) func(ctx context.Context, network, addr string) (net.Conn, error) {
+// safeDialContextWithTimeout returns a DialContext function with the supplied
+// TCP dial timeout while preserving the SSRF validation behavior.
+func safeDialContextWithTimeout(protection *SSRFProtection, timeout time.Duration) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
 	dialer := &net.Dialer{
-		Timeout:   30 * time.Second,
+		Timeout:   timeout,
 		KeepAlive: 30 * time.Second,
 	}
 

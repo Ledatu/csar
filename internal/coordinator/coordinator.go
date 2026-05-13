@@ -325,6 +325,7 @@ func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_Su
 		snapshot.AuthValidatePolicies = authValidatePoliciesMapToProto(cfg.AuthValidatePolicies)
 		snapshot.AuthzPolicies = authzPoliciesMapToProto(cfg.AuthzPolicies)
 		snapshot.BackendTlsPolicies = backendTLSPoliciesToProto(cfg.BackendTLSPolicies)
+		snapshot.BackendPools = backendPoolsToProto(cfg.BackendPools)
 
 		if cfg.GlobalThrottle != nil {
 			snapshot.GlobalThrottle = &csarv1.GlobalThrottleProto{
@@ -523,6 +524,8 @@ func backendToProto(b *config.BackendConfig) *csarv1.BackendConfigProto {
 		LoadBalancer: b.LoadBalancer,
 		PathRewrite:  b.PathRewrite,
 		PathMode:     b.PathMode,
+		Pool:         b.Pool,
+		Timeout:      durationpb.New(b.Timeout.Duration),
 	}
 	if b.HealthCheck != nil {
 		pb.HealthCheck = &csarv1.HealthCheckConfigProto{
@@ -860,6 +863,26 @@ func backendTLSPoliciesToProto(policies map[string]config.BackendTLSPolicy) map[
 			CaFile:             p.CAFile,
 			CertFile:           p.CertFile,
 			KeyFile:            p.KeyFile,
+		}
+	}
+	return out
+}
+
+func backendPoolsToProto(policies map[string]config.BackendPoolConfig) map[string]*csarv1.BackendPoolConfigProto {
+	if len(policies) == 0 {
+		return nil
+	}
+	out := make(map[string]*csarv1.BackendPoolConfigProto, len(policies))
+	for name, p := range policies {
+		out[name] = &csarv1.BackendPoolConfigProto{
+			MaxIdleConns:          safeInt32(p.MaxIdleConns),
+			MaxIdleConnsPerHost:   safeInt32(p.MaxIdleConnsPerHost),
+			MaxConnsPerHost:       safeInt32(p.MaxConnsPerHost),
+			DialTimeout:           durationpb.New(p.DialTimeout.Duration),
+			TlsHandshakeTimeout:   durationpb.New(p.TLSHandshakeTimeout.Duration),
+			ResponseHeaderTimeout: durationpb.New(p.ResponseHeaderTimeout.Duration),
+			IdleConnTimeout:       durationpb.New(p.IdleConnTimeout.Duration),
+			ExpectContinueTimeout: durationpb.New(p.ExpectContinueTimeout.Duration),
 		}
 	}
 	return out

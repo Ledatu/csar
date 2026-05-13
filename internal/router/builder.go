@@ -34,6 +34,7 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 	for _, opt := range opts {
 		opt(r)
 	}
+	r.transportRegistry = newTransportRegistry(cfg.BackendPools, r.ssrfProtection)
 
 	// Resolve the request ID header name once at construction time.
 	r.reqIDHeader = "X-Request-ID"
@@ -102,22 +103,11 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *resilience.CircuitBreakerManager, logger *slog.Logger) error {
 	// Build proxy options (TLS, SSRF protection, etc.)
 	var proxyOpts []proxy.Option
-	var tlsCfg *proxy.TLSConfig
-	if bt := fr.Route.Backend.TLS; bt != nil {
-		tlsCfg = &proxy.TLSConfig{
-			InsecureSkipVerify: bt.InsecureSkipVerify,
-			CAFile:             bt.CAFile,
-			CertFile:           bt.CertFile,
-			KeyFile:            bt.KeyFile,
-		}
-	}
-	backendTransport, err := proxy.BuildTransport(tlsCfg, r.ssrfProtection)
+	backendTransport, transportKey, err := r.transportRegistry.forBackend(fr.Route.Backend)
 	if err != nil {
 		return fmt.Errorf("building outbound transport for %s %s: %w", fr.Method, fr.Path, err)
 	}
-	if backendTransport != nil {
-		proxyOpts = append(proxyOpts, proxy.WithTransport(backendTransport))
-	}
+	proxyOpts = append(proxyOpts, proxy.WithTransport(backendTransport))
 	// Apply path_mode: "append" preserves old join behaviour; "replace" (default)
 	// makes the target_url path the exact upstream path.
 	if fr.Route.Backend.IsAppendPathMode() {
@@ -132,11 +122,12 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 	key := throttle.RouteKey(strings.ToUpper(fr.Method), fr.Path)
 
 	rt := &route{
-		config:       fr.Route,
-		proxy:        rp,
-		routeKey:     key,
-		method:       strings.ToUpper(fr.Method),
-		originalPath: fr.Path,
+		config:          fr.Route,
+		proxy:           rp,
+		routeKey:        key,
+		method:          strings.ToUpper(fr.Method),
+		originalPath:    fr.Path,
+		upstreamTimeout: fr.Route.Backend.Timeout.Duration,
 	}
 
 	// Set up load balancing if multiple targets are configured (audit §3.2 Criticism 3).
@@ -221,7 +212,7 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 
 	// Set up multi-tenant routing if tenant config is present (audit §3.3.3).
 	if fr.Route.Tenant != nil {
-		r.setupTenant(rt, fr, key, logger)
+		r.setupTenant(rt, fr, key, logger, backendTransport, transportKey)
 	}
 
 	// Set up CORS config if present (audit §3.2 Criticism 5).
@@ -712,14 +703,16 @@ func (r *Router) setupDLP(rt *route, fr config.FlatRoute, key string, logger *sl
 }
 
 // setupTenant configures multi-tenant routing for a route.
-func (r *Router) setupTenant(rt *route, fr config.FlatRoute, key string, logger *slog.Logger) {
+func (r *Router) setupTenant(rt *route, fr config.FlatRoute, key string, logger *slog.Logger, transport http.RoundTripper, transportKey string) {
 	if r.tenantRouter == nil {
 		r.tenantRouter = tenant.NewRouter(logger)
 	}
 	rt.tenantConfig = &tenant.Config{
-		Header:   fr.Route.Tenant.Header,
-		Backends: fr.Route.Tenant.Backends,
-		Default:  fr.Route.Tenant.Default,
+		Header:       fr.Route.Tenant.Header,
+		Backends:     fr.Route.Tenant.Backends,
+		Default:      fr.Route.Tenant.Default,
+		Transport:    transport,
+		TransportKey: transportKey,
 	}
 	logger.Info("multi-tenant routing enabled",
 		"route", key,

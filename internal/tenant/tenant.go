@@ -9,8 +9,10 @@
 package tenant
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -30,6 +32,13 @@ type Config struct {
 	// Default is the fallback target URL when no tenant header matches.
 	// If empty, unmatched tenants receive 404.
 	Default string
+
+	// Transport is the explicit outbound transport for this route's tenant
+	// proxies. It prevents tenant routing from falling back to http.DefaultTransport.
+	Transport http.RoundTripper
+
+	// TransportKey identifies the route transport in the proxy cache.
+	TransportKey string
 }
 
 // Router selects upstream backends based on tenant identity.
@@ -104,7 +113,7 @@ func (tr *Router) Proxy(cfg Config, fallbackHandler http.Handler) http.Handler {
 			return
 		}
 
-		proxy, err := tr.getOrCreateProxy(targetURL)
+		proxy, err := tr.getOrCreateProxy(targetURL, cfg.Transport, cfg.TransportKey)
 		if err != nil {
 			tr.logger.Error("tenant routing: failed to create proxy",
 				"tenant_id", tenantID,
@@ -128,9 +137,10 @@ func (tr *Router) Proxy(cfg Config, fallbackHandler http.Handler) http.Handler {
 
 // getOrCreateProxy returns a cached reverse proxy for the target URL,
 // creating one if it doesn't exist yet.
-func (tr *Router) getOrCreateProxy(targetURL string) (*httputil.ReverseProxy, error) {
+func (tr *Router) getOrCreateProxy(targetURL string, transport http.RoundTripper, transportKey string) (*httputil.ReverseProxy, error) {
+	cacheKey := transportKey + "\x00" + targetURL
 	tr.mu.RLock()
-	if p, ok := tr.proxies[targetURL]; ok {
+	if p, ok := tr.proxies[cacheKey]; ok {
 		tr.mu.RUnlock()
 		return p, nil
 	}
@@ -150,13 +160,20 @@ func (tr *Router) getOrCreateProxy(targetURL string) (*httputil.ReverseProxy, er
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			w.Header().Set("Content-Type", "application/json")
+			var netErr net.Error
+			if r.Context().Err() != nil || (errors.As(err, &netErr) && netErr.Timeout()) {
+				w.WriteHeader(http.StatusGatewayTimeout)
+				fmt.Fprintf(w, `{"code":"upstream_error","status":504,"message":"tenant upstream timeout","detail":%q}`, err.Error())
+				return
+			}
 			w.WriteHeader(http.StatusBadGateway)
 			fmt.Fprintf(w, `{"code":"upstream_error","status":502,"message":"tenant upstream error","detail":%q}`, err.Error())
 		},
+		Transport: transport,
 	}
 
 	tr.mu.Lock()
-	tr.proxies[targetURL] = proxy
+	tr.proxies[cacheKey] = proxy
 	tr.mu.Unlock()
 
 	return proxy, nil

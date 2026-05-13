@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -442,7 +443,7 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 			// Step 3: Proxy to upstream (inside circuit breaker)
 			rec := &statusCapture{ResponseWriter: w, statusCode: 200}
 			upstreamStart := time.Now()
-			r.upstreamHandler(rt).ServeHTTP(rec, req)
+			r.serveUpstream(rec, req, rt)
 			upstreamDur := time.Since(upstreamStart)
 
 			if r.metrics != nil {
@@ -491,10 +492,23 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 
 	// Step 3 (no circuit breaker): Proxy to upstream directly
 	upstreamStart := time.Now()
-	r.upstreamHandler(rt).ServeHTTP(w, req)
+	r.serveUpstream(w, req, rt)
 	if r.metrics != nil {
 		r.metrics.RecordUpstream(rt.routeKey, 0, time.Since(upstreamStart))
 	}
+}
+
+func (r *Router) serveUpstream(w http.ResponseWriter, req *http.Request, rt *route) {
+	if rt.upstreamTimeout <= 0 || isStreamingRequest(req) {
+		r.upstreamHandler(rt).ServeHTTP(w, req)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(req.Context(), rt.upstreamTimeout)
+	defer cancel()
+	req = req.WithContext(ctx)
+	w.Header().Set("X-CSAR-Upstream-Timeout-MS", strconv.FormatInt(rt.upstreamTimeout.Milliseconds(), 10))
+	r.upstreamHandler(rt).ServeHTTP(w, req)
 }
 
 // upstreamHandler returns the handler that proxies to the upstream.

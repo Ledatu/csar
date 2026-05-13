@@ -14,6 +14,7 @@ package loadbalancer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
@@ -149,6 +150,12 @@ func New(targetURLs []string, strategy Strategy, logger *slog.Logger, opts ...Po
 			Director: newDirector(target, p.pathMode),
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				w.Header().Set("Content-Type", "application/json")
+				var netErr net.Error
+				if r.Context().Err() == context.DeadlineExceeded || (errors.As(err, &netErr) && netErr.Timeout()) {
+					w.WriteHeader(http.StatusGatewayTimeout)
+					fmt.Fprintf(w, `{"error":"upstream timeout","detail":%q}`, err.Error())
+					return
+				}
 				w.WriteHeader(http.StatusBadGateway)
 				fmt.Fprintf(w, `{"error":"upstream error","detail":%q}`, err.Error())
 			},

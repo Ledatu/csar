@@ -90,6 +90,7 @@ message FullConfigSnapshot {
   map<string, AuthValidateConfigProto> auth_validate_policies = 8;
   map<string, AuthzRouteConfigProto> authz_policies = 12;
   map<string, BackendTLSConfigProto> backend_tls_policies = 13;
+  map<string, BackendPoolConfigProto> backend_pools = 14;
 
   // Global settings.
   GlobalThrottleProto global_throttle = 9;
@@ -144,6 +145,8 @@ message BackendConfigProto {
   string path_mode = 5;
   HealthCheckConfigProto health_check = 6;
   BackendTLSConfigProto tls = 7;
+  string pool = 8;
+  google.protobuf.Duration timeout = 9;
 }
 
 message HealthCheckConfigProto {
@@ -161,6 +164,17 @@ message BackendTLSConfigProto {
   string ca_file = 2;
   string cert_file = 3;
   string key_file = 4;
+}
+
+message BackendPoolConfigProto {
+  int32 max_idle_conns = 1;
+  int32 max_idle_conns_per_host = 2;
+  int32 max_conns_per_host = 3;
+  google.protobuf.Duration dial_timeout = 4;
+  google.protobuf.Duration tls_handshake_timeout = 5;
+  google.protobuf.Duration response_header_timeout = 6;
+  google.protobuf.Duration idle_conn_timeout = 7;
+  google.protobuf.Duration expect_continue_timeout = 8;
 }
 
 // ---------------------------------------------------------------------------

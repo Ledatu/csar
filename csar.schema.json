@@ -85,6 +85,11 @@
       "description": "Named reusable outbound TLS configurations. Routes reference them via x-csar-backend.tls: \"policy_name\" or x-csar-backend.tls.use: \"policy_name\". Policy definitions are terminal — they do not support the \"use\" field.",
       "additionalProperties": { "$ref": "#/$defs/BackendTLSPolicy" }
     },
+    "backend_pools": {
+      "type": "object",
+      "description": "Named outbound HTTP transport pools. Routes reference them via x-csar-backend.pool to isolate upstream failure domains.",
+      "additionalProperties": { "$ref": "#/$defs/BackendPoolConfig" }
+    },
     "global_throttle": { "$ref": "#/$defs/GlobalThrottleConfig" },
     "readiness": { "$ref": "#/$defs/ReadinessConfig" },
     "debug_headers": { "$ref": "#/$defs/DebugHeadersConfig" },
@@ -1284,7 +1289,57 @@
           "enum": ["replace", "append"],
           "default": "replace"
         },
+        "pool": {
+          "type": "string",
+          "description": "Name of a backend_pools entry used for outbound connection isolation."
+        },
+        "timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "Maximum duration CSAR will wait for this upstream request. Streaming requests bypass this route timeout."
+        },
         "tls": { "$ref": "#/$defs/BackendTLSRef" }
+      }
+    },
+    "BackendPoolConfig": {
+      "type": "object",
+      "description": "Outbound HTTP transport pool settings for a backend failure domain.",
+      "additionalProperties": false,
+      "properties": {
+        "max_idle_conns": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum idle connections across all hosts in the pool."
+        },
+        "max_idle_conns_per_host": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum idle connections retained per host."
+        },
+        "max_conns_per_host": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum total connections per host. Zero means unlimited."
+        },
+        "dial_timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "TCP dial timeout."
+        },
+        "tls_handshake_timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "TLS handshake timeout."
+        },
+        "response_header_timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "Maximum wait for upstream response headers. Zero disables the transport-level header timeout."
+        },
+        "idle_conn_timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "Maximum lifetime for idle keep-alive connections."
+        },
+        "expect_continue_timeout": {
+          "$ref": "#/$defs/Duration",
+          "description": "Maximum wait for a 100-continue response."
+        }
       }
     },
     "HealthCheckConfig": {

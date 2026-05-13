@@ -167,6 +167,15 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	for name, pool := range c.BackendPools {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("backend_pools contains an empty pool name")
+		}
+		if err := validateBackendPool(name, pool); err != nil {
+			return err
+		}
+	}
+
 	for path, methods := range c.Paths {
 		for method := range methods {
 			route := methods[method]
@@ -183,6 +192,15 @@ func (c *Config) Validate() error {
 			// Validate path_mode
 			if pm := route.Backend.PathMode; pm != "" && pm != "replace" && pm != "append" {
 				return fmt.Errorf("path %s method %s: x-csar-backend.path_mode must be \"replace\" or \"append\", got %q", path, method, pm)
+			}
+			if pool := strings.TrimSpace(route.Backend.Pool); pool != "" {
+				if _, ok := c.BackendPools[pool]; !ok {
+					return fmt.Errorf("path %s method %s: x-csar-backend.pool references unknown backend_pools entry %q",
+						path, method, pool)
+				}
+			}
+			if route.Backend.Timeout.Duration < 0 {
+				return fmt.Errorf("path %s method %s: x-csar-backend.timeout must be >= 0", path, method)
 			}
 
 			// Validate backend TLS config
@@ -591,6 +609,35 @@ func (c *Config) Validate() error {
 	}
 
 	c.Warnings = warnings
+	return nil
+}
+
+func validateBackendPool(name string, pool BackendPoolConfig) error {
+	prefix := "backend_pools." + name
+	if pool.MaxIdleConns < 0 {
+		return fmt.Errorf("%s.max_idle_conns must be >= 0", prefix)
+	}
+	if pool.MaxIdleConnsPerHost < 0 {
+		return fmt.Errorf("%s.max_idle_conns_per_host must be >= 0", prefix)
+	}
+	if pool.MaxConnsPerHost < 0 {
+		return fmt.Errorf("%s.max_conns_per_host must be >= 0", prefix)
+	}
+	if pool.DialTimeout.Duration < 0 {
+		return fmt.Errorf("%s.dial_timeout must be >= 0", prefix)
+	}
+	if pool.TLSHandshakeTimeout.Duration < 0 {
+		return fmt.Errorf("%s.tls_handshake_timeout must be >= 0", prefix)
+	}
+	if pool.ResponseHeaderTimeout.Duration < 0 {
+		return fmt.Errorf("%s.response_header_timeout must be >= 0", prefix)
+	}
+	if pool.IdleConnTimeout.Duration < 0 {
+		return fmt.Errorf("%s.idle_conn_timeout must be >= 0", prefix)
+	}
+	if pool.ExpectContinueTimeout.Duration < 0 {
+		return fmt.Errorf("%s.expect_continue_timeout must be >= 0", prefix)
+	}
 	return nil
 }
 

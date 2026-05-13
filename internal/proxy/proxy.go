@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -85,6 +87,18 @@ type options struct {
 	pathMode       string
 }
 
+// TransportConfig configures outbound HTTP connection pool behavior.
+type TransportConfig struct {
+	MaxIdleConns          int
+	MaxIdleConnsPerHost   int
+	MaxConnsPerHost       int
+	DialTimeout           time.Duration
+	TLSHandshakeTimeout   time.Duration
+	ResponseHeaderTimeout time.Duration
+	IdleConnTimeout       time.Duration
+	ExpectContinueTimeout time.Duration
+}
+
 // WithTLS configures outbound TLS for this proxy.
 func WithTLS(cfg *TLSConfig) Option {
 	return func(o *options) { o.tls = cfg }
@@ -110,19 +124,28 @@ func WithPathMode(mode string) Option {
 // BuildTransport constructs the outbound HTTP transport used for proxying and
 // active health checks. It applies TLS and SSRF settings when configured.
 func BuildTransport(tlsCfg *TLSConfig, ssrf *SSRFProtection) (http.RoundTripper, error) {
-	switch {
-	case tlsCfg != nil:
-		return buildTLSTransport(tlsCfg, ssrf)
-	case ssrf != nil:
-		return &http.Transport{
-			DialContext:         safeDialContext(ssrf),
-			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 20,
-			IdleConnTimeout:     90 * time.Second,
-		}, nil
-	default:
-		return nil, nil
+	return BuildTransportWithConfig(tlsCfg, ssrf, TransportConfig{})
+}
+
+// BuildTransportWithConfig constructs an explicit outbound transport. It never
+// returns nil, so proxy paths do not silently fall back to http.DefaultTransport.
+func BuildTransportWithConfig(tlsCfg *TLSConfig, ssrf *SSRFProtection, cfg TransportConfig) (*http.Transport, error) {
+	tlsConfig, err := buildClientTLSConfig(tlsCfg)
+	if err != nil {
+		return nil, err
 	}
+	cfg = applyTransportDefaults(cfg)
+	return &http.Transport{
+		DialContext:           safeDialContextWithTimeout(ssrf, cfg.DialTimeout),
+		TLSClientConfig:       tlsConfig,
+		MaxIdleConns:          cfg.MaxIdleConns,
+		MaxIdleConnsPerHost:   cfg.MaxIdleConnsPerHost,
+		MaxConnsPerHost:       cfg.MaxConnsPerHost,
+		IdleConnTimeout:       cfg.IdleConnTimeout,
+		TLSHandshakeTimeout:   cfg.TLSHandshakeTimeout,
+		ResponseHeaderTimeout: cfg.ResponseHeaderTimeout,
+		ExpectContinueTimeout: cfg.ExpectContinueTimeout,
+	}, nil
 }
 
 // New creates a new ReverseProxy for the given target URL.
@@ -239,6 +262,15 @@ func (rp *ReverseProxy) modifyResponse(resp *http.Response) error {
 // errorHandler handles errors from the upstream.
 func (rp *ReverseProxy) errorHandler(w http.ResponseWriter, r *http.Request, err error) {
 	requestID := r.Header.Get("X-Request-ID")
+	var netErr net.Error
+	if errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(r.Context().Err(), context.DeadlineExceeded) ||
+		(errors.As(err, &netErr) && netErr.Timeout()) {
+		apierror.New(apierror.CodeUpstreamError, http.StatusGatewayTimeout,
+			"upstream timeout").WithDetail(err.Error()).
+			WithRequestID(requestID).Write(w)
+		return
+	}
 	apierror.New(apierror.CodeUpstreamError, http.StatusBadGateway,
 		"upstream error").WithDetail(err.Error()).
 		WithRequestID(requestID).Write(w)
@@ -249,8 +281,32 @@ func (rp *ReverseProxy) Target() *url.URL {
 	return rp.target
 }
 
-// buildTLSTransport creates an http.Transport with custom TLS configuration.
-func buildTLSTransport(cfg *TLSConfig, ssrf *SSRFProtection) (*http.Transport, error) {
+func applyTransportDefaults(cfg TransportConfig) TransportConfig {
+	if cfg.MaxIdleConns == 0 {
+		cfg.MaxIdleConns = 100
+	}
+	if cfg.MaxIdleConnsPerHost == 0 {
+		cfg.MaxIdleConnsPerHost = 20
+	}
+	if cfg.DialTimeout == 0 {
+		cfg.DialTimeout = 30 * time.Second
+	}
+	if cfg.TLSHandshakeTimeout == 0 {
+		cfg.TLSHandshakeTimeout = 10 * time.Second
+	}
+	if cfg.IdleConnTimeout == 0 {
+		cfg.IdleConnTimeout = 90 * time.Second
+	}
+	if cfg.ExpectContinueTimeout == 0 {
+		cfg.ExpectContinueTimeout = 1 * time.Second
+	}
+	return cfg
+}
+
+func buildClientTLSConfig(cfg *TLSConfig) (*tls.Config, error) {
+	if cfg == nil {
+		return nil, nil
+	}
 	tlsCfg := &tls.Config{
 		InsecureSkipVerify: cfg.InsecureSkipVerify, //nolint:gosec // configurable per-backend
 	}
@@ -277,14 +333,10 @@ func buildTLSTransport(cfg *TLSConfig, ssrf *SSRFProtection) (*http.Transport, e
 		tlsCfg.Certificates = []tls.Certificate{cert}
 	}
 
-	transport := &http.Transport{
-		TLSClientConfig:     tlsCfg,
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 20,
-		IdleConnTimeout:     90 * time.Second,
-	}
-	if ssrf != nil {
-		transport.DialContext = safeDialContext(ssrf)
-	}
-	return transport, nil
+	return tlsCfg, nil
+}
+
+// buildTLSTransport creates an http.Transport with custom TLS configuration.
+func buildTLSTransport(cfg *TLSConfig, ssrf *SSRFProtection) (*http.Transport, error) {
+	return BuildTransportWithConfig(cfg, ssrf, TransportConfig{})
 }

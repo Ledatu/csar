@@ -866,6 +866,76 @@ func TestBackendConfig_IsAppendPathMode(t *testing.T) {
 	}
 }
 
+func TestValidate_BackendPoolUnknown(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{
+					TargetURL: "https://api.example.com",
+					Pool:      "missing",
+				},
+			}},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should fail for unknown backend pool")
+	}
+	if !containsStr(err.Error(), "backend_pools") || !containsStr(err.Error(), "missing") {
+		t.Errorf("error should mention missing backend pool, got: %v", err)
+	}
+}
+
+func TestValidate_BackendPoolAndTimeout(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		BackendPools: map[string]BackendPoolConfig{
+			"identity-critical": {
+				MaxIdleConns:          64,
+				MaxIdleConnsPerHost:   16,
+				MaxConnsPerHost:       64,
+				DialTimeout:           Duration{Duration: 300 * time.Millisecond},
+				TLSHandshakeTimeout:   Duration{Duration: 500 * time.Millisecond},
+				ResponseHeaderTimeout: Duration{Duration: 800 * time.Millisecond},
+				IdleConnTimeout:       Duration{Duration: 30 * time.Second},
+				ExpectContinueTimeout: Duration{Duration: time.Second},
+			},
+		},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{
+					TargetURL: "https://api.example.com",
+					Pool:      "identity-critical",
+					Timeout:   Duration{Duration: 1200 * time.Millisecond},
+				},
+			}},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() should pass for configured backend pool and timeout: %v", err)
+	}
+}
+
+func TestValidate_BackendPoolRejectsNegativeValues(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		BackendPools: map[string]BackendPoolConfig{
+			"bad": {MaxConnsPerHost: -1},
+		},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{Backend: BackendConfig{TargetURL: "http://localhost"}}},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should fail for negative backend pool values")
+	}
+	if !containsStr(err.Error(), "max_conns_per_host") {
+		t.Errorf("error should mention max_conns_per_host, got: %v", err)
+	}
+}
+
 // containsStr is a helper shared across validate tests.
 func containsStr(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
