@@ -73,6 +73,58 @@ func TestLocalProvider_DifferentKeys(t *testing.T) {
 	}
 }
 
+func TestLocalProvider_StableKeyDerivation(t *testing.T) {
+	ctx := context.Background()
+	plaintext := []byte("stable local secret")
+
+	encryptor, err := NewLocalProvider(map[string]string{
+		"key1": "shared-passphrase",
+	})
+	if err != nil {
+		t.Fatalf("NewLocalProvider encryptor: %v", err)
+	}
+
+	decryptor, err := NewLocalProvider(map[string]string{
+		"key1": "shared-passphrase",
+	})
+	if err != nil {
+		t.Fatalf("NewLocalProvider decryptor: %v", err)
+	}
+
+	ciphertext, err := encryptor.Encrypt(ctx, "key1", plaintext)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	decrypted, err := decryptor.Decrypt(ctx, "key1", ciphertext)
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+
+	if !bytes.Equal(decrypted, plaintext) {
+		t.Errorf("decrypted = %q, want %q", decrypted, plaintext)
+	}
+}
+
+func TestLocalProvider_KeyIDSeparatesSamePassphrase(t *testing.T) {
+	p, err := NewLocalProvider(map[string]string{
+		"key1": "shared-passphrase",
+		"key2": "shared-passphrase",
+	})
+	if err != nil {
+		t.Fatalf("NewLocalProvider: %v", err)
+	}
+
+	ciphertext, err := p.Encrypt(context.Background(), "key1", []byte("secret"))
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	if _, err := p.Decrypt(context.Background(), "key2", ciphertext); err == nil {
+		t.Fatal("Decrypt with same passphrase under different key ID should fail")
+	}
+}
+
 func TestLocalProvider_UnknownKey(t *testing.T) {
 	p, err := NewLocalProvider(map[string]string{"key1": "pass"})
 	if err != nil {
@@ -96,6 +148,20 @@ func TestLocalProvider_EmptyPassphrases(t *testing.T) {
 	_, err := NewLocalProvider(map[string]string{})
 	if err == nil {
 		t.Error("NewLocalProvider with empty passphrases should fail")
+	}
+}
+
+func TestLocalProvider_EmptyKeyID(t *testing.T) {
+	_, err := NewLocalProvider(map[string]string{"": "pass"})
+	if err == nil {
+		t.Error("NewLocalProvider with empty key ID should fail")
+	}
+}
+
+func TestLocalProvider_EmptyPassphrase(t *testing.T) {
+	_, err := NewLocalProvider(map[string]string{"key1": ""})
+	if err == nil {
+		t.Error("NewLocalProvider with empty passphrase should fail")
 	}
 }
 
