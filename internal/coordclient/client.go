@@ -187,6 +187,13 @@ func (c *Client) handleFullConfigSnapshot(snap *csarv1.FullConfigSnapshot, versi
 	}
 
 	cfg := protoconv.FullSnapshotToConfig(snap)
+	if err := cfg.ResolvePolicies(); err != nil {
+		c.logger.Error("failed to resolve policies on coordinator snapshot",
+			"version", version,
+			"error", err,
+		)
+		return
+	}
 
 	if err := c.applier.Apply(cfg); err != nil {
 		c.logger.Error("failed to apply config snapshot",

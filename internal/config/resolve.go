@@ -2,10 +2,10 @@ package config
 
 import "fmt"
 
-// resolveAndValidate runs all policy resolution steps in the correct order,
-// then validates the fully-resolved config. Both Load() and ParseBytes()
-// call this after environment variable expansion.
-func (c *Config) resolveAndValidate() error {
+// ResolvePolicies runs all policy resolution steps in the correct order.
+// Coordinator-driven snapshots use this without Validate() because snapshot
+// configs omit root-only fields like listen_addr.
+func (c *Config) ResolvePolicies() error {
 	steps := []struct {
 		name string
 		fn   func() error
@@ -25,6 +25,15 @@ func (c *Config) resolveAndValidate() error {
 		if err := step.fn(); err != nil {
 			return fmt.Errorf("resolving %s: %w", step.name, err)
 		}
+	}
+	return nil
+}
+
+// resolveAndValidate runs policy resolution then validates the fully-resolved
+// config. Both Load() and ParseBytes() call this after environment variable expansion.
+func (c *Config) resolveAndValidate() error {
+	if err := c.ResolvePolicies(); err != nil {
+		return err
 	}
 	if err := c.Validate(); err != nil {
 		return fmt.Errorf("validating config: %w", err)

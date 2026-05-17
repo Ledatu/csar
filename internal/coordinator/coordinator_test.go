@@ -10,6 +10,7 @@ import (
 
 	"github.com/ledatu/csar-core/configutil"
 	"github.com/ledatu/csar/internal/config"
+	"github.com/ledatu/csar/internal/protoconv"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -260,5 +261,152 @@ func TestCoordinator_SubscriberCount(t *testing.T) {
 		default:
 			time.Sleep(20 * time.Millisecond)
 		}
+	}
+}
+
+func TestRouteEntryToProto_PreservesAuditAndCacheInvalidate(t *testing.T) {
+	auditFalse := false
+	entry := statestore.RouteEntry{
+		ID:     "POST:/svc/s3",
+		Path:   "/svc/s3",
+		Method: "POST",
+		Route: config.RouteConfig{
+			Backend: config.BackendConfig{TargetURL: "https://s3:8087"},
+			Audit:   &auditFalse,
+			CacheInvalidate: &config.CacheInvalidationConfig{
+				Tags: []string{"t1"},
+			},
+		},
+	}
+
+	pb := routeEntryToProto(&entry)
+	if !pb.AuditSet || pb.Audit {
+		t.Fatalf("audit wire: AuditSet=%v Audit=%v, want true,false", pb.AuditSet, pb.Audit)
+	}
+	if pb.CacheInvalidate == nil || len(pb.CacheInvalidate.Tags) != 1 || pb.CacheInvalidate.Tags[0] != "t1" {
+		t.Fatalf("cache_invalidate = %v", pb.CacheInvalidate)
+	}
+}
+
+func TestCacheConfigFullSnapshotRoundTrip(t *testing.T) {
+	enabled := true
+	want := &config.CacheConfig{
+		Enabled:              &enabled,
+		Store:                "redis",
+		Key:                  "k:{tenant}",
+		TTL:                  configutil.Duration{Duration: time.Minute},
+		TTLJitter:            "10%",
+		MaxEntries:           2048,
+		MaxBodySize:          2 << 20,
+		Methods:              []string{"GET"},
+		Namespaces:           []string{"ns:{tenant}"},
+		Tags:                 []string{"tag:{path.id}"},
+		VaryHeaders:          []string{"Accept-Language"},
+		CacheStatuses:        []string{"200", "2xx"},
+		OperationTimeout:     configutil.Duration{Duration: 50 * time.Millisecond},
+		FailMode:             "bypass",
+		StaleIfError:         configutil.Duration{Duration: 30 * time.Second},
+		StaleWhileRevalidate: configutil.Duration{Duration: 5 * time.Second},
+		ContentTypes:         []string{"application/json"},
+		TTLRules: []config.CacheTTLRule{
+			{
+				When: "query.date_range_contains_today",
+				From: "a",
+				To:   "b",
+				TTL:  configutil.Duration{Duration: 2 * time.Minute},
+			},
+		},
+		KeyQuery: &config.CacheKeyQueryConfig{
+			Include: []string{"q"},
+			Sort:    true,
+		},
+		ResponseTTLRules: []config.CacheResponseTTLRule{
+			{
+				When:   "header_equals",
+				Header: "x",
+				Value:  "y",
+				TTL:    configutil.Duration{Duration: time.Hour},
+			},
+		},
+		ResponseTags: []config.CacheResponseTag{
+			{Header: "ETag", Prefix: "e:"},
+		},
+		Bypass: &config.CacheBypassConfig{
+			Headers: []config.CacheBypassHeader{
+				{Name: "X-Bypass", Value: "1", RequireGatewayScope: "cache.bypass"},
+			},
+		},
+		Coalesce: &config.CacheCoalesceConfig{
+			Enabled:           true,
+			Wait:              configutil.Duration{Duration: 100 * time.Millisecond},
+			WaitTimeoutStatus: 504,
+		},
+	}
+
+	snap := &csarv1.FullConfigSnapshot{
+		Routes: []*csarv1.RouteConfig{
+			{
+				Path:    "/api/x",
+				Method:  "GET",
+				Backend: &csarv1.BackendConfigProto{TargetUrl: "http://upstream"},
+				Cache:   cacheToProto(want),
+			},
+		},
+	}
+
+	cfg := protoconv.FullSnapshotToConfig(snap)
+	rt, ok := cfg.Paths["/api/x"]["get"]
+	if !ok {
+		t.Fatal("expected route /api/x GET")
+	}
+	if rt.Cache == nil {
+		t.Fatal("expected Cache on route")
+	}
+	got := rt.Cache
+
+	if got.Store != want.Store || got.Key != want.Key || got.FailMode != want.FailMode || got.TTLJitter != want.TTLJitter {
+		t.Fatalf("scalar fields: got %+v", got)
+	}
+	if got.TTL.Duration != want.TTL.Duration || got.OperationTimeout.Duration != want.OperationTimeout.Duration {
+		t.Fatalf("durations: ttl=%v op=%v", got.TTL, got.OperationTimeout)
+	}
+	if got.MaxEntries != want.MaxEntries || got.MaxBodySize != want.MaxBodySize {
+		t.Fatalf("limits: %+v", got)
+	}
+	if len(got.Methods) != 1 || got.Methods[0] != "GET" {
+		t.Fatalf("methods: %v", got.Methods)
+	}
+	if len(got.Namespaces) != 1 || len(got.Tags) != 1 || len(got.VaryHeaders) != 1 || len(got.CacheStatuses) != 2 {
+		t.Fatalf("slices: ns=%v tags=%v vary=%v cs=%v", got.Namespaces, got.Tags, got.VaryHeaders, got.CacheStatuses)
+	}
+	if len(got.TTLRules) != 1 || got.TTLRules[0].When != want.TTLRules[0].When || got.TTLRules[0].TTL.Duration != want.TTLRules[0].TTL.Duration {
+		t.Fatalf("ttl rules: %+v", got.TTLRules)
+	}
+	if got.KeyQuery == nil || !got.KeyQuery.Sort || len(got.KeyQuery.Include) != 1 {
+		t.Fatalf("key_query: %+v", got.KeyQuery)
+	}
+	if got.StaleIfError.Duration != want.StaleIfError.Duration || got.StaleWhileRevalidate.Duration != want.StaleWhileRevalidate.Duration {
+		t.Fatalf("stale: %+v %+v", got.StaleIfError, got.StaleWhileRevalidate)
+	}
+	if len(got.ContentTypes) != 1 || got.ContentTypes[0] != "application/json" {
+		t.Fatalf("content types: %v", got.ContentTypes)
+	}
+	if len(got.ResponseTTLRules) != 1 || got.ResponseTTLRules[0].TTL.Duration != want.ResponseTTLRules[0].TTL.Duration {
+		t.Fatalf("response ttl rules: %+v", got.ResponseTTLRules)
+	}
+	if len(got.ResponseTags) != 1 || got.ResponseTags[0].Header != "ETag" {
+		t.Fatalf("response tags: %+v", got.ResponseTags)
+	}
+	if got.Bypass == nil || len(got.Bypass.Headers) != 1 || got.Bypass.Headers[0].RequireGatewayScope != "cache.bypass" {
+		t.Fatalf("bypass: %+v", got.Bypass)
+	}
+	if got.Coalesce == nil || !got.Coalesce.Enabled || got.Coalesce.WaitTimeoutStatus != 504 {
+		t.Fatalf("coalesce: %+v", got.Coalesce)
+	}
+	if got.Coalesce.Wait.Duration != want.Coalesce.Wait.Duration {
+		t.Fatalf("coalesce wait: %v", got.Coalesce.Wait)
+	}
+	if got.Enabled == nil || !*got.Enabled {
+		t.Fatalf("enabled: %v", got.Enabled)
 	}
 }

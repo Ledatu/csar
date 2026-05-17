@@ -326,6 +326,8 @@ func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_Su
 		snapshot.AuthzPolicies = authzPoliciesMapToProto(cfg.AuthzPolicies)
 		snapshot.BackendTlsPolicies = backendTLSPoliciesToProto(cfg.BackendTLSPolicies)
 		snapshot.BackendPools = backendPoolsToProto(cfg.BackendPools)
+		snapshot.CachePolicies = cachePoliciesMapToProto(cfg.CachePolicies)
+		snapshot.CacheInvalidationPolicies = cacheInvalidationPoliciesMapToProto(cfg.CacheInvalidationPolicies)
 
 		if cfg.GlobalThrottle != nil {
 			snapshot.GlobalThrottle = &csarv1.GlobalThrottleProto{
@@ -514,6 +516,14 @@ func routeEntryToProto(r *statestore.RouteEntry) *csarv1.RouteConfig {
 		rc.Authz = authzToProto(r.Route.Authz)
 	}
 
+	if r.Route.Audit != nil {
+		rc.AuditSet = true
+		rc.Audit = *r.Route.Audit
+	}
+	if r.Route.CacheInvalidate != nil {
+		rc.CacheInvalidate = cacheInvalidationToProto(r.Route.CacheInvalidate)
+	}
+
 	return rc
 }
 
@@ -649,18 +659,190 @@ func tenantToProto(t *config.TenantConfig) *csarv1.TenantConfigProto {
 	}
 }
 
+func cacheTTLRuleToProto(r config.CacheTTLRule) *csarv1.CacheTTLRuleProto {
+	pb := &csarv1.CacheTTLRuleProto{
+		When: r.When,
+		From: r.From,
+		To:   r.To,
+	}
+	if r.TTL.Duration != 0 {
+		pb.Ttl = durationpb.New(r.TTL.Duration)
+	}
+	return pb
+}
+
+func cacheKeyQueryToProto(k *config.CacheKeyQueryConfig) *csarv1.CacheKeyQueryConfigProto {
+	if k == nil {
+		return nil
+	}
+	return &csarv1.CacheKeyQueryConfigProto{
+		Include:   k.Include,
+		Exclude:   k.Exclude,
+		Sort:      k.Sort,
+		DropEmpty: k.DropEmpty,
+	}
+}
+
+func cacheResponseTTLRuleToProto(r config.CacheResponseTTLRule) *csarv1.CacheResponseTTLRuleProto {
+	pb := &csarv1.CacheResponseTTLRuleProto{
+		When:   r.When,
+		Header: r.Header,
+		Value:  r.Value,
+	}
+	if r.TTL.Duration != 0 {
+		pb.Ttl = durationpb.New(r.TTL.Duration)
+	}
+	return pb
+}
+
+func cacheResponseTagToProto(r config.CacheResponseTag) *csarv1.CacheResponseTagProto {
+	return &csarv1.CacheResponseTagProto{
+		Header: r.Header,
+		Prefix: r.Prefix,
+	}
+}
+
+func cacheBypassToProto(b *config.CacheBypassConfig) *csarv1.CacheBypassConfigProto {
+	if b == nil {
+		return nil
+	}
+	headers := make([]*csarv1.CacheBypassHeaderProto, 0, len(b.Headers))
+	for i := range b.Headers {
+		h := b.Headers[i]
+		headers = append(headers, &csarv1.CacheBypassHeaderProto{
+			Name:                h.Name,
+			Value:               h.Value,
+			RequireGatewayScope: h.RequireGatewayScope,
+		})
+	}
+	return &csarv1.CacheBypassConfigProto{Headers: headers}
+}
+
+func cacheCoalesceToProto(c *config.CacheCoalesceConfig) *csarv1.CacheCoalesceConfigProto {
+	if c == nil {
+		return nil
+	}
+	pb := &csarv1.CacheCoalesceConfigProto{
+		Enabled:           c.Enabled,
+		WaitTimeoutStatus: safeInt32(c.WaitTimeoutStatus),
+	}
+	if c.Wait.Duration != 0 {
+		pb.Wait = durationpb.New(c.Wait.Duration)
+	}
+	return pb
+}
+
 func cacheToProto(cc *config.CacheConfig) *csarv1.CacheConfigProto {
+	if cc == nil {
+		return nil
+	}
 	pb := &csarv1.CacheConfigProto{
-		Ttl:         durationpb.New(cc.TTL.Duration),
-		MaxEntries:  safeInt32(cc.MaxEntries),
-		MaxBodySize: cc.MaxBodySize,
-		Methods:     cc.Methods,
+		Use:           cc.Use,
+		Store:         cc.Store,
+		Key:           cc.Key,
+		FailMode:      cc.FailMode,
+		TtlJitter:     cc.TTLJitter,
+		MaxEntries:    safeInt32(cc.MaxEntries),
+		MaxBodySize:   cc.MaxBodySize,
+		Methods:       cc.Methods,
+		ContentTypes:  cc.ContentTypes,
+		Namespaces:    cc.Namespaces,
+		Tags:          cc.Tags,
+		VaryHeaders:   cc.VaryHeaders,
+		CacheStatuses: cc.CacheStatuses,
 	}
 	if cc.Enabled != nil {
 		pb.Enabled = *cc.Enabled
 		pb.EnabledSet = true
 	}
+	if cc.TTL.Duration != 0 {
+		pb.Ttl = durationpb.New(cc.TTL.Duration)
+	}
+	if cc.OperationTimeout.Duration != 0 {
+		pb.OperationTimeout = durationpb.New(cc.OperationTimeout.Duration)
+	}
+	if len(cc.TTLRules) > 0 {
+		pb.TtlRules = make([]*csarv1.CacheTTLRuleProto, 0, len(cc.TTLRules))
+		for i := range cc.TTLRules {
+			pb.TtlRules = append(pb.TtlRules, cacheTTLRuleToProto(cc.TTLRules[i]))
+		}
+	}
+	if kq := cacheKeyQueryToProto(cc.KeyQuery); kq != nil {
+		pb.KeyQuery = kq
+	}
+	if cc.StaleIfError.Duration != 0 {
+		pb.StaleIfError = durationpb.New(cc.StaleIfError.Duration)
+	}
+	if cc.StaleWhileRevalidate.Duration != 0 {
+		pb.StaleWhileRevalidate = durationpb.New(cc.StaleWhileRevalidate.Duration)
+	}
+	if len(cc.ResponseTTLRules) > 0 {
+		pb.ResponseTtlRules = make([]*csarv1.CacheResponseTTLRuleProto, 0, len(cc.ResponseTTLRules))
+		for i := range cc.ResponseTTLRules {
+			pb.ResponseTtlRules = append(pb.ResponseTtlRules, cacheResponseTTLRuleToProto(cc.ResponseTTLRules[i]))
+		}
+	}
+	if len(cc.ResponseTags) > 0 {
+		pb.ResponseTags = make([]*csarv1.CacheResponseTagProto, 0, len(cc.ResponseTags))
+		for i := range cc.ResponseTags {
+			pb.ResponseTags = append(pb.ResponseTags, cacheResponseTagToProto(cc.ResponseTags[i]))
+		}
+	}
+	if bp := cacheBypassToProto(cc.Bypass); bp != nil {
+		pb.Bypass = bp
+	}
+	if col := cacheCoalesceToProto(cc.Coalesce); col != nil {
+		pb.Coalesce = col
+	}
 	return pb
+}
+
+func cacheInvalidationToProto(ci *config.CacheInvalidationConfig) *csarv1.CacheInvalidationConfigProto {
+	if ci == nil {
+		return nil
+	}
+	pb := &csarv1.CacheInvalidationConfigProto{
+		Use:            ci.Use,
+		Store:          ci.Store,
+		Tags:           ci.Tags,
+		BumpNamespaces: ci.BumpNamespaces,
+		OnStatus:       ci.OnStatus,
+	}
+	if ci.Enabled != nil {
+		pb.Enabled = *ci.Enabled
+		pb.EnabledSet = true
+	}
+	if ci.OperationTimeout.Duration != 0 {
+		pb.OperationTimeout = durationpb.New(ci.OperationTimeout.Duration)
+	}
+	if ci.Debounce.Duration != 0 {
+		pb.Debounce = durationpb.New(ci.Debounce.Duration)
+	}
+	return pb
+}
+
+func cachePoliciesMapToProto(policies map[string]config.CacheConfig) map[string]*csarv1.CacheConfigProto {
+	if len(policies) == 0 {
+		return nil
+	}
+	out := make(map[string]*csarv1.CacheConfigProto, len(policies))
+	for name := range policies {
+		cc := policies[name]
+		out[name] = cacheToProto(&cc)
+	}
+	return out
+}
+
+func cacheInvalidationPoliciesMapToProto(policies map[string]config.CacheInvalidationConfig) map[string]*csarv1.CacheInvalidationConfigProto {
+	if len(policies) == 0 {
+		return nil
+	}
+	out := make(map[string]*csarv1.CacheInvalidationConfigProto, len(policies))
+	for name := range policies {
+		ci := policies[name]
+		out[name] = cacheInvalidationToProto(&ci)
+	}
+	return out
 }
 
 func authValidateToProto(a *config.AuthValidateConfig) *csarv1.AuthValidateConfigProto {

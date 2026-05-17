@@ -42,6 +42,8 @@ func FullSnapshotToConfig(snap *csarv1.FullConfigSnapshot) *config.Config {
 	cfg.AuthzPolicies = protoToAuthzPolicies(snap.GetAuthzPolicies())
 	cfg.BackendTLSPolicies = protoToBackendTLSPolicies(snap.GetBackendTlsPolicies())
 	cfg.BackendPools = protoToBackendPools(snap.GetBackendPools())
+	cfg.CachePolicies = protoToCachePoliciesMap(snap.GetCachePolicies())
+	cfg.CacheInvalidationPolicies = protoToCacheInvalidationPoliciesMap(snap.GetCacheInvalidationPolicies())
 
 	if gt := snap.GetGlobalThrottle(); gt != nil {
 		cfg.GlobalThrottle = &config.GlobalThrottleConfig{
@@ -129,6 +131,14 @@ func protoToRouteConfig(r *csarv1.RouteConfig) config.RouteConfig {
 	}
 	if r.GetAuthz() != nil {
 		rc.Authz = protoToAuthzRouteConfig(r.GetAuthz())
+	}
+
+	if r.GetAuditSet() {
+		v := r.GetAudit()
+		rc.Audit = &v
+	}
+	if r.GetCacheInvalidate() != nil {
+		rc.CacheInvalidate = protoToCacheInvalidationConfig(r.GetCacheInvalidate())
 	}
 
 	return rc
@@ -266,18 +276,183 @@ func protoToTenantConfig(t *csarv1.TenantConfigProto) *config.TenantConfig {
 	}
 }
 
+func protoToCacheTTLRule(p *csarv1.CacheTTLRuleProto) config.CacheTTLRule {
+	if p == nil {
+		return config.CacheTTLRule{}
+	}
+	return config.CacheTTLRule{
+		When: p.GetWhen(),
+		From: p.GetFrom(),
+		To:   p.GetTo(),
+		TTL:  durationFromProto(p.GetTtl()),
+	}
+}
+
+func protoToCacheKeyQuery(p *csarv1.CacheKeyQueryConfigProto) *config.CacheKeyQueryConfig {
+	if p == nil {
+		return nil
+	}
+	return &config.CacheKeyQueryConfig{
+		Include:   append([]string(nil), p.GetInclude()...),
+		Exclude:   append([]string(nil), p.GetExclude()...),
+		Sort:      p.GetSort(),
+		DropEmpty: p.GetDropEmpty(),
+	}
+}
+
+func protoToCacheResponseTTLRule(p *csarv1.CacheResponseTTLRuleProto) config.CacheResponseTTLRule {
+	if p == nil {
+		return config.CacheResponseTTLRule{}
+	}
+	return config.CacheResponseTTLRule{
+		When:   p.GetWhen(),
+		Header: p.GetHeader(),
+		Value:  p.GetValue(),
+		TTL:    durationFromProto(p.GetTtl()),
+	}
+}
+
+func protoToCacheResponseTag(p *csarv1.CacheResponseTagProto) config.CacheResponseTag {
+	if p == nil {
+		return config.CacheResponseTag{}
+	}
+	return config.CacheResponseTag{
+		Header: p.GetHeader(),
+		Prefix: p.GetPrefix(),
+	}
+}
+
+func protoToCacheBypass(p *csarv1.CacheBypassConfigProto) *config.CacheBypassConfig {
+	if p == nil {
+		return nil
+	}
+	hs := p.GetHeaders()
+	out := make([]config.CacheBypassHeader, 0, len(hs))
+	for _, h := range hs {
+		if h == nil {
+			continue
+		}
+		out = append(out, config.CacheBypassHeader{
+			Name:                h.GetName(),
+			Value:               h.GetValue(),
+			RequireGatewayScope: h.GetRequireGatewayScope(),
+		})
+	}
+	return &config.CacheBypassConfig{Headers: out}
+}
+
+func protoToCacheCoalesce(p *csarv1.CacheCoalesceConfigProto) *config.CacheCoalesceConfig {
+	if p == nil {
+		return nil
+	}
+	return &config.CacheCoalesceConfig{
+		Enabled:           p.GetEnabled(),
+		Wait:              durationFromProto(p.GetWait()),
+		WaitTimeoutStatus: int(p.GetWaitTimeoutStatus()),
+	}
+}
+
 func protoToCacheConfig(c *csarv1.CacheConfigProto) *config.CacheConfig {
+	if c == nil {
+		return nil
+	}
 	cc := &config.CacheConfig{
-		TTL:         configutil.Duration{Duration: c.GetTtl().AsDuration()},
-		MaxEntries:  int(c.GetMaxEntries()),
-		MaxBodySize: c.GetMaxBodySize(),
-		Methods:     c.GetMethods(),
+		Use:                  c.GetUse(),
+		Store:                c.GetStore(),
+		Key:                  c.GetKey(),
+		FailMode:             c.GetFailMode(),
+		TTL:                  durationFromProto(c.GetTtl()),
+		TTLJitter:            c.GetTtlJitter(),
+		MaxEntries:           int(c.GetMaxEntries()),
+		MaxBodySize:          c.GetMaxBodySize(),
+		Methods:              append([]string(nil), c.GetMethods()...),
+		ContentTypes:         append([]string(nil), c.GetContentTypes()...),
+		Namespaces:           append([]string(nil), c.GetNamespaces()...),
+		Tags:                 append([]string(nil), c.GetTags()...),
+		VaryHeaders:          append([]string(nil), c.GetVaryHeaders()...),
+		CacheStatuses:        append([]string(nil), c.GetCacheStatuses()...),
+		OperationTimeout:     durationFromProto(c.GetOperationTimeout()),
+		StaleIfError:         durationFromProto(c.GetStaleIfError()),
+		StaleWhileRevalidate: durationFromProto(c.GetStaleWhileRevalidate()),
 	}
 	if c.GetEnabledSet() {
 		v := c.GetEnabled()
 		cc.Enabled = &v
 	}
+	if tr := c.GetTtlRules(); len(tr) > 0 {
+		cc.TTLRules = make([]config.CacheTTLRule, 0, len(tr))
+		for _, r := range tr {
+			cc.TTLRules = append(cc.TTLRules, protoToCacheTTLRule(r))
+		}
+	}
+	cc.KeyQuery = protoToCacheKeyQuery(c.GetKeyQuery())
+	if rtr := c.GetResponseTtlRules(); len(rtr) > 0 {
+		cc.ResponseTTLRules = make([]config.CacheResponseTTLRule, 0, len(rtr))
+		for _, r := range rtr {
+			cc.ResponseTTLRules = append(cc.ResponseTTLRules, protoToCacheResponseTTLRule(r))
+		}
+	}
+	if rtg := c.GetResponseTags(); len(rtg) > 0 {
+		cc.ResponseTags = make([]config.CacheResponseTag, 0, len(rtg))
+		for _, t := range rtg {
+			cc.ResponseTags = append(cc.ResponseTags, protoToCacheResponseTag(t))
+		}
+	}
+	cc.Bypass = protoToCacheBypass(c.GetBypass())
+	cc.Coalesce = protoToCacheCoalesce(c.GetCoalesce())
 	return cc
+}
+
+func protoToCachePoliciesMap(m map[string]*csarv1.CacheConfigProto) map[string]config.CacheConfig {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]config.CacheConfig, len(m))
+	for name, pb := range m {
+		if pb == nil {
+			continue
+		}
+		out[name] = *protoToCacheConfig(pb)
+	}
+	return out
+}
+
+func protoToCacheInvalidationConfig(c *csarv1.CacheInvalidationConfigProto) *config.CacheInvalidationConfig {
+	if c == nil {
+		return nil
+	}
+	ci := &config.CacheInvalidationConfig{
+		Use:            c.GetUse(),
+		Store:          c.GetStore(),
+		Tags:           c.GetTags(),
+		BumpNamespaces: c.GetBumpNamespaces(),
+		OnStatus:       c.GetOnStatus(),
+	}
+	if c.GetEnabledSet() {
+		v := c.GetEnabled()
+		ci.Enabled = &v
+	}
+	if op := c.GetOperationTimeout(); op != nil {
+		ci.OperationTimeout = configutil.Duration{Duration: op.AsDuration()}
+	}
+	if deb := c.GetDebounce(); deb != nil {
+		ci.Debounce = configutil.Duration{Duration: deb.AsDuration()}
+	}
+	return ci
+}
+
+func protoToCacheInvalidationPoliciesMap(m map[string]*csarv1.CacheInvalidationConfigProto) map[string]config.CacheInvalidationConfig {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]config.CacheInvalidationConfig, len(m))
+	for name, pb := range m {
+		if pb == nil {
+			continue
+		}
+		out[name] = *protoToCacheInvalidationConfig(pb)
+	}
+	return out
 }
 
 func protoToAuthValidateConfig(a *csarv1.AuthValidateConfigProto) *config.AuthValidateConfig {

@@ -91,6 +91,8 @@ message FullConfigSnapshot {
   map<string, AuthzRouteConfigProto> authz_policies = 12;
   map<string, BackendTLSConfigProto> backend_tls_policies = 13;
   map<string, BackendPoolConfigProto> backend_pools = 14;
+  map<string, CacheConfigProto> cache_policies = 15;
+  map<string, CacheInvalidationConfigProto> cache_invalidation_policies = 16;
 
   // Global settings.
   GlobalThrottleProto global_throttle = 9;
@@ -131,6 +133,12 @@ message RouteConfig {
   int64 max_response_size = 22;
   ProtocolPolicyProto protocol = 23;
   AuthzRouteConfigProto authz = 24;
+
+  // Router access audit (csar-audit). When audit_set is false, the router uses
+  // default-by-HTTP-method behavior. Mirrors config.RouteConfig.Audit (*bool).
+  bool audit = 25;
+  bool audit_set = 26;
+  CacheInvalidationConfigProto cache_invalidate = 27;
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +324,48 @@ message TenantConfigProto {
 // Cache
 // ---------------------------------------------------------------------------
 
+message CacheTTLRuleProto {
+  string when = 1;
+  string from = 2;
+  string to = 3;
+  google.protobuf.Duration ttl = 4;
+}
+
+message CacheKeyQueryConfigProto {
+  repeated string include = 1;
+  repeated string exclude = 2;
+  bool sort = 3;
+  bool drop_empty = 4;
+}
+
+message CacheResponseTTLRuleProto {
+  string when = 1;
+  string header = 2;
+  string value = 3;
+  google.protobuf.Duration ttl = 4;
+}
+
+message CacheResponseTagProto {
+  string header = 1;
+  string prefix = 2;
+}
+
+message CacheBypassHeaderProto {
+  string name = 1;
+  string value = 2;
+  string require_gateway_scope = 3;
+}
+
+message CacheBypassConfigProto {
+  repeated CacheBypassHeaderProto headers = 1;
+}
+
+message CacheCoalesceConfigProto {
+  bool enabled = 1;
+  google.protobuf.Duration wait = 2;
+  int32 wait_timeout_status = 3;
+}
+
 message CacheConfigProto {
   bool enabled = 1;
   bool enabled_set = 2;
@@ -323,6 +373,39 @@ message CacheConfigProto {
   int32 max_entries = 4;
   int64 max_body_size = 5;
   repeated string methods = 6;
+
+  string use = 7;
+  string store = 8;
+  string key = 9;
+  string fail_mode = 10;
+  google.protobuf.Duration operation_timeout = 11;
+  string ttl_jitter = 12;
+  repeated CacheTTLRuleProto ttl_rules = 13;
+  CacheKeyQueryConfigProto key_query = 14;
+  google.protobuf.Duration stale_if_error = 15;
+  google.protobuf.Duration stale_while_revalidate = 16;
+  repeated string content_types = 17;
+  repeated CacheResponseTTLRuleProto response_ttl_rules = 18;
+  repeated CacheResponseTagProto response_tags = 19;
+  repeated string namespaces = 20;
+  CacheBypassConfigProto bypass = 21;
+  CacheCoalesceConfigProto coalesce = 22;
+  repeated string tags = 23;
+  repeated string vary_headers = 24;
+  repeated string cache_statuses = 25;
+}
+
+// CacheInvalidationConfigProto mirrors config.CacheInvalidationConfig.
+message CacheInvalidationConfigProto {
+  string use = 1;
+  bool enabled = 2;
+  bool enabled_set = 3;
+  string store = 4;
+  google.protobuf.Duration operation_timeout = 5;
+  repeated string tags = 6;
+  repeated string bump_namespaces = 7;
+  google.protobuf.Duration debounce = 8;
+  repeated string on_status = 9;
 }
 
 // ---------------------------------------------------------------------------

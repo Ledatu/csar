@@ -177,3 +177,113 @@ func TestFullSnapshotToConfig_SessionTLSWithBackendTLSPolicy(t *testing.T) {
 		t.Errorf("policy CertFile = %q, want /etc/csar/tls/csar-client.pem", policy.CertFile)
 	}
 }
+
+func TestFullSnapshotToConfig_AuditExplicitFalse(t *testing.T) {
+	snap := &csarv1.FullConfigSnapshot{
+		Routes: []*csarv1.RouteConfig{
+			{
+				Path:   "/svc/s3",
+				Method: "POST",
+				Backend: &csarv1.BackendConfigProto{
+					TargetUrl: "https://s3:8087",
+				},
+				AuditSet: true,
+				Audit:    false,
+			},
+		},
+	}
+
+	cfg := FullSnapshotToConfig(snap)
+	route, ok := cfg.Paths["/svc/s3"]["post"]
+	if !ok {
+		t.Fatal("route not found")
+	}
+	if route.Audit == nil || *route.Audit != false {
+		t.Fatalf("Audit = %v, want pointer to false", route.Audit)
+	}
+}
+
+func TestFullSnapshotToConfig_CachePolicyMaps(t *testing.T) {
+	snap := &csarv1.FullConfigSnapshot{
+		CachePolicies: map[string]*csarv1.CacheConfigProto{
+			"short": {
+				EnabledSet:       true,
+				Enabled:          true,
+				Ttl:              durationpb.New(30 * time.Second),
+				MaxEntries:       100,
+				Store:            "redis",
+				Key:              "analytics:{tenant}",
+				Tags:             []string{"t:{path.id}"},
+				VaryHeaders:      []string{"Accept"},
+				OperationTimeout: durationpb.New(50 * time.Millisecond),
+				CacheStatuses:    []string{"200"},
+				TtlRules: []*csarv1.CacheTTLRuleProto{
+					{
+						When: "query.date_range_contains_today",
+						Ttl:  durationpb.New(time.Minute),
+					},
+				},
+				KeyQuery: &csarv1.CacheKeyQueryConfigProto{
+					Include: []string{"marketplace"},
+					Sort:    true,
+				},
+			},
+		},
+		CacheInvalidationPolicies: map[string]*csarv1.CacheInvalidationConfigProto{
+			"on-write": {
+				Tags: []string{"widgets:{path.id}"},
+			},
+		},
+		Routes: []*csarv1.RouteConfig{
+			{
+				Path:    "/x",
+				Method:  "GET",
+				Backend: &csarv1.BackendConfigProto{TargetUrl: "http://upstream:8080"},
+			},
+		},
+	}
+
+	cfg := FullSnapshotToConfig(snap)
+	cc, ok := cfg.CachePolicies["short"]
+	if !ok {
+		t.Fatal("CachePolicies missing short")
+	}
+	if cc.Enabled == nil || !*cc.Enabled {
+		t.Fatalf("cache policy enabled = %v", cc.Enabled)
+	}
+	if cc.TTL.Duration != 30*time.Second {
+		t.Errorf("TTL = %v", cc.TTL.Duration)
+	}
+	if cc.MaxEntries != 100 {
+		t.Errorf("MaxEntries = %d", cc.MaxEntries)
+	}
+	if cc.Store != "redis" || cc.Key != "analytics:{tenant}" {
+		t.Errorf("store/key = %q %q", cc.Store, cc.Key)
+	}
+	if len(cc.Tags) != 1 || cc.Tags[0] != "t:{path.id}" {
+		t.Errorf("tags = %v", cc.Tags)
+	}
+	if len(cc.VaryHeaders) != 1 || cc.VaryHeaders[0] != "Accept" {
+		t.Errorf("vary = %v", cc.VaryHeaders)
+	}
+	if cc.OperationTimeout.Duration != 50*time.Millisecond {
+		t.Errorf("operation_timeout = %v", cc.OperationTimeout)
+	}
+	if len(cc.CacheStatuses) != 1 || cc.CacheStatuses[0] != "200" {
+		t.Errorf("cache_statuses = %v", cc.CacheStatuses)
+	}
+	if len(cc.TTLRules) != 1 || cc.TTLRules[0].When != "query.date_range_contains_today" {
+		t.Errorf("ttl_rules = %+v", cc.TTLRules)
+	}
+	if cc.KeyQuery == nil || len(cc.KeyQuery.Include) != 1 || !cc.KeyQuery.Sort {
+		t.Errorf("key_query = %+v", cc.KeyQuery)
+	}
+
+	ci, ok := cfg.CacheInvalidationPolicies["on-write"]
+	if !ok {
+		t.Fatal("CacheInvalidationPolicies missing on-write")
+	}
+	if len(ci.Tags) != 1 || ci.Tags[0] != "widgets:{path.id}" {
+		t.Errorf("tags = %v", ci.Tags)
+	}
+}
