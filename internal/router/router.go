@@ -43,6 +43,7 @@ type route struct {
 	allowCIDRs          []*net.IPNet               // nil = use global; empty after init = deny all (shouldn't happen)
 	hasRouteACL         bool                       // true if this route has its own x-csar-access (overrides global)
 	trustProxy          bool                       // route-scoped: trust X-Forwarded-For / X-Real-IP for this route
+	trustedProxyCIDRs   []*net.IPNet               // route-scoped direct proxy peers allowed to supply forwarded IP headers
 	pathPattern         *regexp.Regexp             // compiled regex when path contains {var:regex} variables
 	pathRewrite         string                     // rewrite template with $1/$2 back-references
 	method              string                     // HTTP method for this route (uppercase)
@@ -73,29 +74,30 @@ type vipOverride struct {
 // It matches incoming requests to configured routes and applies
 // the pipeline: ip_check -> cors -> security_inject -> throttle.Wait -> circuit_breaker -> proxy.Forward.
 type Router struct {
-	routes            map[string]*route // keyed by "METHOD:PATH" (exact/prefix routes)
-	regexRoutes       []*route          // routes with {var:regex} patterns (checked after exact, before prefix)
-	cfg               *config.Config
-	logger            *slog.Logger
-	metrics           *metrics.Metrics                   // nil if no metrics
-	telemetry         *telemetry.Provider                // nil if no telemetry
-	authInjector      *middleware.AuthInjector           // nil if no auth injection configured
-	jwtValidators     map[string]*authn.JWTValidator     // keyed by jwks_tls policy name ("" = default)
-	sessionValidators map[string]*authn.SessionValidator // keyed by session_tls policy name ("" = default)
-	authzClient       *authz.Client                      // nil if no route uses authz
-	auditClient       *audit.Client                      // nil if audit ingest is not configured
-	dlpRedactor       *dlp.Redactor                      // nil if no route uses DLP redaction
-	tenantRouter      *tenant.Router                     // nil if no route uses tenant routing
-	responseCache     *cache.ResponseCache               // nil if no route uses response caching
-	ssrfProtection    *proxy.SSRFProtection              // nil if SSRF protection is disabled
-	transportRegistry *transportRegistry                 // explicit outbound transport pools
-	throttleManager   *throttle.ThrottleManager          // manages all per-route throttlers
-	redisClient       *redis.Client                      // shared Redis client for distributed throttling (nil if not configured)
-	pools             []*loadbalancer.Pool               // tracked for Close() cleanup on reload
-	globalCIDRs       []*net.IPNet                       // parsed global access_control.allow_cidrs
-	hasGlobalACL      bool                               // true if global access_control is configured
-	globalTrustProxy  bool                               // global default for trust_proxy (from access_control)
-	reqIDHeader       string                             // resolved request ID header name (default: "X-Request-ID")
+	routes               map[string]*route // keyed by "METHOD:PATH" (exact/prefix routes)
+	regexRoutes          []*route          // routes with {var:regex} patterns (checked after exact, before prefix)
+	cfg                  *config.Config
+	logger               *slog.Logger
+	metrics              *metrics.Metrics                   // nil if no metrics
+	telemetry            *telemetry.Provider                // nil if no telemetry
+	authInjector         *middleware.AuthInjector           // nil if no auth injection configured
+	jwtValidators        map[string]*authn.JWTValidator     // keyed by jwks_tls policy name ("" = default)
+	sessionValidators    map[string]*authn.SessionValidator // keyed by session_tls policy name ("" = default)
+	authzClient          *authz.Client                      // nil if no route uses authz
+	auditClient          *audit.Client                      // nil if audit ingest is not configured
+	dlpRedactor          *dlp.Redactor                      // nil if no route uses DLP redaction
+	tenantRouter         *tenant.Router                     // nil if no route uses tenant routing
+	responseCache        *cache.ResponseCache               // nil if no route uses response caching
+	ssrfProtection       *proxy.SSRFProtection              // nil if SSRF protection is disabled
+	transportRegistry    *transportRegistry                 // explicit outbound transport pools
+	throttleManager      *throttle.ThrottleManager          // manages all per-route throttlers
+	redisClient          *redis.Client                      // shared Redis client for distributed throttling (nil if not configured)
+	pools                []*loadbalancer.Pool               // tracked for Close() cleanup on reload
+	globalCIDRs          []*net.IPNet                       // parsed global access_control.allow_cidrs
+	hasGlobalACL         bool                               // true if global access_control is configured
+	globalTrustProxy     bool                               // global default for trust_proxy (from access_control)
+	globalTrustedProxies []*net.IPNet                       // parsed global access_control.trusted_proxy_cidrs
+	reqIDHeader          string                             // resolved request ID header name (default: "X-Request-ID")
 }
 
 // GetThrottler returns the throttler for a given route key (for observability).

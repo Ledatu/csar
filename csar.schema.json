@@ -192,8 +192,14 @@
         },
         "trust_proxy": {
           "type": "boolean",
-          "description": "Trust X-Forwarded-For / X-Real-IP headers for extracting the real client IP.",
+          "description": "Allow trusted proxy peers to supply X-Forwarded-For / X-Real-IP headers for extracting the real client IP.",
           "default": false
+        },
+        "trusted_proxy_cidrs": {
+          "type": "array",
+          "description": "Direct proxy peer IP addresses or CIDR ranges whose forwarded client IP headers are trusted.",
+          "items": { "type": "string" },
+          "examples": [["172.25.0.1/32", "10.70.0.0/24"]]
         }
       }
     },

@@ -61,18 +61,29 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 		)
 	}
 
-	// Parse global access control CIDRs
-	if cfg.AccessControl != nil && len(cfg.AccessControl.AllowCIDRs) > 0 {
-		nets, err := parseCIDRList(cfg.AccessControl.AllowCIDRs)
-		if err != nil {
-			return nil, fmt.Errorf("global access_control: %w", err)
-		}
-		r.globalCIDRs = nets
-		r.hasGlobalACL = true
+	// Parse global access control and trusted proxy CIDRs. Trusting proxy
+	// headers is independent from applying a global IP allowlist.
+	if cfg.AccessControl != nil {
 		r.globalTrustProxy = cfg.AccessControl.TrustProxy
-		logger.Info("global IP allowlist configured",
+		if len(cfg.AccessControl.AllowCIDRs) > 0 {
+			nets, err := parseCIDRList(cfg.AccessControl.AllowCIDRs)
+			if err != nil {
+				return nil, fmt.Errorf("global access_control: %w", err)
+			}
+			r.globalCIDRs = nets
+			r.hasGlobalACL = true
+		}
+		if len(cfg.AccessControl.TrustedProxyCIDRs) > 0 {
+			nets, err := parseCIDRList(cfg.AccessControl.TrustedProxyCIDRs)
+			if err != nil {
+				return nil, fmt.Errorf("global access_control.trusted_proxy_cidrs: %w", err)
+			}
+			r.globalTrustedProxies = nets
+		}
+		logger.Info("global access control configured",
 			"cidrs", cfg.AccessControl.AllowCIDRs,
 			"trust_proxy", r.globalTrustProxy,
+			"trusted_proxy_cidrs", cfg.AccessControl.TrustedProxyCIDRs,
 		)
 	}
 
@@ -359,22 +370,35 @@ func (r *Router) setupSecurity(rt *route, fr config.FlatRoute, key string, logge
 
 // setupAccess configures IP access control for a route.
 func (r *Router) setupAccess(rt *route, fr config.FlatRoute, key string, logger *slog.Logger) error {
-	if fr.Route.Access != nil && len(fr.Route.Access.AllowCIDRs) > 0 {
-		nets, err := parseCIDRList(fr.Route.Access.AllowCIDRs)
-		if err != nil {
-			return fmt.Errorf("route %s x-csar-access: %w", key, err)
+	if fr.Route.Access != nil {
+		if len(fr.Route.Access.AllowCIDRs) > 0 {
+			nets, err := parseCIDRList(fr.Route.Access.AllowCIDRs)
+			if err != nil {
+				return fmt.Errorf("route %s x-csar-access: %w", key, err)
+			}
+			rt.allowCIDRs = nets
+			rt.hasRouteACL = true
 		}
-		rt.allowCIDRs = nets
-		rt.hasRouteACL = true
+		if len(fr.Route.Access.TrustedProxyCIDRs) > 0 {
+			nets, err := parseCIDRList(fr.Route.Access.TrustedProxyCIDRs)
+			if err != nil {
+				return fmt.Errorf("route %s x-csar-access.trusted_proxy_cidrs: %w", key, err)
+			}
+			rt.trustedProxyCIDRs = nets
+		} else {
+			rt.trustedProxyCIDRs = r.globalTrustedProxies
+		}
 		rt.trustProxy = fr.Route.Access.TrustProxy
-		logger.Info("route IP allowlist configured",
+		logger.Info("route access control configured",
 			"route", key,
 			"cidrs", fr.Route.Access.AllowCIDRs,
 			"trust_proxy", rt.trustProxy,
+			"trusted_proxy_cidrs", fr.Route.Access.TrustedProxyCIDRs,
 		)
 	} else {
-		// No per-route ACL — inherit global trust_proxy setting
+		// No per-route access control — inherit global trust_proxy settings.
 		rt.trustProxy = r.globalTrustProxy
+		rt.trustedProxyCIDRs = r.globalTrustedProxies
 	}
 	return nil
 }

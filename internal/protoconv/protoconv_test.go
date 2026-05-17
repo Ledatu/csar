@@ -20,6 +20,24 @@ func TestProtoToAuthValidateConfig_PreservesJWKSTLS(t *testing.T) {
 	}
 }
 
+func TestProtoToAccessControl_PreservesTrustedProxyCIDRs(t *testing.T) {
+	cfg := protoToAccessControl(&csarv1.AccessControlProto{
+		AllowCidrs:        []string{"203.0.113.0/24"},
+		TrustProxy:        true,
+		TrustedProxyCidrs: []string{"127.0.0.1/32"},
+	})
+
+	if got, want := cfg.AllowCIDRs[0], "203.0.113.0/24"; got != want {
+		t.Fatalf("AllowCIDRs[0] = %q, want %q", got, want)
+	}
+	if !cfg.TrustProxy {
+		t.Fatal("TrustProxy = false, want true")
+	}
+	if got, want := cfg.TrustedProxyCIDRs[0], "127.0.0.1/32"; got != want {
+		t.Fatalf("TrustedProxyCIDRs[0] = %q, want %q", got, want)
+	}
+}
+
 func TestFullSnapshotToConfig_BackendTLSPolicies(t *testing.T) {
 	snap := &csarv1.FullConfigSnapshot{
 		BackendTlsPolicies: map[string]*csarv1.BackendTLSConfigProto{

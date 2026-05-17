@@ -28,6 +28,48 @@ func TestValidate_NoPaths(t *testing.T) {
 	}
 }
 
+func TestValidate_GlobalTrustProxyRequiresTrustedProxyCIDRs(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		AccessControl: &AccessControlConfig{
+			TrustProxy: true,
+		},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{Backend: BackendConfig{TargetURL: "http://localhost"}}},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() should fail when global trust_proxy lacks trusted_proxy_cidrs")
+	}
+
+	cfg.AccessControl.TrustedProxyCIDRs = []string{"127.0.0.1/32"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error with trusted_proxy_cidrs: %v", err)
+	}
+}
+
+func TestValidate_RouteTrustProxyCanUseGlobalTrustedProxyCIDRs(t *testing.T) {
+	cfg := &Config{
+		ListenAddr: ":8080",
+		AccessControl: &AccessControlConfig{
+			TrustedProxyCIDRs: []string{"127.0.0.1/32"},
+		},
+		Paths: map[string]PathConfig{
+			"/test": {"get": RouteConfig{
+				Backend: BackendConfig{TargetURL: "http://localhost"},
+				Access: &AccessControlConfig{
+					TrustProxy: true,
+				},
+			}},
+		},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error when route uses global trusted_proxy_cidrs: %v", err)
+	}
+}
+
 func TestValidate_MissingTargetURL(t *testing.T) {
 	cfg := &Config{
 		ListenAddr: ":8080",

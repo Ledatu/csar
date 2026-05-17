@@ -22,6 +22,24 @@ func newTestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+func TestAccessControlToProto_PreservesTrustedProxyCIDRs(t *testing.T) {
+	pb := accessControlToProto(&config.AccessControlConfig{
+		AllowCIDRs:        []string{"203.0.113.0/24"},
+		TrustProxy:        true,
+		TrustedProxyCIDRs: []string{"127.0.0.1/32"},
+	})
+
+	if got, want := pb.GetAllowCidrs()[0], "203.0.113.0/24"; got != want {
+		t.Fatalf("AllowCidrs[0] = %q, want %q", got, want)
+	}
+	if !pb.GetTrustProxy() {
+		t.Fatal("TrustProxy = false, want true")
+	}
+	if got, want := pb.GetTrustedProxyCidrs()[0], "127.0.0.1/32"; got != want {
+		t.Fatalf("TrustedProxyCidrs[0] = %q, want %q", got, want)
+	}
+}
+
 // testEnv sets up a coordinator gRPC server and returns a client + cleanup func.
 func testEnv(t *testing.T) (csarv1.CoordinatorServiceClient, *Coordinator, func()) {
 	t.Helper()

@@ -41,7 +41,7 @@ func (r *Router) wrapUpstreamWithAudit(rt *route, next http.Handler) http.Handle
 		next.ServeHTTP(rec, req)
 
 		gw := gatewayctx.FromRequest(req)
-		clientIP := extractClientIP(req, rt.trustProxy)
+		clientIP := extractClientIP(req, rt.trustProxy, rt.trustedProxyCIDRs)
 
 		scopeType := "platform"
 		scopeID := ""

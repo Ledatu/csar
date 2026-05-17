@@ -2862,11 +2862,12 @@ func (x *CacheInvalidationConfigProto) GetOnStatus() []string {
 }
 
 type AccessControlProto struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AllowCidrs    []string               `protobuf:"bytes,1,rep,name=allow_cidrs,json=allowCidrs,proto3" json:"allow_cidrs,omitempty"`
-	TrustProxy    bool                   `protobuf:"varint,2,opt,name=trust_proxy,json=trustProxy,proto3" json:"trust_proxy,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	AllowCidrs        []string               `protobuf:"bytes,1,rep,name=allow_cidrs,json=allowCidrs,proto3" json:"allow_cidrs,omitempty"`
+	TrustProxy        bool                   `protobuf:"varint,2,opt,name=trust_proxy,json=trustProxy,proto3" json:"trust_proxy,omitempty"`
+	TrustedProxyCidrs []string               `protobuf:"bytes,3,rep,name=trusted_proxy_cidrs,json=trustedProxyCidrs,proto3" json:"trusted_proxy_cidrs,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *AccessControlProto) Reset() {
@@ -2911,6 +2912,13 @@ func (x *AccessControlProto) GetTrustProxy() bool {
 		return x.TrustProxy
 	}
 	return false
+}
+
+func (x *AccessControlProto) GetTrustedProxyCidrs() []string {
+	if x != nil {
+		return x.TrustedProxyCidrs
+	}
+	return nil
 }
 
 type ResilienceConfigProto struct {
@@ -3812,12 +3820,13 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x04tags\x18\x06 \x03(\tR\x04tags\x12'\n" +
 	"\x0fbump_namespaces\x18\a \x03(\tR\x0ebumpNamespaces\x125\n" +
 	"\bdebounce\x18\b \x01(\v2\x19.google.protobuf.DurationR\bdebounce\x12\x1b\n" +
-	"\ton_status\x18\t \x03(\tR\bonStatus\"V\n" +
+	"\ton_status\x18\t \x03(\tR\bonStatus\"\x86\x01\n" +
 	"\x12AccessControlProto\x12\x1f\n" +
 	"\vallow_cidrs\x18\x01 \x03(\tR\n" +
 	"allowCidrs\x12\x1f\n" +
 	"\vtrust_proxy\x18\x02 \x01(\bR\n" +
-	"trustProxy\"@\n" +
+	"trustProxy\x12.\n" +
+	"\x13trusted_proxy_cidrs\x18\x03 \x03(\tR\x11trustedProxyCidrs\"@\n" +
 	"\x15ResilienceConfigProto\x12'\n" +
 	"\x0fcircuit_breaker\x18\x01 \x01(\tR\x0ecircuitBreaker\"\xd8\x01\n" +
 	"\x1aCircuitBreakerProfileProto\x12!\n" +

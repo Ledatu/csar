@@ -477,8 +477,9 @@ func protoToAuthValidateConfig(a *csarv1.AuthValidateConfigProto) *config.AuthVa
 
 func protoToAccessControl(a *csarv1.AccessControlProto) *config.AccessControlConfig {
 	return &config.AccessControlConfig{
-		AllowCIDRs: a.GetAllowCidrs(),
-		TrustProxy: a.GetTrustProxy(),
+		AllowCIDRs:        a.GetAllowCidrs(),
+		TrustProxy:        a.GetTrustProxy(),
+		TrustedProxyCIDRs: a.GetTrustedProxyCidrs(),
 	}
 }
 

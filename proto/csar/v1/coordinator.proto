@@ -415,6 +415,7 @@ message CacheInvalidationConfigProto {
 message AccessControlProto {
   repeated string allow_cidrs = 1;
   bool trust_proxy = 2;
+  repeated string trusted_proxy_cidrs = 3;
 }
 
 // ---------------------------------------------------------------------------

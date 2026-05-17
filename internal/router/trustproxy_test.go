@@ -17,8 +17,9 @@ func TestRouter_TrustProxy_XForwardedFor(t *testing.T) {
 	cfg := &config.Config{
 		ListenAddr: ":8080",
 		AccessControl: &config.AccessControlConfig{
-			AllowCIDRs: []string{"203.0.113.50"},
-			TrustProxy: true,
+			AllowCIDRs:        []string{"203.0.113.50"},
+			TrustProxy:        true,
+			TrustedProxyCIDRs: []string{"127.0.0.1"},
 		},
 		Paths: map[string]config.PathConfig{
 			"/api": {
@@ -66,8 +67,9 @@ func TestRouter_TrustProxy_XRealIP(t *testing.T) {
 	cfg := &config.Config{
 		ListenAddr: ":8080",
 		AccessControl: &config.AccessControlConfig{
-			AllowCIDRs: []string{"203.0.113.50"},
-			TrustProxy: true,
+			AllowCIDRs:        []string{"203.0.113.50"},
+			TrustProxy:        true,
+			TrustedProxyCIDRs: []string{"127.0.0.1"},
 		},
 		Paths: map[string]config.PathConfig{
 			"/api": {
@@ -94,6 +96,81 @@ func TestRouter_TrustProxy_XRealIP(t *testing.T) {
 	}
 }
 
+func TestRouter_TrustProxy_RequiresTrustedProxyPeer(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		ListenAddr: ":8080",
+		AccessControl: &config.AccessControlConfig{
+			AllowCIDRs:        []string{"203.0.113.50"},
+			TrustProxy:        true,
+			TrustedProxyCIDRs: []string{"127.0.0.1"},
+		},
+		Paths: map[string]config.PathConfig{
+			"/api": {
+				"get": config.RouteConfig{
+					Backend: config.BackendConfig{TargetURL: upstream.URL},
+				},
+			},
+		},
+	}
+
+	r, err := New(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api", nil)
+	req.RemoteAddr = "198.51.100.10:9999"
+	req.Header.Set("X-Forwarded-For", "203.0.113.50")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("untrusted proxy peer with XFF: status = %d, want 403", rec.Code)
+	}
+}
+
+func TestRouter_TrustProxy_WithoutGlobalAllowlist(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	cfg := &config.Config{
+		ListenAddr: ":8080",
+		AccessControl: &config.AccessControlConfig{
+			TrustProxy:        true,
+			TrustedProxyCIDRs: []string{"127.0.0.1"},
+		},
+		Paths: map[string]config.PathConfig{
+			"/api": {
+				"get": config.RouteConfig{
+					Backend: config.BackendConfig{TargetURL: upstream.URL},
+				},
+			},
+		},
+	}
+
+	r, err := New(cfg, newTestLogger())
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api", nil)
+	req.RemoteAddr = "127.0.0.1:9999"
+	req.Header.Set("X-Forwarded-For", "203.0.113.50")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("trust_proxy without global allowlist: status = %d, want 200", rec.Code)
+	}
+}
+
 func TestRouter_TrustProxy_RouteIsolation(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -108,8 +185,9 @@ func TestRouter_TrustProxy_RouteIsolation(t *testing.T) {
 				"get": config.RouteConfig{
 					Backend: config.BackendConfig{TargetURL: upstream.URL},
 					Access: &config.AccessControlConfig{
-						AllowCIDRs: []string{"203.0.113.0/24"},
-						TrustProxy: true, // trusts X-Forwarded-For
+						AllowCIDRs:        []string{"203.0.113.0/24"},
+						TrustProxy:        true, // trusts X-Forwarded-For from configured proxy peers
+						TrustedProxyCIDRs: []string{"127.0.0.1"},
 					},
 				},
 			},
@@ -170,8 +248,9 @@ func TestRouter_TrustProxy_XFF_Spoofing_Prevention(t *testing.T) {
 	cfg := &config.Config{
 		ListenAddr: ":8080",
 		AccessControl: &config.AccessControlConfig{
-			AllowCIDRs: []string{"203.0.113.50"},
-			TrustProxy: true,
+			AllowCIDRs:        []string{"203.0.113.50"},
+			TrustProxy:        true,
+			TrustedProxyCIDRs: []string{"10.0.0.1"},
 		},
 		Paths: map[string]config.PathConfig{
 			"/api": {

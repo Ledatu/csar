@@ -119,7 +119,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func (r *Router) serveWithIPCheck(w http.ResponseWriter, req *http.Request, rt *route) {
 	// Step -1: IP access control (checked before anything else)
 	if !r.checkIPAccess(rt, req) {
-		clientIP := extractClientIP(req, rt.trustProxy)
+		clientIP := extractClientIP(req, rt.trustProxy, rt.trustedProxyCIDRs)
 		r.logger.Warn("request denied by IP allowlist",
 			"client_ip", clientIP,
 			"route", rt.routeKey,
@@ -325,7 +325,7 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 		// Check exclude-IPs: skip throttle if client IP is in the exclusion list.
 		skipThrottle := false
 		if len(rt.excludeIPs) > 0 {
-			clientIP := extractClientIP(req, rt.trustProxy)
+			clientIP := extractClientIP(req, rt.trustProxy, rt.trustedProxyCIDRs)
 			ip := net.ParseIP(clientIP)
 			if ip != nil {
 				for _, cidr := range rt.excludeIPs {

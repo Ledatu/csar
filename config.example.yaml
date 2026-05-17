@@ -31,7 +31,9 @@ listen_addr: ":8080"
 #     - "172.16.0.0/12"       # Docker / private range
 #     - "192.168.1.100"       # Specific host
 #     - "::1"                 # IPv6 loopback
-#   trust_proxy: false        # Set true to use X-Forwarded-For / X-Real-IP
+#   trust_proxy: false        # Set true to use X-Forwarded-For / X-Real-IP from trusted proxy peers
+#   trusted_proxy_cidrs:
+#     - "172.25.0.1/32"       # Direct proxy peer allowed to supply forwarded client IP headers
 
 # --- SSRF Protection ---
 # Blocks outbound proxy connections to internal/private/metadata IPs.

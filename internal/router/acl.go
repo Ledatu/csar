@@ -21,7 +21,7 @@ func (r *Router) checkIPAccess(rt *route, req *http.Request) bool {
 		return true // no ACL configured
 	}
 
-	clientIP := extractClientIP(req, rt.trustProxy)
+	clientIP := extractClientIP(req, rt.trustProxy, rt.trustedProxyCIDRs)
 	ip := net.ParseIP(clientIP)
 	if ip == nil {
 		return false // unparseable IP is denied
@@ -36,7 +36,8 @@ func (r *Router) checkIPAccess(rt *route, req *http.Request) bool {
 }
 
 // extractClientIP gets the client IP from the request.
-// If trustProxy is true, X-Forwarded-For and X-Real-IP are checked first.
+// If trustProxy is true and RemoteAddr is a trusted proxy peer,
+// X-Forwarded-For and X-Real-IP are checked first.
 //
 // SECURITY: We take the RIGHTMOST IP in X-Forwarded-For, because the last
 // proxy in the chain appends the real client IP. Taking the leftmost is
@@ -44,8 +45,8 @@ func (r *Router) checkIPAccess(rt *route, req *http.Request) bool {
 // and the proxy appends the actual IP, making leftmost the spoofed one.
 //
 // This is a package-level function (not a method) since trust is route-scoped.
-func extractClientIP(req *http.Request, trustProxy bool) string {
-	if trustProxy {
+func extractClientIP(req *http.Request, trustProxy bool, trustedProxyCIDRs []*net.IPNet) string {
+	if trustProxy && isTrustedProxyPeer(req.RemoteAddr, trustedProxyCIDRs) {
 		// X-Forwarded-For: client, proxy1, proxy2
 		// The rightmost IP is the one appended by the last (trusted) proxy.
 		if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
@@ -69,6 +70,26 @@ func extractClientIP(req *http.Request, trustProxy bool) string {
 		return req.RemoteAddr // best effort
 	}
 	return host
+}
+
+func isTrustedProxyPeer(remoteAddr string, trustedProxyCIDRs []*net.IPNet) bool {
+	if len(trustedProxyCIDRs) == 0 {
+		return false
+	}
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	if ip == nil {
+		return false
+	}
+	for _, cidr := range trustedProxyCIDRs {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseCIDRList parses a list of IP addresses and CIDR ranges into []*net.IPNet.

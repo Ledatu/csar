@@ -247,6 +247,10 @@ type AccessControlConfig struct {
 	// TrustProxy controls whether X-Forwarded-For / X-Real-IP headers are
 	// trusted for extracting the real client IP. Default: false (use RemoteAddr).
 	TrustProxy bool `yaml:"trust_proxy,omitempty" json:"trust_proxy,omitempty"`
+
+	// TrustedProxyCIDRs is the list of direct proxy peers allowed to supply
+	// X-Forwarded-For / X-Real-IP. Headers from any other RemoteAddr are ignored.
+	TrustedProxyCIDRs []string `yaml:"trusted_proxy_cidrs,omitempty" json:"trusted_proxy_cidrs,omitempty"`
 }
 
 // SourceMeta records where a config field was declared.

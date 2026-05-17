@@ -141,9 +141,17 @@ func (c *Config) Validate() error {
 
 	// Validate global access control
 	if c.AccessControl != nil {
+		if c.AccessControl.TrustProxy && len(c.AccessControl.TrustedProxyCIDRs) == 0 {
+			return fmt.Errorf("access_control.trusted_proxy_cidrs is required when trust_proxy is true")
+		}
 		for _, cidr := range c.AccessControl.AllowCIDRs {
 			if err := validateCIDROrIP(cidr); err != nil {
 				return fmt.Errorf("access_control.allow_cidrs: %w", err)
+			}
+		}
+		for _, cidr := range c.AccessControl.TrustedProxyCIDRs {
+			if err := validateCIDROrIP(cidr); err != nil {
+				return fmt.Errorf("access_control.trusted_proxy_cidrs: %w", err)
 			}
 		}
 	}
@@ -305,9 +313,19 @@ func (c *Config) Validate() error {
 
 			// Validate per-route access control
 			if route.Access != nil {
+				hasTrustedProxyCIDRs := len(route.Access.TrustedProxyCIDRs) > 0 ||
+					(c.AccessControl != nil && len(c.AccessControl.TrustedProxyCIDRs) > 0)
+				if route.Access.TrustProxy && !hasTrustedProxyCIDRs {
+					return fmt.Errorf("path %s method %s: x-csar-access.trusted_proxy_cidrs is required when trust_proxy is true", path, method)
+				}
 				for _, cidr := range route.Access.AllowCIDRs {
 					if err := validateCIDROrIP(cidr); err != nil {
 						return fmt.Errorf("path %s method %s: x-csar-access.allow_cidrs: %w", path, method, err)
+					}
+				}
+				for _, cidr := range route.Access.TrustedProxyCIDRs {
+					if err := validateCIDROrIP(cidr); err != nil {
+						return fmt.Errorf("path %s method %s: x-csar-access.trusted_proxy_cidrs: %w", path, method, err)
 					}
 				}
 			}
