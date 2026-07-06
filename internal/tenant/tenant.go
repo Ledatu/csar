@@ -18,6 +18,8 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+
+	csarproxy "github.com/ledatu/csar/internal/proxy"
 )
 
 // Config configures multi-tenant routing for a single route.
@@ -157,6 +159,12 @@ func (tr *Router) getOrCreateProxy(targetURL string, transport http.RoundTripper
 			req.URL.Host = target.Host
 			req.URL.Path = target.Path
 			req.Host = target.Host
+		},
+		ModifyResponse: func(resp *http.Response) error {
+			if csarproxy.ShouldStripUpstreamCORS(resp.Request.Context()) {
+				csarproxy.StripUpstreamCORSHeaders(resp.Header)
+			}
+			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			w.Header().Set("Content-Type", "application/json")

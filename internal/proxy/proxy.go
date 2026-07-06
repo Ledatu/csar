@@ -31,6 +31,7 @@ var (
 	ctxKeyStatus    = csarCtxKey{"X-CSAR-Status"}
 	ctxKeyRetryAftr = csarCtxKey{"Retry-After"}
 	ctxKeyProtoVer  = csarCtxKey{"X-CSAR-Protocol-Version"}
+	ctxKeyStripCORS = csarCtxKey{"strip-upstream-cors"}
 )
 
 // WithCSARHeaders stores X-CSAR-Wait-MS, X-CSAR-Status, Retry-After, and
@@ -55,6 +56,29 @@ func WithProtocolVersion(ctx context.Context, version string) context.Context {
 		ctx = context.WithValue(ctx, ctxKeyProtoVer, version)
 	}
 	return ctx
+}
+
+// WithStripUpstreamCORS marks a proxied request whose upstream CORS response
+// headers must be removed before CSAR's own CORS headers are sent.
+func WithStripUpstreamCORS(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxKeyStripCORS, true)
+}
+
+// ShouldStripUpstreamCORS reports whether upstream CORS headers should be
+// removed from the proxied response.
+func ShouldStripUpstreamCORS(ctx context.Context) bool {
+	v, _ := ctx.Value(ctxKeyStripCORS).(bool)
+	return v
+}
+
+// StripUpstreamCORSHeaders removes upstream CORS response headers so CSAR can
+// remain the sole CORS authority for routes with x-csar-cors configured.
+func StripUpstreamCORSHeaders(h http.Header) {
+	for k := range h {
+		if strings.HasPrefix(strings.ToLower(k), "access-control-") {
+			delete(h, k)
+		}
+	}
 }
 
 // TLSConfig configures outbound TLS for the reverse proxy.
@@ -244,6 +268,9 @@ func joinPaths(base, reqPath string) string {
 // because httputil.ReverseProxy replaces the ResponseWriter's header map.
 func (rp *ReverseProxy) modifyResponse(resp *http.Response) error {
 	ctx := resp.Request.Context()
+	if ShouldStripUpstreamCORS(ctx) {
+		StripUpstreamCORSHeaders(resp.Header)
+	}
 	if v, ok := ctx.Value(ctxKeyWaitMS).(string); ok && v != "" {
 		resp.Header.Set("X-CSAR-Wait-MS", v)
 	}

@@ -413,6 +413,9 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 	// Always inject protocol version into context for proxy passthrough.
 	{
 		ctx := proxy.WithProtocolVersion(req.Context(), ProtocolVersion)
+		if rt.corsConfig != nil {
+			ctx = proxy.WithStripUpstreamCORS(ctx)
+		}
 		if totalWait > 0 {
 			// Honor per-route protocol policy for wait-MS emission.
 			emitWaitMS := true

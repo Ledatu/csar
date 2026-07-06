@@ -1,11 +1,13 @@
 package proxy
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -108,6 +110,74 @@ func TestReverseProxy_UpstreamHeaders(t *testing.T) {
 	// Director should rewrite Host to the target
 	if receivedHost != rp.Target().Host {
 		t.Errorf("upstream received Host = %q, want %q", receivedHost, rp.Target().Host)
+	}
+}
+
+func TestStripUpstreamCORSHeaders(t *testing.T) {
+	headers := http.Header{
+		"Access-Control-Allow-Origin":      {"*"},
+		"Access-Control-Allow-Credentials": {"true"},
+		"Access-Control-Allow-Methods":     {"GET, POST"},
+		"Access-Control-Allow-Headers":     {"Authorization"},
+		"Access-Control-Expose-Headers":    {"X-Upstream"},
+		"Access-Control-Max-Age":           {"86400"},
+		"access-control-private-network":   {"true"},
+		"Content-Type":                     {"application/json"},
+		"X-Upstream":                       {"ok"},
+	}
+
+	StripUpstreamCORSHeaders(headers)
+
+	for k := range headers {
+		if strings.HasPrefix(strings.ToLower(k), "access-control-") {
+			t.Fatalf("CORS header %q was not stripped", k)
+		}
+	}
+	if got := headers.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if got := headers.Get("X-Upstream"); got != "ok" {
+		t.Fatalf("X-Upstream = %q, want ok", got)
+	}
+}
+
+func TestModifyResponse_StripsUpstreamCORSWhenEnabled(t *testing.T) {
+	rp := &ReverseProxy{}
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req = req.WithContext(WithStripUpstreamCORS(req.Context()))
+	resp := &http.Response{
+		Request: req,
+		Header: http.Header{
+			"Access-Control-Allow-Origin": {"*"},
+			"X-Upstream":                  {"ok"},
+		},
+	}
+
+	if err := rp.modifyResponse(resp); err != nil {
+		t.Fatalf("modifyResponse() error = %v", err)
+	}
+	if got := resp.Header.Values("Access-Control-Allow-Origin"); len(got) != 0 {
+		t.Fatalf("Access-Control-Allow-Origin = %#v, want stripped", got)
+	}
+	if got := resp.Header.Get("X-Upstream"); got != "ok" {
+		t.Fatalf("X-Upstream = %q, want ok", got)
+	}
+}
+
+func TestModifyResponse_PreservesUpstreamCORSWhenDisabled(t *testing.T) {
+	rp := &ReverseProxy{}
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req = req.WithContext(context.Background())
+	resp := &http.Response{
+		Request: req,
+		Header:  http.Header{"Access-Control-Allow-Origin": {"*"}},
+	}
+
+	if err := rp.modifyResponse(resp); err != nil {
+		t.Fatalf("modifyResponse() error = %v", err)
+	}
+	if got := resp.Header.Values("Access-Control-Allow-Origin"); len(got) != 1 || got[0] != "*" {
+		t.Fatalf("Access-Control-Allow-Origin = %#v, want [*]", got)
 	}
 }
 

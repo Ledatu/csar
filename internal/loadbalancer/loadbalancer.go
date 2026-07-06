@@ -25,6 +25,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	csarproxy "github.com/ledatu/csar/internal/proxy"
 )
 
 // Strategy defines the load balancing algorithm.
@@ -148,6 +150,12 @@ func New(targetURLs []string, strategy Strategy, logger *slog.Logger, opts ...Po
 
 		rp := &httputil.ReverseProxy{
 			Director: newDirector(target, p.pathMode),
+			ModifyResponse: func(resp *http.Response) error {
+				if csarproxy.ShouldStripUpstreamCORS(resp.Request.Context()) {
+					csarproxy.StripUpstreamCORSHeaders(resp.Header)
+				}
+				return nil
+			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 				w.Header().Set("Content-Type", "application/json")
 				var netErr net.Error
