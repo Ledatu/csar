@@ -693,16 +693,27 @@ func (r *Router) setupSession(rt *route, fr config.FlatRoute, cfg *config.Config
 	}
 
 	rt.sessionValidator = sv
+	issueTokens := make([]authn.IssueTokenConfig, 0, len(fr.Route.AuthValidate.IssueTokens))
+	for _, token := range fr.Route.AuthValidate.IssueTokens {
+		issueTokens = append(issueTokens, authn.IssueTokenConfig{
+			Profile:        token.Profile,
+			InjectHeader:   token.InjectHeader,
+			InjectFormat:   token.InjectFormat,
+			OnMissingClaim: token.OnMissingClaim,
+		})
+	}
 	rt.sessionConfig = &authn.SessionConfig{
 		Endpoint:       fr.Route.AuthValidate.SessionEndpoint,
 		CookieName:     fr.Route.AuthValidate.CookieName,
 		ForwardHeaders: fr.Route.AuthValidate.ForwardHeaders,
 		CacheTTL:       fr.Route.AuthValidate.CacheTTL.Duration,
+		IssueTokens:    issueTokens,
 	}
 	logger.Info("session validation enabled",
 		"route", key,
 		"endpoint", fr.Route.AuthValidate.SessionEndpoint,
 		"tls_policy", tlsRef,
+		"issue_tokens", len(issueTokens),
 	)
 	return nil
 }

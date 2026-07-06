@@ -211,7 +211,7 @@ func (a *AuthInjector) Wrap(cfg AuthInjectorConfig, next http.Handler) http.Hand
 		}
 
 		// Format and inject the header
-		headerValue := formatToken(cfg.InjectFormat, string(plainToken))
+		headerValue := FormatToken(cfg.InjectFormat, string(plainToken))
 		r.Header.Set(cfg.InjectHeader, headerValue)
 
 		// Update stale cache on success — keyed by resolved ref to prevent
@@ -405,8 +405,8 @@ func (a *AuthInjector) InvalidateAllTokens() {
 	a.logger.Info("all tokens invalidated from stale cache")
 }
 
-// formatToken replaces {token} placeholder in the format string with the actual token.
-func formatToken(format, token string) string {
+// FormatToken replaces {token} placeholder in the format string with the actual token.
+func FormatToken(format, token string) string {
 	if format == "" {
 		return token
 	}

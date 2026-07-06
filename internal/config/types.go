@@ -965,6 +965,18 @@ type AuthValidateConfig struct {
 	// CookieName, if set, reads the token/session ID from the named cookie
 	// instead of a request header. Used in both jwt and session modes.
 	CookieName string `yaml:"cookie_name,omitempty" json:"cookie_name,omitempty"`
+
+	// IssueTokens asks csar-authn to mint named route-token profiles during
+	// session validation and inject them into upstream request headers.
+	IssueTokens []IssueTokenConfig `yaml:"issue_tokens,omitempty" json:"issue_tokens,omitempty"`
+}
+
+// IssueTokenConfig configures one authn-managed route token injection.
+type IssueTokenConfig struct {
+	Profile        string `yaml:"profile" json:"profile"`
+	InjectHeader   string `yaml:"inject_header" json:"inject_header"`
+	InjectFormat   string `yaml:"inject_format,omitempty" json:"inject_format,omitempty"`
+	OnMissingClaim string `yaml:"on_missing_claim,omitempty" json:"on_missing_claim,omitempty"`
 }
 
 // UnmarshalYAML handles bare string (policy reference) and inline object syntax for AuthValidateConfig.

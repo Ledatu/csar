@@ -883,6 +883,40 @@
         "cookie_name": {
           "type": "string",
           "description": "Read the JWT from a named cookie instead of a request header. When set, header_name and token_prefix are ignored."
+        },
+        "issue_tokens": {
+          "type": "array",
+          "description": "Authn-managed route tokens to mint during session validation and inject upstream.",
+          "items": { "$ref": "#/$defs/IssueTokenConfig" }
+        }
+      }
+    },
+    "IssueTokenConfig": {
+      "type": "object",
+      "description": "One authn-managed route token injection.",
+      "additionalProperties": false,
+      "required": ["profile", "inject_header"],
+      "properties": {
+        "profile": {
+          "type": "string",
+          "description": "Name of the csar-authn route_tokens profile to mint."
+        },
+        "inject_header": {
+          "type": "string",
+          "description": "HTTP header to inject the signed JWT into.",
+          "examples": ["Authorization", "X-Route-Token"]
+        },
+        "inject_format": {
+          "type": "string",
+          "description": "Header value format. Must contain {token}. Defaults to Bearer {token}.",
+          "default": "Bearer {token}",
+          "examples": ["Bearer {token}", "{token}"]
+        },
+        "on_missing_claim": {
+          "type": "string",
+          "description": "Router behavior if authn cannot mint the requested profile for this user.",
+          "enum": ["fail_closed", "omit"],
+          "default": "fail_closed"
         }
       }
     },

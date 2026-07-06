@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"time"
@@ -277,6 +278,9 @@ func (c *Config) Validate() error {
 						return fmt.Errorf("path %s method %s: x-csar-authn-validate.cookie_name is required for session mode", path, method)
 					}
 				case "", "jwt":
+					if len(route.AuthValidate.IssueTokens) > 0 {
+						return fmt.Errorf("path %s method %s: x-csar-authn-validate.issue_tokens requires mode \"session\"", path, method)
+					}
 					if route.AuthValidate.JWKSURL == "" {
 						return fmt.Errorf("path %s method %s: x-csar-authn-validate.jwks_url is required", path, method)
 					}
@@ -291,6 +295,30 @@ func (c *Config) Validate() error {
 					}
 				default:
 					return fmt.Errorf("path %s method %s: x-csar-authn-validate.mode %q is not recognized (expected \"jwt\" or \"session\")", path, method, route.AuthValidate.Mode)
+				}
+				for i := range route.AuthValidate.IssueTokens {
+					token := &route.AuthValidate.IssueTokens[i]
+					idx := fmt.Sprintf("[%d]", i)
+					if token.Profile == "" {
+						return fmt.Errorf("path %s method %s: x-csar-authn-validate.issue_tokens%s.profile is required", path, method, idx)
+					}
+					if token.InjectHeader == "" {
+						return fmt.Errorf("path %s method %s: x-csar-authn-validate.issue_tokens%s.inject_header is required", path, method, idx)
+					}
+					token.InjectHeader = textproto.CanonicalMIMEHeaderKey(token.InjectHeader)
+					if token.InjectFormat == "" {
+						token.InjectFormat = "Bearer {token}"
+					}
+					if !strings.Contains(token.InjectFormat, "{token}") {
+						return fmt.Errorf("path %s method %s: x-csar-authn-validate.issue_tokens%s.inject_format must contain {token}", path, method, idx)
+					}
+					switch token.OnMissingClaim {
+					case "", "fail_closed":
+						token.OnMissingClaim = "fail_closed"
+					case "omit":
+					default:
+						return fmt.Errorf("path %s method %s: x-csar-authn-validate.issue_tokens%s.on_missing_claim must be \"fail_closed\" or \"omit\"", path, method, idx)
+					}
 				}
 			}
 
@@ -599,6 +627,15 @@ func (c *Config) Validate() error {
 							path, method, sec.InjectHeader, route.Backend.TargetURL))
 				}
 			}
+			if route.AuthValidate != nil {
+				for _, token := range route.AuthValidate.IssueTokens {
+					if token.Profile != "" && !strings.HasPrefix(route.Backend.TargetURL, "https://") {
+						warnings = append(warnings,
+							fmt.Sprintf("SECURITY WARNING: path %s method %s injects route token (%s) over non-TLS upstream %q",
+								path, method, token.InjectHeader, route.Backend.TargetURL))
+					}
+				}
+			}
 
 			// Warn separately if insecure_skip_verify is set on an https:// upstream
 			if route.Backend.TLS != nil && route.Backend.TLS.InsecureSkipVerify {
@@ -623,6 +660,7 @@ func (c *Config) Validate() error {
 					}
 				}
 			}
+			methods[method] = route
 		}
 	}
 

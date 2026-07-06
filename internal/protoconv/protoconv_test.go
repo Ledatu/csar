@@ -20,6 +20,27 @@ func TestProtoToAuthValidateConfig_PreservesJWKSTLS(t *testing.T) {
 	}
 }
 
+func TestProtoToAuthValidateConfig_PreservesIssueTokens(t *testing.T) {
+	cfg := protoToAuthValidateConfig(&csarv1.AuthValidateConfigProto{
+		Mode: "session",
+		IssueTokens: []*csarv1.IssueTokenConfigProto{{
+			Profile:        "telegram-webapp",
+			InjectHeader:   "Authorization",
+			InjectFormat:   "Bearer {token}",
+			OnMissingClaim: "fail_closed",
+		}},
+	})
+
+	if len(cfg.IssueTokens) != 1 {
+		t.Fatalf("IssueTokens len = %d, want 1", len(cfg.IssueTokens))
+	}
+	got := cfg.IssueTokens[0]
+	if got.Profile != "telegram-webapp" || got.InjectHeader != "Authorization" ||
+		got.InjectFormat != "Bearer {token}" || got.OnMissingClaim != "fail_closed" {
+		t.Fatalf("IssueToken = %#v", got)
+	}
+}
+
 func TestProtoToAccessControl_PreservesTrustedProxyCIDRs(t *testing.T) {
 	cfg := protoToAccessControl(&csarv1.AccessControlProto{
 		AllowCidrs:        []string{"203.0.113.0/24"},

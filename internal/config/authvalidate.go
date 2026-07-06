@@ -65,6 +65,9 @@ func (c *Config) ResolveAuthValidatePolicies() error {
 			if route.AuthValidate.CookieName != "" {
 				merged.CookieName = route.AuthValidate.CookieName
 			}
+			if len(route.AuthValidate.IssueTokens) > 0 {
+				merged.IssueTokens = route.AuthValidate.IssueTokens
+			}
 			merged.Use = ""
 			route.AuthValidate = &merged
 			annotatePolicy(&route, "x-csar-authn-validate", policyName)

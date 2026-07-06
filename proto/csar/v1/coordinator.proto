@@ -201,6 +201,13 @@ message SecurityConfigProto {
   bool strip_token_params_set = 9;
 }
 
+message IssueTokenConfigProto {
+  string profile = 1;
+  string inject_header = 2;
+  string inject_format = 3;
+  string on_missing_claim = 4;
+}
+
 // ---------------------------------------------------------------------------
 // Traffic / throttling
 // ---------------------------------------------------------------------------
@@ -267,6 +274,7 @@ message AuthValidateConfigProto {
   string session_tls = 13;
   repeated string forward_headers = 14;
   string jwks_tls = 15;
+  repeated IssueTokenConfigProto issue_tokens = 16;
 }
 
 // ---------------------------------------------------------------------------

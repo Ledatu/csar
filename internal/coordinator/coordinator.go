@@ -862,7 +862,24 @@ func authValidateToProto(a *config.AuthValidateConfig) *csarv1.AuthValidateConfi
 		RequiredClaims:  a.RequiredClaims,
 		ForwardClaims:   a.ForwardClaims,
 		CookieName:      a.CookieName,
+		IssueTokens:     issueTokensToProto(a.IssueTokens),
 	}
+}
+
+func issueTokensToProto(tokens []config.IssueTokenConfig) []*csarv1.IssueTokenConfigProto {
+	if len(tokens) == 0 {
+		return nil
+	}
+	out := make([]*csarv1.IssueTokenConfigProto, 0, len(tokens))
+	for _, token := range tokens {
+		out = append(out, &csarv1.IssueTokenConfigProto{
+			Profile:        token.Profile,
+			InjectHeader:   token.InjectHeader,
+			InjectFormat:   token.InjectFormat,
+			OnMissingClaim: token.OnMissingClaim,
+		})
+	}
+	return out
 }
 
 func accessControlToProto(a *config.AccessControlConfig) *csarv1.AccessControlProto {
