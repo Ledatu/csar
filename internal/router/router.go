@@ -4,6 +4,7 @@
 package router
 
 import (
+	"context"
 	"log/slog"
 	"net"
 	"net/http"
@@ -11,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledatu/csar/internal/audit"
+	auditcore "github.com/ledatu/csar-core/audit"
 	"github.com/ledatu/csar/internal/authn"
 	"github.com/ledatu/csar/internal/authz"
 	"github.com/ledatu/csar/internal/cache"
@@ -27,6 +28,11 @@ import (
 	"github.com/ledatu/csar/pkg/middleware"
 	"github.com/redis/go-redis/v9"
 )
+
+// auditRecorder enqueues router access audit events.
+type auditRecorder interface {
+	Record(ctx context.Context, ev *auditcore.Event)
+}
 
 // route holds a compiled route with its proxy and throttler.
 type route struct {
@@ -59,7 +65,8 @@ type route struct {
 	cacheConfig         *cache.Config              // nil if no response caching
 	cacheInvalidation   *cache.InvalidationConfig  // nil if no cache invalidation
 	authzConfig         *config.AuthzRouteConfig   // nil if no authz authorization
-	auditEnabled        bool                       // resolved from x-csar-audit + method default
+	auditMode           config.AuditMode           // resolved from x-csar-audit + method default
+	auditCapture        *config.AuditCaptureConfig // resolved capture config; nil if disabled
 	excludeIPs          []*net.IPNet               // IPs/CIDRs that bypass this route's throttle
 	vipOverrides        []vipOverride              // header-based throttle policy swaps
 }
@@ -84,7 +91,7 @@ type Router struct {
 	jwtValidators        map[string]*authn.JWTValidator     // keyed by jwks_tls policy name ("" = default)
 	sessionValidators    map[string]*authn.SessionValidator // keyed by session_tls policy name ("" = default)
 	authzClient          *authz.Client                      // nil if no route uses authz
-	auditClient          *audit.Client                      // nil if audit ingest is not configured
+	auditClient          auditRecorder                      // nil if audit ingest is not configured
 	dlpRedactor          *dlp.Redactor                      // nil if no route uses DLP redaction
 	tenantRouter         *tenant.Router                     // nil if no route uses tenant routing
 	responseCache        *cache.ResponseCache               // nil if no route uses response caching

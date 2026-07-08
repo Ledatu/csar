@@ -17,6 +17,7 @@ func (c *Config) ResolvePolicies() error {
 		{"cache invalidation policies", c.ResolveCacheInvalidationPolicies},
 		{"retry policies", c.ResolveRetryPolicies},
 		{"redact policies", c.ResolveRedactPolicies},
+		{"audit capture policies", c.ResolveAuditCapturePolicies},
 		{"auth-validate policies", c.ResolveAuthValidatePolicies},
 		{"authz policies", c.ResolveAuthzPolicies},
 		{"backend TLS policies", c.ResolveBackendTLSPolicies},

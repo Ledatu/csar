@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/ledatu/csar-core/jsonredact"
 )
 
 func newTestLogger() *slog.Logger {
@@ -310,9 +312,9 @@ func TestRedactPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := redactPath(tt.data, tt.path, tt.mask)
+			got := jsonredact.RedactPath(tt.data, tt.path, tt.mask)
 			if got != tt.want {
-				t.Errorf("redactPath() = %v, want %v", got, tt.want)
+				t.Errorf("RedactPath() = %v, want %v", got, tt.want)
 			}
 		})
 	}

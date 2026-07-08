@@ -38,6 +38,7 @@ func FullSnapshotToConfig(snap *csarv1.FullConfigSnapshot) *config.Config {
 	cfg.CORSPolicies = protoToCORSPolicies(snap.GetCorsPolicies())
 	cfg.RetryPolicies = protoToRetryPolicies(snap.GetRetryPolicies())
 	cfg.RedactPolicies = protoToRedactPolicies(snap.GetRedactPolicies())
+	cfg.AuditCapturePolicies = protoToAuditCapturePolicies(snap.GetAuditCapturePolicies())
 	cfg.AuthValidatePolicies = protoToAuthValidatePolicies(snap.GetAuthValidatePolicies())
 	cfg.AuthzPolicies = protoToAuthzPolicies(snap.GetAuthzPolicies())
 	cfg.BackendTLSPolicies = protoToBackendTLSPolicies(snap.GetBackendTlsPolicies())
@@ -133,9 +134,21 @@ func protoToRouteConfig(r *csarv1.RouteConfig) config.RouteConfig {
 		rc.Authz = protoToAuthzRouteConfig(r.GetAuthz())
 	}
 
-	if r.GetAuditSet() {
-		v := r.GetAudit()
-		rc.Audit = &v
+	if mode := strings.TrimSpace(r.GetAuditMode()); mode != "" {
+		if m, err := config.ParseAuditMode(mode); err == nil {
+			rc.Audit = &m
+		}
+	} else if r.GetAuditSet() {
+		if r.GetAudit() {
+			m := config.AuditModeAll
+			rc.Audit = &m
+		} else {
+			m := config.AuditModeOff
+			rc.Audit = &m
+		}
+	}
+	if r.GetAuditCapture() != nil {
+		rc.AuditCapture = protoToAuditCaptureConfig(r.GetAuditCapture())
 	}
 	if r.GetCacheInvalidate() != nil {
 		rc.CacheInvalidate = protoToCacheInvalidationConfig(r.GetCacheInvalidate())
@@ -697,4 +710,38 @@ func durationFromProto(d *durationpb.Duration) configutil.Duration {
 		return configutil.Duration{}
 	}
 	return configutil.Duration{Duration: d.AsDuration()}
+}
+
+func protoToAuditCaptureConfig(ac *csarv1.AuditCaptureConfigProto) *config.AuditCaptureConfig {
+	if ac == nil {
+		return nil
+	}
+	cfg := &config.AuditCaptureConfig{
+		Use:             ac.GetUse(),
+		MaxBytes:        ac.GetMaxBytes(),
+		Redact:          ac.GetRedact(),
+		Fields:          ac.GetFields(),
+		SensitiveFields: ac.GetSensitiveFields(),
+		Mask:            ac.GetMask(),
+	}
+	if ac.GetRequestSet() {
+		v := ac.GetRequest()
+		cfg.Request = &v
+	}
+	if ac.GetIncludeQuerySet() {
+		v := ac.GetIncludeQuery()
+		cfg.IncludeQuery = &v
+	}
+	return cfg
+}
+
+func protoToAuditCapturePolicies(policies map[string]*csarv1.AuditCaptureConfigProto) map[string]config.AuditCaptureConfig {
+	if len(policies) == 0 {
+		return nil
+	}
+	out := make(map[string]config.AuditCaptureConfig, len(policies))
+	for name, ac := range policies {
+		out[name] = *protoToAuditCaptureConfig(ac)
+	}
+	return out
 }

@@ -19,6 +19,8 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/ledatu/csar-core/jsonredact"
 )
 
 // DefaultMaxResponseSize is the default maximum response size for DLP processing (10MB).
@@ -133,7 +135,7 @@ func (rd *Redactor) Wrap(cfg Config, next http.Handler) http.Handler {
 		// Apply redaction.
 		redacted := false
 		for _, path := range paths {
-			if redactPath(data, path, cfg.Mask) {
+			if jsonredact.RedactPath(data, path, cfg.Mask) {
 				redacted = true
 			}
 		}
@@ -163,63 +165,6 @@ func (rd *Redactor) Wrap(cfg Config, next http.Handler) http.Handler {
 			"fields", cfg.Fields,
 		)
 	})
-}
-
-// redactPath walks the data structure along the path and replaces
-// the target field with the mask. Returns true if anything was redacted.
-func redactPath(data interface{}, path []string, mask string) bool {
-	if len(path) == 0 {
-		return false
-	}
-
-	switch v := data.(type) {
-	case map[string]interface{}:
-		if len(path) == 1 {
-			// Terminal: replace the field value.
-			if _, ok := v[path[0]]; ok {
-				v[path[0]] = mask
-				return true
-			}
-			// Wildcard at terminal doesn't make sense for objects — skip.
-			return false
-		}
-
-		key := path[0]
-		if key == "*" {
-			matched := false
-			for k := range v {
-				if redactPath(v[k], path[1:], mask) {
-					matched = true
-				}
-			}
-			return matched
-		}
-
-		child, ok := v[key]
-		if !ok {
-			return false
-		}
-		return redactPath(child, path[1:], mask)
-
-	case []interface{}:
-		// For arrays, apply the current path segment to each element.
-		// If the path segment is "*", consume it and descend.
-		// If it's not "*", also descend into each element (implicit array iteration).
-		matched := false
-		nextPath := path
-		if path[0] == "*" {
-			nextPath = path[1:]
-		}
-		for i := range v {
-			if redactPath(v[i], nextPath, mask) {
-				matched = true
-			}
-		}
-		return matched
-
-	default:
-		return false
-	}
 }
 
 // captureWriter captures the response body and status code with size limiting.

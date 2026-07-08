@@ -322,6 +322,7 @@ func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_Su
 		snapshot.CorsPolicies = corsPoliciesMapToProto(cfg.CORSPolicies)
 		snapshot.RetryPolicies = retryPoliciesMapToProto(cfg.RetryPolicies)
 		snapshot.RedactPolicies = redactPoliciesMapToProto(cfg.RedactPolicies)
+		snapshot.AuditCapturePolicies = auditCapturePoliciesMapToProto(cfg.AuditCapturePolicies)
 		snapshot.AuthValidatePolicies = authValidatePoliciesMapToProto(cfg.AuthValidatePolicies)
 		snapshot.AuthzPolicies = authzPoliciesMapToProto(cfg.AuthzPolicies)
 		snapshot.BackendTlsPolicies = backendTLSPoliciesToProto(cfg.BackendTLSPolicies)
@@ -518,7 +519,11 @@ func routeEntryToProto(r *statestore.RouteEntry) *csarv1.RouteConfig {
 
 	if r.Route.Audit != nil {
 		rc.AuditSet = true
-		rc.Audit = *r.Route.Audit
+		rc.AuditMode = string(*r.Route.Audit)
+		rc.Audit = *r.Route.Audit == config.AuditModeAll
+	}
+	if r.Route.AuditCapture != nil {
+		rc.AuditCapture = auditCaptureToProto(r.Route.AuditCapture)
 	}
 	if r.Route.CacheInvalidate != nil {
 		rc.CacheInvalidate = cacheInvalidationToProto(r.Route.CacheInvalidate)
@@ -637,6 +642,41 @@ func redactToProto(r *config.RedactConfig) *csarv1.RedactConfigProto {
 		pb.EnabledSet = true
 	}
 	return pb
+}
+
+func auditCaptureToProto(ac *config.AuditCaptureConfig) *csarv1.AuditCaptureConfigProto {
+	if ac == nil {
+		return nil
+	}
+	pb := &csarv1.AuditCaptureConfigProto{
+		Use:             ac.Use,
+		MaxBytes:        ac.MaxBytes,
+		Redact:          ac.Redact,
+		Fields:          ac.Fields,
+		SensitiveFields: ac.SensitiveFields,
+		Mask:            ac.Mask,
+	}
+	if ac.Request != nil {
+		pb.Request = *ac.Request
+		pb.RequestSet = true
+	}
+	if ac.IncludeQuery != nil {
+		pb.IncludeQuery = *ac.IncludeQuery
+		pb.IncludeQuerySet = true
+	}
+	return pb
+}
+
+func auditCapturePoliciesMapToProto(policies map[string]config.AuditCaptureConfig) map[string]*csarv1.AuditCaptureConfigProto {
+	if len(policies) == 0 {
+		return nil
+	}
+	out := make(map[string]*csarv1.AuditCaptureConfigProto, len(policies))
+	for name, ac := range policies {
+		cfg := ac
+		out[name] = auditCaptureToProto(&cfg)
+	}
+	return out
 }
 
 func corsToProto(cc *config.CORSConfig) *csarv1.CORSConfigProto {

@@ -304,6 +304,7 @@ type FullConfigSnapshot struct {
 	BackendPools              map[string]*BackendPoolConfigProto       `protobuf:"bytes,14,rep,name=backend_pools,json=backendPools,proto3" json:"backend_pools,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	CachePolicies             map[string]*CacheConfigProto             `protobuf:"bytes,15,rep,name=cache_policies,json=cachePolicies,proto3" json:"cache_policies,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	CacheInvalidationPolicies map[string]*CacheInvalidationConfigProto `protobuf:"bytes,16,rep,name=cache_invalidation_policies,json=cacheInvalidationPolicies,proto3" json:"cache_invalidation_policies,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	AuditCapturePolicies      map[string]*AuditCaptureConfigProto      `protobuf:"bytes,17,rep,name=audit_capture_policies,json=auditCapturePolicies,proto3" json:"audit_capture_policies,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Global settings.
 	GlobalThrottle      *GlobalThrottleProto `protobuf:"bytes,9,opt,name=global_throttle,json=globalThrottle,proto3" json:"global_throttle,omitempty"`
 	DebugHeaders        *DebugHeadersProto   `protobuf:"bytes,10,opt,name=debug_headers,json=debugHeaders,proto3" json:"debug_headers,omitempty"`
@@ -433,6 +434,13 @@ func (x *FullConfigSnapshot) GetCacheInvalidationPolicies() map[string]*CacheInv
 	return nil
 }
 
+func (x *FullConfigSnapshot) GetAuditCapturePolicies() map[string]*AuditCaptureConfigProto {
+	if x != nil {
+		return x.AuditCapturePolicies
+	}
+	return nil
+}
+
 func (x *FullConfigSnapshot) GetGlobalThrottle() *GlobalThrottleProto {
 	if x != nil {
 		return x.GlobalThrottle
@@ -527,12 +535,15 @@ type RouteConfig struct {
 	Protocol        *ProtocolPolicyProto     `protobuf:"bytes,23,opt,name=protocol,proto3" json:"protocol,omitempty"`
 	Authz           *AuthzRouteConfigProto   `protobuf:"bytes,24,opt,name=authz,proto3" json:"authz,omitempty"`
 	// Router access audit (csar-audit). When audit_set is false, the router uses
-	// default-by-HTTP-method behavior. Mirrors config.RouteConfig.Audit (*bool).
+	// default-by-HTTP-method behavior. Mirrors config.RouteConfig.Audit.
 	Audit           bool                          `protobuf:"varint,25,opt,name=audit,proto3" json:"audit,omitempty"`
 	AuditSet        bool                          `protobuf:"varint,26,opt,name=audit_set,json=auditSet,proto3" json:"audit_set,omitempty"`
 	CacheInvalidate *CacheInvalidationConfigProto `protobuf:"bytes,27,opt,name=cache_invalidate,json=cacheInvalidate,proto3" json:"cache_invalidate,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Audit mode: "off", "all", or "errors". Preferred over audit bool when set.
+	AuditMode     string                   `protobuf:"bytes,28,opt,name=audit_mode,json=auditMode,proto3" json:"audit_mode,omitempty"`
+	AuditCapture  *AuditCaptureConfigProto `protobuf:"bytes,29,opt,name=audit_capture,json=auditCapture,proto3" json:"audit_capture,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RouteConfig) Reset() {
@@ -736,6 +747,20 @@ func (x *RouteConfig) GetAuditSet() bool {
 func (x *RouteConfig) GetCacheInvalidate() *CacheInvalidationConfigProto {
 	if x != nil {
 		return x.CacheInvalidate
+	}
+	return nil
+}
+
+func (x *RouteConfig) GetAuditMode() string {
+	if x != nil {
+		return x.AuditMode
+	}
+	return ""
+}
+
+func (x *RouteConfig) GetAuditCapture() *AuditCaptureConfigProto {
+	if x != nil {
+		return x.AuditCapture
 	}
 	return nil
 }
@@ -2020,6 +2045,122 @@ func (x *RedactConfigProto) GetEnabledSet() bool {
 	return false
 }
 
+type AuditCaptureConfigProto struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Use             string                 `protobuf:"bytes,1,opt,name=use,proto3" json:"use,omitempty"`
+	Request         bool                   `protobuf:"varint,2,opt,name=request,proto3" json:"request,omitempty"`
+	RequestSet      bool                   `protobuf:"varint,3,opt,name=request_set,json=requestSet,proto3" json:"request_set,omitempty"`
+	MaxBytes        int64                  `protobuf:"varint,4,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
+	Redact          string                 `protobuf:"bytes,5,opt,name=redact,proto3" json:"redact,omitempty"`
+	Fields          []string               `protobuf:"bytes,6,rep,name=fields,proto3" json:"fields,omitempty"`
+	SensitiveFields []string               `protobuf:"bytes,7,rep,name=sensitive_fields,json=sensitiveFields,proto3" json:"sensitive_fields,omitempty"`
+	IncludeQuery    bool                   `protobuf:"varint,8,opt,name=include_query,json=includeQuery,proto3" json:"include_query,omitempty"`
+	IncludeQuerySet bool                   `protobuf:"varint,9,opt,name=include_query_set,json=includeQuerySet,proto3" json:"include_query_set,omitempty"`
+	Mask            string                 `protobuf:"bytes,10,opt,name=mask,proto3" json:"mask,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *AuditCaptureConfigProto) Reset() {
+	*x = AuditCaptureConfigProto{}
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AuditCaptureConfigProto) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuditCaptureConfigProto) ProtoMessage() {}
+
+func (x *AuditCaptureConfigProto) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuditCaptureConfigProto.ProtoReflect.Descriptor instead.
+func (*AuditCaptureConfigProto) Descriptor() ([]byte, []int) {
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *AuditCaptureConfigProto) GetUse() string {
+	if x != nil {
+		return x.Use
+	}
+	return ""
+}
+
+func (x *AuditCaptureConfigProto) GetRequest() bool {
+	if x != nil {
+		return x.Request
+	}
+	return false
+}
+
+func (x *AuditCaptureConfigProto) GetRequestSet() bool {
+	if x != nil {
+		return x.RequestSet
+	}
+	return false
+}
+
+func (x *AuditCaptureConfigProto) GetMaxBytes() int64 {
+	if x != nil {
+		return x.MaxBytes
+	}
+	return 0
+}
+
+func (x *AuditCaptureConfigProto) GetRedact() string {
+	if x != nil {
+		return x.Redact
+	}
+	return ""
+}
+
+func (x *AuditCaptureConfigProto) GetFields() []string {
+	if x != nil {
+		return x.Fields
+	}
+	return nil
+}
+
+func (x *AuditCaptureConfigProto) GetSensitiveFields() []string {
+	if x != nil {
+		return x.SensitiveFields
+	}
+	return nil
+}
+
+func (x *AuditCaptureConfigProto) GetIncludeQuery() bool {
+	if x != nil {
+		return x.IncludeQuery
+	}
+	return false
+}
+
+func (x *AuditCaptureConfigProto) GetIncludeQuerySet() bool {
+	if x != nil {
+		return x.IncludeQuerySet
+	}
+	return false
+}
+
+func (x *AuditCaptureConfigProto) GetMask() string {
+	if x != nil {
+		return x.Mask
+	}
+	return ""
+}
+
 type CORSConfigProto struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	Use              string                 `protobuf:"bytes,1,opt,name=use,proto3" json:"use,omitempty"`
@@ -2035,7 +2176,7 @@ type CORSConfigProto struct {
 
 func (x *CORSConfigProto) Reset() {
 	*x = CORSConfigProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[20]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2047,7 +2188,7 @@ func (x *CORSConfigProto) String() string {
 func (*CORSConfigProto) ProtoMessage() {}
 
 func (x *CORSConfigProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[20]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2060,7 +2201,7 @@ func (x *CORSConfigProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CORSConfigProto.ProtoReflect.Descriptor instead.
 func (*CORSConfigProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{20}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *CORSConfigProto) GetUse() string {
@@ -2123,7 +2264,7 @@ type TenantConfigProto struct {
 
 func (x *TenantConfigProto) Reset() {
 	*x = TenantConfigProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[21]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2135,7 +2276,7 @@ func (x *TenantConfigProto) String() string {
 func (*TenantConfigProto) ProtoMessage() {}
 
 func (x *TenantConfigProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[21]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2148,7 +2289,7 @@ func (x *TenantConfigProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TenantConfigProto.ProtoReflect.Descriptor instead.
 func (*TenantConfigProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{21}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *TenantConfigProto) GetHeader() string {
@@ -2184,7 +2325,7 @@ type CacheTTLRuleProto struct {
 
 func (x *CacheTTLRuleProto) Reset() {
 	*x = CacheTTLRuleProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[22]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2196,7 +2337,7 @@ func (x *CacheTTLRuleProto) String() string {
 func (*CacheTTLRuleProto) ProtoMessage() {}
 
 func (x *CacheTTLRuleProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[22]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2209,7 +2350,7 @@ func (x *CacheTTLRuleProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CacheTTLRuleProto.ProtoReflect.Descriptor instead.
 func (*CacheTTLRuleProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{22}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *CacheTTLRuleProto) GetWhen() string {
@@ -2252,7 +2393,7 @@ type CacheKeyQueryConfigProto struct {
 
 func (x *CacheKeyQueryConfigProto) Reset() {
 	*x = CacheKeyQueryConfigProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[23]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2264,7 +2405,7 @@ func (x *CacheKeyQueryConfigProto) String() string {
 func (*CacheKeyQueryConfigProto) ProtoMessage() {}
 
 func (x *CacheKeyQueryConfigProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[23]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2277,7 +2418,7 @@ func (x *CacheKeyQueryConfigProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CacheKeyQueryConfigProto.ProtoReflect.Descriptor instead.
 func (*CacheKeyQueryConfigProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{23}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *CacheKeyQueryConfigProto) GetInclude() []string {
@@ -2320,7 +2461,7 @@ type CacheResponseTTLRuleProto struct {
 
 func (x *CacheResponseTTLRuleProto) Reset() {
 	*x = CacheResponseTTLRuleProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[24]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2332,7 +2473,7 @@ func (x *CacheResponseTTLRuleProto) String() string {
 func (*CacheResponseTTLRuleProto) ProtoMessage() {}
 
 func (x *CacheResponseTTLRuleProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[24]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2345,7 +2486,7 @@ func (x *CacheResponseTTLRuleProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CacheResponseTTLRuleProto.ProtoReflect.Descriptor instead.
 func (*CacheResponseTTLRuleProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{24}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *CacheResponseTTLRuleProto) GetWhen() string {
@@ -2386,7 +2527,7 @@ type CacheResponseTagProto struct {
 
 func (x *CacheResponseTagProto) Reset() {
 	*x = CacheResponseTagProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[25]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2398,7 +2539,7 @@ func (x *CacheResponseTagProto) String() string {
 func (*CacheResponseTagProto) ProtoMessage() {}
 
 func (x *CacheResponseTagProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[25]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2411,7 +2552,7 @@ func (x *CacheResponseTagProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CacheResponseTagProto.ProtoReflect.Descriptor instead.
 func (*CacheResponseTagProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{25}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *CacheResponseTagProto) GetHeader() string {
@@ -2439,7 +2580,7 @@ type CacheBypassHeaderProto struct {
 
 func (x *CacheBypassHeaderProto) Reset() {
 	*x = CacheBypassHeaderProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[26]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2451,7 +2592,7 @@ func (x *CacheBypassHeaderProto) String() string {
 func (*CacheBypassHeaderProto) ProtoMessage() {}
 
 func (x *CacheBypassHeaderProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[26]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2464,7 +2605,7 @@ func (x *CacheBypassHeaderProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CacheBypassHeaderProto.ProtoReflect.Descriptor instead.
 func (*CacheBypassHeaderProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{26}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *CacheBypassHeaderProto) GetName() string {
@@ -2497,7 +2638,7 @@ type CacheBypassConfigProto struct {
 
 func (x *CacheBypassConfigProto) Reset() {
 	*x = CacheBypassConfigProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[27]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2509,7 +2650,7 @@ func (x *CacheBypassConfigProto) String() string {
 func (*CacheBypassConfigProto) ProtoMessage() {}
 
 func (x *CacheBypassConfigProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[27]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2522,7 +2663,7 @@ func (x *CacheBypassConfigProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CacheBypassConfigProto.ProtoReflect.Descriptor instead.
 func (*CacheBypassConfigProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{27}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *CacheBypassConfigProto) GetHeaders() []*CacheBypassHeaderProto {
@@ -2543,7 +2684,7 @@ type CacheCoalesceConfigProto struct {
 
 func (x *CacheCoalesceConfigProto) Reset() {
 	*x = CacheCoalesceConfigProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[28]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2555,7 +2696,7 @@ func (x *CacheCoalesceConfigProto) String() string {
 func (*CacheCoalesceConfigProto) ProtoMessage() {}
 
 func (x *CacheCoalesceConfigProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[28]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2568,7 +2709,7 @@ func (x *CacheCoalesceConfigProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CacheCoalesceConfigProto.ProtoReflect.Descriptor instead.
 func (*CacheCoalesceConfigProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{28}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *CacheCoalesceConfigProto) GetEnabled() bool {
@@ -2625,7 +2766,7 @@ type CacheConfigProto struct {
 
 func (x *CacheConfigProto) Reset() {
 	*x = CacheConfigProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[29]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2637,7 +2778,7 @@ func (x *CacheConfigProto) String() string {
 func (*CacheConfigProto) ProtoMessage() {}
 
 func (x *CacheConfigProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[29]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2650,7 +2791,7 @@ func (x *CacheConfigProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CacheConfigProto.ProtoReflect.Descriptor instead.
 func (*CacheConfigProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{29}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *CacheConfigProto) GetEnabled() bool {
@@ -2846,7 +2987,7 @@ type CacheInvalidationConfigProto struct {
 
 func (x *CacheInvalidationConfigProto) Reset() {
 	*x = CacheInvalidationConfigProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[30]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2858,7 +2999,7 @@ func (x *CacheInvalidationConfigProto) String() string {
 func (*CacheInvalidationConfigProto) ProtoMessage() {}
 
 func (x *CacheInvalidationConfigProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[30]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2871,7 +3012,7 @@ func (x *CacheInvalidationConfigProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CacheInvalidationConfigProto.ProtoReflect.Descriptor instead.
 func (*CacheInvalidationConfigProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{30}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *CacheInvalidationConfigProto) GetUse() string {
@@ -2948,7 +3089,7 @@ type AccessControlProto struct {
 
 func (x *AccessControlProto) Reset() {
 	*x = AccessControlProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[31]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2960,7 +3101,7 @@ func (x *AccessControlProto) String() string {
 func (*AccessControlProto) ProtoMessage() {}
 
 func (x *AccessControlProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[31]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2973,7 +3114,7 @@ func (x *AccessControlProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AccessControlProto.ProtoReflect.Descriptor instead.
 func (*AccessControlProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{31}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *AccessControlProto) GetAllowCidrs() []string {
@@ -3006,7 +3147,7 @@ type ResilienceConfigProto struct {
 
 func (x *ResilienceConfigProto) Reset() {
 	*x = ResilienceConfigProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[32]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3018,7 +3159,7 @@ func (x *ResilienceConfigProto) String() string {
 func (*ResilienceConfigProto) ProtoMessage() {}
 
 func (x *ResilienceConfigProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[32]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3031,7 +3172,7 @@ func (x *ResilienceConfigProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResilienceConfigProto.ProtoReflect.Descriptor instead.
 func (*ResilienceConfigProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{32}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ResilienceConfigProto) GetCircuitBreaker() string {
@@ -3053,7 +3194,7 @@ type CircuitBreakerProfileProto struct {
 
 func (x *CircuitBreakerProfileProto) Reset() {
 	*x = CircuitBreakerProfileProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[33]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3065,7 +3206,7 @@ func (x *CircuitBreakerProfileProto) String() string {
 func (*CircuitBreakerProfileProto) ProtoMessage() {}
 
 func (x *CircuitBreakerProfileProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[33]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3078,7 +3219,7 @@ func (x *CircuitBreakerProfileProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CircuitBreakerProfileProto.ProtoReflect.Descriptor instead.
 func (*CircuitBreakerProfileProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{33}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *CircuitBreakerProfileProto) GetMaxRequests() uint32 {
@@ -3123,7 +3264,7 @@ type ProtocolPolicyProto struct {
 
 func (x *ProtocolPolicyProto) Reset() {
 	*x = ProtocolPolicyProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[34]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3135,7 +3276,7 @@ func (x *ProtocolPolicyProto) String() string {
 func (*ProtocolPolicyProto) ProtoMessage() {}
 
 func (x *ProtocolPolicyProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[34]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3148,7 +3289,7 @@ func (x *ProtocolPolicyProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProtocolPolicyProto.ProtoReflect.Descriptor instead.
 func (*ProtocolPolicyProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{34}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ProtocolPolicyProto) GetEmitWaitMs() bool {
@@ -3205,7 +3346,7 @@ type DebugHeadersProto struct {
 
 func (x *DebugHeadersProto) Reset() {
 	*x = DebugHeadersProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[35]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3217,7 +3358,7 @@ func (x *DebugHeadersProto) String() string {
 func (*DebugHeadersProto) ProtoMessage() {}
 
 func (x *DebugHeadersProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[35]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3230,7 +3371,7 @@ func (x *DebugHeadersProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DebugHeadersProto.ProtoReflect.Descriptor instead.
 func (*DebugHeadersProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{35}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *DebugHeadersProto) GetEnabled() bool {
@@ -3276,7 +3417,7 @@ type AuthzRouteConfigProto struct {
 
 func (x *AuthzRouteConfigProto) Reset() {
 	*x = AuthzRouteConfigProto{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[36]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3288,7 +3429,7 @@ func (x *AuthzRouteConfigProto) String() string {
 func (*AuthzRouteConfigProto) ProtoMessage() {}
 
 func (x *AuthzRouteConfigProto) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[36]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3301,7 +3442,7 @@ func (x *AuthzRouteConfigProto) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthzRouteConfigProto.ProtoReflect.Descriptor instead.
 func (*AuthzRouteConfigProto) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{36}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *AuthzRouteConfigProto) GetUse() string {
@@ -3364,7 +3505,7 @@ type QuotaAssignment struct {
 
 func (x *QuotaAssignment) Reset() {
 	*x = QuotaAssignment{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[37]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3376,7 +3517,7 @@ func (x *QuotaAssignment) String() string {
 func (*QuotaAssignment) ProtoMessage() {}
 
 func (x *QuotaAssignment) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[37]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3389,7 +3530,7 @@ func (x *QuotaAssignment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QuotaAssignment.ProtoReflect.Descriptor instead.
 func (*QuotaAssignment) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{37}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *QuotaAssignment) GetQuotas() map[string]*RouteQuota {
@@ -3410,7 +3551,7 @@ type RouteQuota struct {
 
 func (x *RouteQuota) Reset() {
 	*x = RouteQuota{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[38]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3422,7 +3563,7 @@ func (x *RouteQuota) String() string {
 func (*RouteQuota) ProtoMessage() {}
 
 func (x *RouteQuota) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[38]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3435,7 +3576,7 @@ func (x *RouteQuota) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RouteQuota.ProtoReflect.Descriptor instead.
 func (*RouteQuota) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{38}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *RouteQuota) GetRps() float64 {
@@ -3467,7 +3608,7 @@ type HealthReport struct {
 
 func (x *HealthReport) Reset() {
 	*x = HealthReport{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[39]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3479,7 +3620,7 @@ func (x *HealthReport) String() string {
 func (*HealthReport) ProtoMessage() {}
 
 func (x *HealthReport) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[39]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3492,7 +3633,7 @@ func (x *HealthReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthReport.ProtoReflect.Descriptor instead.
 func (*HealthReport) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{39}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *HealthReport) GetRouterId() string {
@@ -3533,7 +3674,7 @@ type HealthAck struct {
 
 func (x *HealthAck) Reset() {
 	*x = HealthAck{}
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[40]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3545,7 +3686,7 @@ func (x *HealthAck) String() string {
 func (*HealthAck) ProtoMessage() {}
 
 func (x *HealthAck) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[40]
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3558,7 +3699,7 @@ func (x *HealthAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthAck.ProtoReflect.Descriptor instead.
 func (*HealthAck) Descriptor() ([]byte, []int) {
-	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{40}
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *HealthAck) GetAcknowledged() bool {
@@ -3591,7 +3732,7 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x11TokenInvalidation\x12\x1d\n" +
 	"\n" +
 	"token_refs\x18\x01 \x03(\tR\ttokenRefs\x121\n" +
-	"\x14invalidation_version\x18\x02 \x01(\x04R\x13invalidationVersion\"\xc7\x14\n" +
+	"\x14invalidation_version\x18\x02 \x01(\x04R\x13invalidationVersion\"\x9f\x16\n" +
 	"\x12FullConfigSnapshot\x12,\n" +
 	"\x06routes\x18\x01 \x03(\v2\x14.csar.v1.RouteConfigR\x06routes\x12[\n" +
 	"\x10circuit_breakers\x18\x02 \x03(\v20.csar.v1.FullConfigSnapshot.CircuitBreakersEntryR\x0fcircuitBreakers\x12^\n" +
@@ -3605,7 +3746,8 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x14backend_tls_policies\x18\r \x03(\v23.csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntryR\x12backendTlsPolicies\x12R\n" +
 	"\rbackend_pools\x18\x0e \x03(\v2-.csar.v1.FullConfigSnapshot.BackendPoolsEntryR\fbackendPools\x12U\n" +
 	"\x0ecache_policies\x18\x0f \x03(\v2..csar.v1.FullConfigSnapshot.CachePoliciesEntryR\rcachePolicies\x12z\n" +
-	"\x1bcache_invalidation_policies\x18\x10 \x03(\v2:.csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntryR\x19cacheInvalidationPolicies\x12E\n" +
+	"\x1bcache_invalidation_policies\x18\x10 \x03(\v2:.csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntryR\x19cacheInvalidationPolicies\x12k\n" +
+	"\x16audit_capture_policies\x18\x11 \x03(\v25.csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntryR\x14auditCapturePolicies\x12E\n" +
 	"\x0fglobal_throttle\x18\t \x01(\v2\x1c.csar.v1.GlobalThrottleProtoR\x0eglobalThrottle\x12?\n" +
 	"\rdebug_headers\x18\n" +
 	" \x01(\v2\x1a.csar.v1.DebugHeadersProtoR\fdebugHeaders\x12O\n" +
@@ -3645,10 +3787,12 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\v2\x19.csar.v1.CacheConfigProtoR\x05value:\x028\x01\x1as\n" +
 	"\x1eCacheInvalidationPoliciesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12;\n" +
-	"\x05value\x18\x02 \x01(\v2%.csar.v1.CacheInvalidationConfigProtoR\x05value:\x028\x01\"=\n" +
+	"\x05value\x18\x02 \x01(\v2%.csar.v1.CacheInvalidationConfigProtoR\x05value:\x028\x01\x1ai\n" +
+	"\x19AuditCapturePoliciesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x126\n" +
+	"\x05value\x18\x02 \x01(\v2 .csar.v1.AuditCaptureConfigProtoR\x05value:\x028\x01\"=\n" +
 	"\rRouteSnapshot\x12,\n" +
-	"\x06routes\x18\x01 \x03(\v2\x14.csar.v1.RouteConfigR\x06routes\"\x9a\n" +
-	"\n" +
+	"\x06routes\x18\x01 \x03(\v2\x14.csar.v1.RouteConfigR\x06routes\"\x80\v\n" +
 	"\vRouteConfig\x12\x19\n" +
 	"\broute_id\x18\x01 \x01(\tR\arouteId\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x16\n" +
@@ -3680,7 +3824,10 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x05authz\x18\x18 \x01(\v2\x1e.csar.v1.AuthzRouteConfigProtoR\x05authz\x12\x14\n" +
 	"\x05audit\x18\x19 \x01(\bR\x05audit\x12\x1b\n" +
 	"\taudit_set\x18\x1a \x01(\bR\bauditSet\x12P\n" +
-	"\x10cache_invalidate\x18\x1b \x01(\v2%.csar.v1.CacheInvalidationConfigProtoR\x0fcacheInvalidate\x1a:\n" +
+	"\x10cache_invalidate\x18\x1b \x01(\v2%.csar.v1.CacheInvalidationConfigProtoR\x0fcacheInvalidate\x12\x1d\n" +
+	"\n" +
+	"audit_mode\x18\x1c \x01(\tR\tauditMode\x12E\n" +
+	"\raudit_capture\x18\x1d \x01(\v2 .csar.v1.AuditCaptureConfigProtoR\fauditCapture\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf1\x02\n" +
@@ -3815,7 +3962,20 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x04mask\x18\x03 \x01(\tR\x04mask\x12\x18\n" +
 	"\aenabled\x18\x04 \x01(\bR\aenabled\x12\x1f\n" +
 	"\venabled_set\x18\x05 \x01(\bR\n" +
-	"enabledSet\"\x8d\x02\n" +
+	"enabledSet\"\xc3\x02\n" +
+	"\x17AuditCaptureConfigProto\x12\x10\n" +
+	"\x03use\x18\x01 \x01(\tR\x03use\x12\x18\n" +
+	"\arequest\x18\x02 \x01(\bR\arequest\x12\x1f\n" +
+	"\vrequest_set\x18\x03 \x01(\bR\n" +
+	"requestSet\x12\x1b\n" +
+	"\tmax_bytes\x18\x04 \x01(\x03R\bmaxBytes\x12\x16\n" +
+	"\x06redact\x18\x05 \x01(\tR\x06redact\x12\x16\n" +
+	"\x06fields\x18\x06 \x03(\tR\x06fields\x12)\n" +
+	"\x10sensitive_fields\x18\a \x03(\tR\x0fsensitiveFields\x12#\n" +
+	"\rinclude_query\x18\b \x01(\bR\fincludeQuery\x12*\n" +
+	"\x11include_query_set\x18\t \x01(\bR\x0fincludeQuerySet\x12\x12\n" +
+	"\x04mask\x18\n" +
+	" \x01(\tR\x04mask\"\x8d\x02\n" +
 	"\x0fCORSConfigProto\x12\x10\n" +
 	"\x03use\x18\x01 \x01(\tR\x03use\x12'\n" +
 	"\x0fallowed_origins\x18\x02 \x03(\tR\x0eallowedOrigins\x12'\n" +
@@ -3976,7 +4136,7 @@ func file_proto_csar_v1_coordinator_proto_rawDescGZIP() []byte {
 	return file_proto_csar_v1_coordinator_proto_rawDescData
 }
 
-var file_proto_csar_v1_coordinator_proto_msgTypes = make([]protoimpl.MessageInfo, 62)
+var file_proto_csar_v1_coordinator_proto_msgTypes = make([]protoimpl.MessageInfo, 64)
 var file_proto_csar_v1_coordinator_proto_goTypes = []any{
 	(*SubscribeRequest)(nil),             // 0: csar.v1.SubscribeRequest
 	(*ConfigUpdate)(nil),                 // 1: csar.v1.ConfigUpdate
@@ -3998,158 +4158,163 @@ var file_proto_csar_v1_coordinator_proto_goTypes = []any{
 	(*AuthValidateConfigProto)(nil),      // 17: csar.v1.AuthValidateConfigProto
 	(*RetryConfigProto)(nil),             // 18: csar.v1.RetryConfigProto
 	(*RedactConfigProto)(nil),            // 19: csar.v1.RedactConfigProto
-	(*CORSConfigProto)(nil),              // 20: csar.v1.CORSConfigProto
-	(*TenantConfigProto)(nil),            // 21: csar.v1.TenantConfigProto
-	(*CacheTTLRuleProto)(nil),            // 22: csar.v1.CacheTTLRuleProto
-	(*CacheKeyQueryConfigProto)(nil),     // 23: csar.v1.CacheKeyQueryConfigProto
-	(*CacheResponseTTLRuleProto)(nil),    // 24: csar.v1.CacheResponseTTLRuleProto
-	(*CacheResponseTagProto)(nil),        // 25: csar.v1.CacheResponseTagProto
-	(*CacheBypassHeaderProto)(nil),       // 26: csar.v1.CacheBypassHeaderProto
-	(*CacheBypassConfigProto)(nil),       // 27: csar.v1.CacheBypassConfigProto
-	(*CacheCoalesceConfigProto)(nil),     // 28: csar.v1.CacheCoalesceConfigProto
-	(*CacheConfigProto)(nil),             // 29: csar.v1.CacheConfigProto
-	(*CacheInvalidationConfigProto)(nil), // 30: csar.v1.CacheInvalidationConfigProto
-	(*AccessControlProto)(nil),           // 31: csar.v1.AccessControlProto
-	(*ResilienceConfigProto)(nil),        // 32: csar.v1.ResilienceConfigProto
-	(*CircuitBreakerProfileProto)(nil),   // 33: csar.v1.CircuitBreakerProfileProto
-	(*ProtocolPolicyProto)(nil),          // 34: csar.v1.ProtocolPolicyProto
-	(*DebugHeadersProto)(nil),            // 35: csar.v1.DebugHeadersProto
-	(*AuthzRouteConfigProto)(nil),        // 36: csar.v1.AuthzRouteConfigProto
-	(*QuotaAssignment)(nil),              // 37: csar.v1.QuotaAssignment
-	(*RouteQuota)(nil),                   // 38: csar.v1.RouteQuota
-	(*HealthReport)(nil),                 // 39: csar.v1.HealthReport
-	(*HealthAck)(nil),                    // 40: csar.v1.HealthAck
-	nil,                                  // 41: csar.v1.SubscribeRequest.MetadataEntry
-	nil,                                  // 42: csar.v1.FullConfigSnapshot.CircuitBreakersEntry
-	nil,                                  // 43: csar.v1.FullConfigSnapshot.SecurityProfilesEntry
-	nil,                                  // 44: csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry
-	nil,                                  // 45: csar.v1.FullConfigSnapshot.CorsPoliciesEntry
-	nil,                                  // 46: csar.v1.FullConfigSnapshot.RetryPoliciesEntry
-	nil,                                  // 47: csar.v1.FullConfigSnapshot.RedactPoliciesEntry
-	nil,                                  // 48: csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry
-	nil,                                  // 49: csar.v1.FullConfigSnapshot.AuthzPoliciesEntry
-	nil,                                  // 50: csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry
-	nil,                                  // 51: csar.v1.FullConfigSnapshot.BackendPoolsEntry
-	nil,                                  // 52: csar.v1.FullConfigSnapshot.CachePoliciesEntry
-	nil,                                  // 53: csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry
-	nil,                                  // 54: csar.v1.RouteConfig.HeadersEntry
-	nil,                                  // 55: csar.v1.VIPOverrideProto.ValuesEntry
-	nil,                                  // 56: csar.v1.AuthValidateConfigProto.RequiredClaimsEntry
-	nil,                                  // 57: csar.v1.AuthValidateConfigProto.ForwardClaimsEntry
-	nil,                                  // 58: csar.v1.TenantConfigProto.BackendsEntry
-	nil,                                  // 59: csar.v1.QuotaAssignment.QuotasEntry
-	nil,                                  // 60: csar.v1.HealthReport.QueueDepthsEntry
-	nil,                                  // 61: csar.v1.HealthReport.MetadataEntry
-	(*durationpb.Duration)(nil),          // 62: google.protobuf.Duration
+	(*AuditCaptureConfigProto)(nil),      // 20: csar.v1.AuditCaptureConfigProto
+	(*CORSConfigProto)(nil),              // 21: csar.v1.CORSConfigProto
+	(*TenantConfigProto)(nil),            // 22: csar.v1.TenantConfigProto
+	(*CacheTTLRuleProto)(nil),            // 23: csar.v1.CacheTTLRuleProto
+	(*CacheKeyQueryConfigProto)(nil),     // 24: csar.v1.CacheKeyQueryConfigProto
+	(*CacheResponseTTLRuleProto)(nil),    // 25: csar.v1.CacheResponseTTLRuleProto
+	(*CacheResponseTagProto)(nil),        // 26: csar.v1.CacheResponseTagProto
+	(*CacheBypassHeaderProto)(nil),       // 27: csar.v1.CacheBypassHeaderProto
+	(*CacheBypassConfigProto)(nil),       // 28: csar.v1.CacheBypassConfigProto
+	(*CacheCoalesceConfigProto)(nil),     // 29: csar.v1.CacheCoalesceConfigProto
+	(*CacheConfigProto)(nil),             // 30: csar.v1.CacheConfigProto
+	(*CacheInvalidationConfigProto)(nil), // 31: csar.v1.CacheInvalidationConfigProto
+	(*AccessControlProto)(nil),           // 32: csar.v1.AccessControlProto
+	(*ResilienceConfigProto)(nil),        // 33: csar.v1.ResilienceConfigProto
+	(*CircuitBreakerProfileProto)(nil),   // 34: csar.v1.CircuitBreakerProfileProto
+	(*ProtocolPolicyProto)(nil),          // 35: csar.v1.ProtocolPolicyProto
+	(*DebugHeadersProto)(nil),            // 36: csar.v1.DebugHeadersProto
+	(*AuthzRouteConfigProto)(nil),        // 37: csar.v1.AuthzRouteConfigProto
+	(*QuotaAssignment)(nil),              // 38: csar.v1.QuotaAssignment
+	(*RouteQuota)(nil),                   // 39: csar.v1.RouteQuota
+	(*HealthReport)(nil),                 // 40: csar.v1.HealthReport
+	(*HealthAck)(nil),                    // 41: csar.v1.HealthAck
+	nil,                                  // 42: csar.v1.SubscribeRequest.MetadataEntry
+	nil,                                  // 43: csar.v1.FullConfigSnapshot.CircuitBreakersEntry
+	nil,                                  // 44: csar.v1.FullConfigSnapshot.SecurityProfilesEntry
+	nil,                                  // 45: csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry
+	nil,                                  // 46: csar.v1.FullConfigSnapshot.CorsPoliciesEntry
+	nil,                                  // 47: csar.v1.FullConfigSnapshot.RetryPoliciesEntry
+	nil,                                  // 48: csar.v1.FullConfigSnapshot.RedactPoliciesEntry
+	nil,                                  // 49: csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry
+	nil,                                  // 50: csar.v1.FullConfigSnapshot.AuthzPoliciesEntry
+	nil,                                  // 51: csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry
+	nil,                                  // 52: csar.v1.FullConfigSnapshot.BackendPoolsEntry
+	nil,                                  // 53: csar.v1.FullConfigSnapshot.CachePoliciesEntry
+	nil,                                  // 54: csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry
+	nil,                                  // 55: csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntry
+	nil,                                  // 56: csar.v1.RouteConfig.HeadersEntry
+	nil,                                  // 57: csar.v1.VIPOverrideProto.ValuesEntry
+	nil,                                  // 58: csar.v1.AuthValidateConfigProto.RequiredClaimsEntry
+	nil,                                  // 59: csar.v1.AuthValidateConfigProto.ForwardClaimsEntry
+	nil,                                  // 60: csar.v1.TenantConfigProto.BackendsEntry
+	nil,                                  // 61: csar.v1.QuotaAssignment.QuotasEntry
+	nil,                                  // 62: csar.v1.HealthReport.QueueDepthsEntry
+	nil,                                  // 63: csar.v1.HealthReport.MetadataEntry
+	(*durationpb.Duration)(nil),          // 64: google.protobuf.Duration
 }
 var file_proto_csar_v1_coordinator_proto_depIdxs = []int32{
-	41,  // 0: csar.v1.SubscribeRequest.metadata:type_name -> csar.v1.SubscribeRequest.MetadataEntry
+	42,  // 0: csar.v1.SubscribeRequest.metadata:type_name -> csar.v1.SubscribeRequest.MetadataEntry
 	4,   // 1: csar.v1.ConfigUpdate.route_snapshot:type_name -> csar.v1.RouteSnapshot
-	37,  // 2: csar.v1.ConfigUpdate.quota_assignment:type_name -> csar.v1.QuotaAssignment
+	38,  // 2: csar.v1.ConfigUpdate.quota_assignment:type_name -> csar.v1.QuotaAssignment
 	2,   // 3: csar.v1.ConfigUpdate.token_invalidation:type_name -> csar.v1.TokenInvalidation
 	3,   // 4: csar.v1.ConfigUpdate.full_config_snapshot:type_name -> csar.v1.FullConfigSnapshot
 	5,   // 5: csar.v1.FullConfigSnapshot.routes:type_name -> csar.v1.RouteConfig
-	42,  // 6: csar.v1.FullConfigSnapshot.circuit_breakers:type_name -> csar.v1.FullConfigSnapshot.CircuitBreakersEntry
-	43,  // 7: csar.v1.FullConfigSnapshot.security_profiles:type_name -> csar.v1.FullConfigSnapshot.SecurityProfilesEntry
-	44,  // 8: csar.v1.FullConfigSnapshot.throttling_policies:type_name -> csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry
-	45,  // 9: csar.v1.FullConfigSnapshot.cors_policies:type_name -> csar.v1.FullConfigSnapshot.CorsPoliciesEntry
-	46,  // 10: csar.v1.FullConfigSnapshot.retry_policies:type_name -> csar.v1.FullConfigSnapshot.RetryPoliciesEntry
-	47,  // 11: csar.v1.FullConfigSnapshot.redact_policies:type_name -> csar.v1.FullConfigSnapshot.RedactPoliciesEntry
-	48,  // 12: csar.v1.FullConfigSnapshot.auth_validate_policies:type_name -> csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry
-	49,  // 13: csar.v1.FullConfigSnapshot.authz_policies:type_name -> csar.v1.FullConfigSnapshot.AuthzPoliciesEntry
-	50,  // 14: csar.v1.FullConfigSnapshot.backend_tls_policies:type_name -> csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry
-	51,  // 15: csar.v1.FullConfigSnapshot.backend_pools:type_name -> csar.v1.FullConfigSnapshot.BackendPoolsEntry
-	52,  // 16: csar.v1.FullConfigSnapshot.cache_policies:type_name -> csar.v1.FullConfigSnapshot.CachePoliciesEntry
-	53,  // 17: csar.v1.FullConfigSnapshot.cache_invalidation_policies:type_name -> csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry
-	16,  // 18: csar.v1.FullConfigSnapshot.global_throttle:type_name -> csar.v1.GlobalThrottleProto
-	35,  // 19: csar.v1.FullConfigSnapshot.debug_headers:type_name -> csar.v1.DebugHeadersProto
-	31,  // 20: csar.v1.FullConfigSnapshot.global_access_control:type_name -> csar.v1.AccessControlProto
-	5,   // 21: csar.v1.RouteSnapshot.routes:type_name -> csar.v1.RouteConfig
-	10,  // 22: csar.v1.RouteConfig.security:type_name -> csar.v1.SecurityConfigProto
-	12,  // 23: csar.v1.RouteConfig.traffic:type_name -> csar.v1.TrafficConfigProto
-	6,   // 24: csar.v1.RouteConfig.backend:type_name -> csar.v1.BackendConfigProto
-	10,  // 25: csar.v1.RouteConfig.securities:type_name -> csar.v1.SecurityConfigProto
-	12,  // 26: csar.v1.RouteConfig.traffic_config:type_name -> csar.v1.TrafficConfigProto
-	18,  // 27: csar.v1.RouteConfig.retry:type_name -> csar.v1.RetryConfigProto
-	19,  // 28: csar.v1.RouteConfig.redact:type_name -> csar.v1.RedactConfigProto
-	20,  // 29: csar.v1.RouteConfig.cors:type_name -> csar.v1.CORSConfigProto
-	21,  // 30: csar.v1.RouteConfig.tenant:type_name -> csar.v1.TenantConfigProto
-	29,  // 31: csar.v1.RouteConfig.cache:type_name -> csar.v1.CacheConfigProto
-	17,  // 32: csar.v1.RouteConfig.auth_validate:type_name -> csar.v1.AuthValidateConfigProto
-	31,  // 33: csar.v1.RouteConfig.access:type_name -> csar.v1.AccessControlProto
-	32,  // 34: csar.v1.RouteConfig.resilience:type_name -> csar.v1.ResilienceConfigProto
-	54,  // 35: csar.v1.RouteConfig.headers:type_name -> csar.v1.RouteConfig.HeadersEntry
-	34,  // 36: csar.v1.RouteConfig.protocol:type_name -> csar.v1.ProtocolPolicyProto
-	36,  // 37: csar.v1.RouteConfig.authz:type_name -> csar.v1.AuthzRouteConfigProto
-	30,  // 38: csar.v1.RouteConfig.cache_invalidate:type_name -> csar.v1.CacheInvalidationConfigProto
-	7,   // 39: csar.v1.BackendConfigProto.health_check:type_name -> csar.v1.HealthCheckConfigProto
-	8,   // 40: csar.v1.BackendConfigProto.tls:type_name -> csar.v1.BackendTLSConfigProto
-	62,  // 41: csar.v1.BackendConfigProto.timeout:type_name -> google.protobuf.Duration
-	62,  // 42: csar.v1.HealthCheckConfigProto.interval:type_name -> google.protobuf.Duration
-	62,  // 43: csar.v1.HealthCheckConfigProto.timeout:type_name -> google.protobuf.Duration
-	62,  // 44: csar.v1.BackendPoolConfigProto.dial_timeout:type_name -> google.protobuf.Duration
-	62,  // 45: csar.v1.BackendPoolConfigProto.tls_handshake_timeout:type_name -> google.protobuf.Duration
-	62,  // 46: csar.v1.BackendPoolConfigProto.response_header_timeout:type_name -> google.protobuf.Duration
-	62,  // 47: csar.v1.BackendPoolConfigProto.idle_conn_timeout:type_name -> google.protobuf.Duration
-	62,  // 48: csar.v1.BackendPoolConfigProto.expect_continue_timeout:type_name -> google.protobuf.Duration
-	62,  // 49: csar.v1.TrafficConfigProto.max_wait:type_name -> google.protobuf.Duration
-	13,  // 50: csar.v1.TrafficConfigProto.vip_overrides:type_name -> csar.v1.VIPOverrideProto
-	14,  // 51: csar.v1.TrafficConfigProto.adaptive_backpressure:type_name -> csar.v1.AdaptiveBackpressureProto
-	55,  // 52: csar.v1.VIPOverrideProto.values:type_name -> csar.v1.VIPOverrideProto.ValuesEntry
-	62,  // 53: csar.v1.ThrottlingPolicyProto.max_wait:type_name -> google.protobuf.Duration
-	13,  // 54: csar.v1.ThrottlingPolicyProto.vip_overrides:type_name -> csar.v1.VIPOverrideProto
-	62,  // 55: csar.v1.GlobalThrottleProto.max_wait:type_name -> google.protobuf.Duration
-	62,  // 56: csar.v1.AuthValidateConfigProto.cache_ttl:type_name -> google.protobuf.Duration
-	56,  // 57: csar.v1.AuthValidateConfigProto.required_claims:type_name -> csar.v1.AuthValidateConfigProto.RequiredClaimsEntry
-	57,  // 58: csar.v1.AuthValidateConfigProto.forward_claims:type_name -> csar.v1.AuthValidateConfigProto.ForwardClaimsEntry
-	11,  // 59: csar.v1.AuthValidateConfigProto.issue_tokens:type_name -> csar.v1.IssueTokenConfigProto
-	62,  // 60: csar.v1.RetryConfigProto.backoff:type_name -> google.protobuf.Duration
-	62,  // 61: csar.v1.RetryConfigProto.max_backoff:type_name -> google.protobuf.Duration
-	62,  // 62: csar.v1.RetryConfigProto.max_internal_wait:type_name -> google.protobuf.Duration
-	58,  // 63: csar.v1.TenantConfigProto.backends:type_name -> csar.v1.TenantConfigProto.BackendsEntry
-	62,  // 64: csar.v1.CacheTTLRuleProto.ttl:type_name -> google.protobuf.Duration
-	62,  // 65: csar.v1.CacheResponseTTLRuleProto.ttl:type_name -> google.protobuf.Duration
-	26,  // 66: csar.v1.CacheBypassConfigProto.headers:type_name -> csar.v1.CacheBypassHeaderProto
-	62,  // 67: csar.v1.CacheCoalesceConfigProto.wait:type_name -> google.protobuf.Duration
-	62,  // 68: csar.v1.CacheConfigProto.ttl:type_name -> google.protobuf.Duration
-	62,  // 69: csar.v1.CacheConfigProto.operation_timeout:type_name -> google.protobuf.Duration
-	22,  // 70: csar.v1.CacheConfigProto.ttl_rules:type_name -> csar.v1.CacheTTLRuleProto
-	23,  // 71: csar.v1.CacheConfigProto.key_query:type_name -> csar.v1.CacheKeyQueryConfigProto
-	62,  // 72: csar.v1.CacheConfigProto.stale_if_error:type_name -> google.protobuf.Duration
-	62,  // 73: csar.v1.CacheConfigProto.stale_while_revalidate:type_name -> google.protobuf.Duration
-	24,  // 74: csar.v1.CacheConfigProto.response_ttl_rules:type_name -> csar.v1.CacheResponseTTLRuleProto
-	25,  // 75: csar.v1.CacheConfigProto.response_tags:type_name -> csar.v1.CacheResponseTagProto
-	27,  // 76: csar.v1.CacheConfigProto.bypass:type_name -> csar.v1.CacheBypassConfigProto
-	28,  // 77: csar.v1.CacheConfigProto.coalesce:type_name -> csar.v1.CacheCoalesceConfigProto
-	62,  // 78: csar.v1.CacheInvalidationConfigProto.operation_timeout:type_name -> google.protobuf.Duration
-	62,  // 79: csar.v1.CacheInvalidationConfigProto.debounce:type_name -> google.protobuf.Duration
-	62,  // 80: csar.v1.CircuitBreakerProfileProto.interval:type_name -> google.protobuf.Duration
-	62,  // 81: csar.v1.CircuitBreakerProfileProto.timeout:type_name -> google.protobuf.Duration
-	59,  // 82: csar.v1.QuotaAssignment.quotas:type_name -> csar.v1.QuotaAssignment.QuotasEntry
-	60,  // 83: csar.v1.HealthReport.queue_depths:type_name -> csar.v1.HealthReport.QueueDepthsEntry
-	61,  // 84: csar.v1.HealthReport.metadata:type_name -> csar.v1.HealthReport.MetadataEntry
-	33,  // 85: csar.v1.FullConfigSnapshot.CircuitBreakersEntry.value:type_name -> csar.v1.CircuitBreakerProfileProto
-	10,  // 86: csar.v1.FullConfigSnapshot.SecurityProfilesEntry.value:type_name -> csar.v1.SecurityConfigProto
-	15,  // 87: csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry.value:type_name -> csar.v1.ThrottlingPolicyProto
-	20,  // 88: csar.v1.FullConfigSnapshot.CorsPoliciesEntry.value:type_name -> csar.v1.CORSConfigProto
-	18,  // 89: csar.v1.FullConfigSnapshot.RetryPoliciesEntry.value:type_name -> csar.v1.RetryConfigProto
-	19,  // 90: csar.v1.FullConfigSnapshot.RedactPoliciesEntry.value:type_name -> csar.v1.RedactConfigProto
-	17,  // 91: csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry.value:type_name -> csar.v1.AuthValidateConfigProto
-	36,  // 92: csar.v1.FullConfigSnapshot.AuthzPoliciesEntry.value:type_name -> csar.v1.AuthzRouteConfigProto
-	8,   // 93: csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry.value:type_name -> csar.v1.BackendTLSConfigProto
-	9,   // 94: csar.v1.FullConfigSnapshot.BackendPoolsEntry.value:type_name -> csar.v1.BackendPoolConfigProto
-	29,  // 95: csar.v1.FullConfigSnapshot.CachePoliciesEntry.value:type_name -> csar.v1.CacheConfigProto
-	30,  // 96: csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry.value:type_name -> csar.v1.CacheInvalidationConfigProto
-	38,  // 97: csar.v1.QuotaAssignment.QuotasEntry.value:type_name -> csar.v1.RouteQuota
-	0,   // 98: csar.v1.CoordinatorService.Subscribe:input_type -> csar.v1.SubscribeRequest
-	39,  // 99: csar.v1.CoordinatorService.ReportHealth:input_type -> csar.v1.HealthReport
-	1,   // 100: csar.v1.CoordinatorService.Subscribe:output_type -> csar.v1.ConfigUpdate
-	40,  // 101: csar.v1.CoordinatorService.ReportHealth:output_type -> csar.v1.HealthAck
-	100, // [100:102] is the sub-list for method output_type
-	98,  // [98:100] is the sub-list for method input_type
-	98,  // [98:98] is the sub-list for extension type_name
-	98,  // [98:98] is the sub-list for extension extendee
-	0,   // [0:98] is the sub-list for field type_name
+	43,  // 6: csar.v1.FullConfigSnapshot.circuit_breakers:type_name -> csar.v1.FullConfigSnapshot.CircuitBreakersEntry
+	44,  // 7: csar.v1.FullConfigSnapshot.security_profiles:type_name -> csar.v1.FullConfigSnapshot.SecurityProfilesEntry
+	45,  // 8: csar.v1.FullConfigSnapshot.throttling_policies:type_name -> csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry
+	46,  // 9: csar.v1.FullConfigSnapshot.cors_policies:type_name -> csar.v1.FullConfigSnapshot.CorsPoliciesEntry
+	47,  // 10: csar.v1.FullConfigSnapshot.retry_policies:type_name -> csar.v1.FullConfigSnapshot.RetryPoliciesEntry
+	48,  // 11: csar.v1.FullConfigSnapshot.redact_policies:type_name -> csar.v1.FullConfigSnapshot.RedactPoliciesEntry
+	49,  // 12: csar.v1.FullConfigSnapshot.auth_validate_policies:type_name -> csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry
+	50,  // 13: csar.v1.FullConfigSnapshot.authz_policies:type_name -> csar.v1.FullConfigSnapshot.AuthzPoliciesEntry
+	51,  // 14: csar.v1.FullConfigSnapshot.backend_tls_policies:type_name -> csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry
+	52,  // 15: csar.v1.FullConfigSnapshot.backend_pools:type_name -> csar.v1.FullConfigSnapshot.BackendPoolsEntry
+	53,  // 16: csar.v1.FullConfigSnapshot.cache_policies:type_name -> csar.v1.FullConfigSnapshot.CachePoliciesEntry
+	54,  // 17: csar.v1.FullConfigSnapshot.cache_invalidation_policies:type_name -> csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry
+	55,  // 18: csar.v1.FullConfigSnapshot.audit_capture_policies:type_name -> csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntry
+	16,  // 19: csar.v1.FullConfigSnapshot.global_throttle:type_name -> csar.v1.GlobalThrottleProto
+	36,  // 20: csar.v1.FullConfigSnapshot.debug_headers:type_name -> csar.v1.DebugHeadersProto
+	32,  // 21: csar.v1.FullConfigSnapshot.global_access_control:type_name -> csar.v1.AccessControlProto
+	5,   // 22: csar.v1.RouteSnapshot.routes:type_name -> csar.v1.RouteConfig
+	10,  // 23: csar.v1.RouteConfig.security:type_name -> csar.v1.SecurityConfigProto
+	12,  // 24: csar.v1.RouteConfig.traffic:type_name -> csar.v1.TrafficConfigProto
+	6,   // 25: csar.v1.RouteConfig.backend:type_name -> csar.v1.BackendConfigProto
+	10,  // 26: csar.v1.RouteConfig.securities:type_name -> csar.v1.SecurityConfigProto
+	12,  // 27: csar.v1.RouteConfig.traffic_config:type_name -> csar.v1.TrafficConfigProto
+	18,  // 28: csar.v1.RouteConfig.retry:type_name -> csar.v1.RetryConfigProto
+	19,  // 29: csar.v1.RouteConfig.redact:type_name -> csar.v1.RedactConfigProto
+	21,  // 30: csar.v1.RouteConfig.cors:type_name -> csar.v1.CORSConfigProto
+	22,  // 31: csar.v1.RouteConfig.tenant:type_name -> csar.v1.TenantConfigProto
+	30,  // 32: csar.v1.RouteConfig.cache:type_name -> csar.v1.CacheConfigProto
+	17,  // 33: csar.v1.RouteConfig.auth_validate:type_name -> csar.v1.AuthValidateConfigProto
+	32,  // 34: csar.v1.RouteConfig.access:type_name -> csar.v1.AccessControlProto
+	33,  // 35: csar.v1.RouteConfig.resilience:type_name -> csar.v1.ResilienceConfigProto
+	56,  // 36: csar.v1.RouteConfig.headers:type_name -> csar.v1.RouteConfig.HeadersEntry
+	35,  // 37: csar.v1.RouteConfig.protocol:type_name -> csar.v1.ProtocolPolicyProto
+	37,  // 38: csar.v1.RouteConfig.authz:type_name -> csar.v1.AuthzRouteConfigProto
+	31,  // 39: csar.v1.RouteConfig.cache_invalidate:type_name -> csar.v1.CacheInvalidationConfigProto
+	20,  // 40: csar.v1.RouteConfig.audit_capture:type_name -> csar.v1.AuditCaptureConfigProto
+	7,   // 41: csar.v1.BackendConfigProto.health_check:type_name -> csar.v1.HealthCheckConfigProto
+	8,   // 42: csar.v1.BackendConfigProto.tls:type_name -> csar.v1.BackendTLSConfigProto
+	64,  // 43: csar.v1.BackendConfigProto.timeout:type_name -> google.protobuf.Duration
+	64,  // 44: csar.v1.HealthCheckConfigProto.interval:type_name -> google.protobuf.Duration
+	64,  // 45: csar.v1.HealthCheckConfigProto.timeout:type_name -> google.protobuf.Duration
+	64,  // 46: csar.v1.BackendPoolConfigProto.dial_timeout:type_name -> google.protobuf.Duration
+	64,  // 47: csar.v1.BackendPoolConfigProto.tls_handshake_timeout:type_name -> google.protobuf.Duration
+	64,  // 48: csar.v1.BackendPoolConfigProto.response_header_timeout:type_name -> google.protobuf.Duration
+	64,  // 49: csar.v1.BackendPoolConfigProto.idle_conn_timeout:type_name -> google.protobuf.Duration
+	64,  // 50: csar.v1.BackendPoolConfigProto.expect_continue_timeout:type_name -> google.protobuf.Duration
+	64,  // 51: csar.v1.TrafficConfigProto.max_wait:type_name -> google.protobuf.Duration
+	13,  // 52: csar.v1.TrafficConfigProto.vip_overrides:type_name -> csar.v1.VIPOverrideProto
+	14,  // 53: csar.v1.TrafficConfigProto.adaptive_backpressure:type_name -> csar.v1.AdaptiveBackpressureProto
+	57,  // 54: csar.v1.VIPOverrideProto.values:type_name -> csar.v1.VIPOverrideProto.ValuesEntry
+	64,  // 55: csar.v1.ThrottlingPolicyProto.max_wait:type_name -> google.protobuf.Duration
+	13,  // 56: csar.v1.ThrottlingPolicyProto.vip_overrides:type_name -> csar.v1.VIPOverrideProto
+	64,  // 57: csar.v1.GlobalThrottleProto.max_wait:type_name -> google.protobuf.Duration
+	64,  // 58: csar.v1.AuthValidateConfigProto.cache_ttl:type_name -> google.protobuf.Duration
+	58,  // 59: csar.v1.AuthValidateConfigProto.required_claims:type_name -> csar.v1.AuthValidateConfigProto.RequiredClaimsEntry
+	59,  // 60: csar.v1.AuthValidateConfigProto.forward_claims:type_name -> csar.v1.AuthValidateConfigProto.ForwardClaimsEntry
+	11,  // 61: csar.v1.AuthValidateConfigProto.issue_tokens:type_name -> csar.v1.IssueTokenConfigProto
+	64,  // 62: csar.v1.RetryConfigProto.backoff:type_name -> google.protobuf.Duration
+	64,  // 63: csar.v1.RetryConfigProto.max_backoff:type_name -> google.protobuf.Duration
+	64,  // 64: csar.v1.RetryConfigProto.max_internal_wait:type_name -> google.protobuf.Duration
+	60,  // 65: csar.v1.TenantConfigProto.backends:type_name -> csar.v1.TenantConfigProto.BackendsEntry
+	64,  // 66: csar.v1.CacheTTLRuleProto.ttl:type_name -> google.protobuf.Duration
+	64,  // 67: csar.v1.CacheResponseTTLRuleProto.ttl:type_name -> google.protobuf.Duration
+	27,  // 68: csar.v1.CacheBypassConfigProto.headers:type_name -> csar.v1.CacheBypassHeaderProto
+	64,  // 69: csar.v1.CacheCoalesceConfigProto.wait:type_name -> google.protobuf.Duration
+	64,  // 70: csar.v1.CacheConfigProto.ttl:type_name -> google.protobuf.Duration
+	64,  // 71: csar.v1.CacheConfigProto.operation_timeout:type_name -> google.protobuf.Duration
+	23,  // 72: csar.v1.CacheConfigProto.ttl_rules:type_name -> csar.v1.CacheTTLRuleProto
+	24,  // 73: csar.v1.CacheConfigProto.key_query:type_name -> csar.v1.CacheKeyQueryConfigProto
+	64,  // 74: csar.v1.CacheConfigProto.stale_if_error:type_name -> google.protobuf.Duration
+	64,  // 75: csar.v1.CacheConfigProto.stale_while_revalidate:type_name -> google.protobuf.Duration
+	25,  // 76: csar.v1.CacheConfigProto.response_ttl_rules:type_name -> csar.v1.CacheResponseTTLRuleProto
+	26,  // 77: csar.v1.CacheConfigProto.response_tags:type_name -> csar.v1.CacheResponseTagProto
+	28,  // 78: csar.v1.CacheConfigProto.bypass:type_name -> csar.v1.CacheBypassConfigProto
+	29,  // 79: csar.v1.CacheConfigProto.coalesce:type_name -> csar.v1.CacheCoalesceConfigProto
+	64,  // 80: csar.v1.CacheInvalidationConfigProto.operation_timeout:type_name -> google.protobuf.Duration
+	64,  // 81: csar.v1.CacheInvalidationConfigProto.debounce:type_name -> google.protobuf.Duration
+	64,  // 82: csar.v1.CircuitBreakerProfileProto.interval:type_name -> google.protobuf.Duration
+	64,  // 83: csar.v1.CircuitBreakerProfileProto.timeout:type_name -> google.protobuf.Duration
+	61,  // 84: csar.v1.QuotaAssignment.quotas:type_name -> csar.v1.QuotaAssignment.QuotasEntry
+	62,  // 85: csar.v1.HealthReport.queue_depths:type_name -> csar.v1.HealthReport.QueueDepthsEntry
+	63,  // 86: csar.v1.HealthReport.metadata:type_name -> csar.v1.HealthReport.MetadataEntry
+	34,  // 87: csar.v1.FullConfigSnapshot.CircuitBreakersEntry.value:type_name -> csar.v1.CircuitBreakerProfileProto
+	10,  // 88: csar.v1.FullConfigSnapshot.SecurityProfilesEntry.value:type_name -> csar.v1.SecurityConfigProto
+	15,  // 89: csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry.value:type_name -> csar.v1.ThrottlingPolicyProto
+	21,  // 90: csar.v1.FullConfigSnapshot.CorsPoliciesEntry.value:type_name -> csar.v1.CORSConfigProto
+	18,  // 91: csar.v1.FullConfigSnapshot.RetryPoliciesEntry.value:type_name -> csar.v1.RetryConfigProto
+	19,  // 92: csar.v1.FullConfigSnapshot.RedactPoliciesEntry.value:type_name -> csar.v1.RedactConfigProto
+	17,  // 93: csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry.value:type_name -> csar.v1.AuthValidateConfigProto
+	37,  // 94: csar.v1.FullConfigSnapshot.AuthzPoliciesEntry.value:type_name -> csar.v1.AuthzRouteConfigProto
+	8,   // 95: csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry.value:type_name -> csar.v1.BackendTLSConfigProto
+	9,   // 96: csar.v1.FullConfigSnapshot.BackendPoolsEntry.value:type_name -> csar.v1.BackendPoolConfigProto
+	30,  // 97: csar.v1.FullConfigSnapshot.CachePoliciesEntry.value:type_name -> csar.v1.CacheConfigProto
+	31,  // 98: csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry.value:type_name -> csar.v1.CacheInvalidationConfigProto
+	20,  // 99: csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntry.value:type_name -> csar.v1.AuditCaptureConfigProto
+	39,  // 100: csar.v1.QuotaAssignment.QuotasEntry.value:type_name -> csar.v1.RouteQuota
+	0,   // 101: csar.v1.CoordinatorService.Subscribe:input_type -> csar.v1.SubscribeRequest
+	40,  // 102: csar.v1.CoordinatorService.ReportHealth:input_type -> csar.v1.HealthReport
+	1,   // 103: csar.v1.CoordinatorService.Subscribe:output_type -> csar.v1.ConfigUpdate
+	41,  // 104: csar.v1.CoordinatorService.ReportHealth:output_type -> csar.v1.HealthAck
+	103, // [103:105] is the sub-list for method output_type
+	101, // [101:103] is the sub-list for method input_type
+	101, // [101:101] is the sub-list for extension type_name
+	101, // [101:101] is the sub-list for extension extendee
+	0,   // [0:101] is the sub-list for field type_name
 }
 
 func init() { file_proto_csar_v1_coordinator_proto_init() }
@@ -4169,7 +4334,7 @@ func file_proto_csar_v1_coordinator_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_csar_v1_coordinator_proto_rawDesc), len(file_proto_csar_v1_coordinator_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   62,
+			NumMessages:   64,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

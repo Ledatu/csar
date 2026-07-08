@@ -93,6 +93,7 @@ message FullConfigSnapshot {
   map<string, BackendPoolConfigProto> backend_pools = 14;
   map<string, CacheConfigProto> cache_policies = 15;
   map<string, CacheInvalidationConfigProto> cache_invalidation_policies = 16;
+  map<string, AuditCaptureConfigProto> audit_capture_policies = 17;
 
   // Global settings.
   GlobalThrottleProto global_throttle = 9;
@@ -135,10 +136,13 @@ message RouteConfig {
   AuthzRouteConfigProto authz = 24;
 
   // Router access audit (csar-audit). When audit_set is false, the router uses
-  // default-by-HTTP-method behavior. Mirrors config.RouteConfig.Audit (*bool).
+  // default-by-HTTP-method behavior. Mirrors config.RouteConfig.Audit.
   bool audit = 25;
   bool audit_set = 26;
   CacheInvalidationConfigProto cache_invalidate = 27;
+  // Audit mode: "off", "all", or "errors". Preferred over audit bool when set.
+  string audit_mode = 28;
+  AuditCaptureConfigProto audit_capture = 29;
 }
 
 // ---------------------------------------------------------------------------
@@ -302,6 +306,19 @@ message RedactConfigProto {
   string mask = 3;
   bool enabled = 4;
   bool enabled_set = 5;
+}
+
+message AuditCaptureConfigProto {
+  string use = 1;
+  bool request = 2;
+  bool request_set = 3;
+  int64 max_bytes = 4;
+  string redact = 5;
+  repeated string fields = 6;
+  repeated string sensitive_fields = 7;
+  bool include_query = 8;
+  bool include_query_set = 9;
+  string mask = 10;
 }
 
 // ---------------------------------------------------------------------------

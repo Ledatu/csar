@@ -70,6 +70,11 @@
       "description": "Named reusable redaction configurations. Routes reference them via x-csar-redact: \"policy_name\".",
       "additionalProperties": { "$ref": "#/$defs/RedactConfigObject" }
     },
+    "audit_capture_policies": {
+      "type": "object",
+      "description": "Named reusable audit request capture configurations. Routes reference them via x-csar-audit-capture: \"policy_name\".",
+      "additionalProperties": { "$ref": "#/$defs/AuditCaptureConfig" }
+    },
     "auth_validate_policies": {
       "type": "object",
       "description": "Named reusable auth validation configurations. Routes reference them via x-csar-authn-validate: \"policy_name\".",
@@ -1536,6 +1541,7 @@
           "description": "gRPC address of the csar-audit service.",
           "examples": ["localhost:9084", "audit.internal:443"]
         },
+        "capture": { "$ref": "#/$defs/AuditCaptureConfig" },
         "ca_file": {
           "type": "string",
           "description": "CA certificate for verifying the csar-audit server."
@@ -1557,6 +1563,48 @@
           "$ref": "#/$defs/Duration",
           "description": "Per-call timeout for RecordEvents RPCs. Default: 500ms.",
           "default": "500ms"
+        }
+      }
+    },
+    "AuditCaptureConfig": {
+      "type": "object",
+      "description": "Redacted request-body capture for router audit events.",
+      "additionalProperties": false,
+      "properties": {
+        "use": {
+          "type": "string",
+          "description": "Reference to a named audit_capture_policies entry."
+        },
+        "request": {
+          "type": "boolean",
+          "description": "Enable request body capture."
+        },
+        "max_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum request body bytes to capture. Default: 16384."
+        },
+        "redact": {
+          "type": "string",
+          "description": "Reference to a redact_policies entry for extra field redaction."
+        },
+        "fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Extra dot-path JSON fields to redact."
+        },
+        "sensitive_fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Extra sensitive key names merged with built-in defaults."
+        },
+        "include_query": {
+          "type": "boolean",
+          "description": "Capture redacted query params in metadata. Default: true."
+        },
+        "mask": {
+          "type": "string",
+          "description": "Replacement string for redacted values. Default: [REDACTED]."
         }
       }
     },
@@ -1639,8 +1687,21 @@
         "x-csar-protocol": { "$ref": "#/$defs/ProtocolPolicyConfig" },
         "x-csar-authz": { "$ref": "#/$defs/AuthzRouteConfig" },
         "x-csar-audit": {
-          "type": "boolean",
-          "description": "Emit access audit events for this route. When omitted, POST/PUT/PATCH/DELETE default to on (if audit client is configured); GET/HEAD/OPTIONS default to off."
+          "oneOf": [
+            { "type": "boolean", "description": "Legacy: true=all, false=off." },
+            {
+              "type": "string",
+              "enum": ["off", "all", "errors"],
+              "description": "Audit mode: off (never), all (every request), errors (upstream status >= 400 only)."
+            }
+          ],
+          "description": "Emit access audit events for this route. When omitted, POST/PUT/PATCH/DELETE default to all (if audit client is configured); GET/HEAD/OPTIONS default to off."
+        },
+        "x-csar-audit-capture": {
+          "oneOf": [
+            { "type": "string", "description": "Reference to a named audit_capture_policies entry." },
+            { "$ref": "#/$defs/AuditCaptureConfig" }
+          ]
         }
       }
     },

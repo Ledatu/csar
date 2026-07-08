@@ -581,6 +581,16 @@ func (c *Config) Validate() error {
 					"call ResolveAuthzPolicies() before Validate()", path, method, route.Authz.Use)
 			}
 
+			if route.AuditCapture != nil && route.AuditCapture.Use != "" {
+				return fmt.Errorf("path %s method %s: x-csar-audit-capture has unresolved policy reference %q — "+
+					"call ResolveAuditCapturePolicies() before Validate()", path, method, route.AuditCapture.Use)
+			}
+
+			if route.AuditCapture != nil && route.AuditCapture.Redact != "" {
+				return fmt.Errorf("path %s method %s: x-csar-audit-capture has unresolved redact reference %q — "+
+					"call ResolveAuditCapturePolicies() before Validate()", path, method, route.AuditCapture.Redact)
+			}
+
 			// Validate dynamic key requires redis backend.
 			if route.Traffic != nil && route.Traffic.Key != "" {
 				if route.Traffic.Backend != "redis" {

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledatu/csar/internal/config"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
@@ -226,8 +227,8 @@ func TestFullSnapshotToConfig_AuditExplicitFalse(t *testing.T) {
 				Backend: &csarv1.BackendConfigProto{
 					TargetUrl: "https://s3:8087",
 				},
-				AuditSet: true,
-				Audit:    false,
+				AuditSet:  true,
+				AuditMode: "off",
 			},
 		},
 	}
@@ -237,8 +238,8 @@ func TestFullSnapshotToConfig_AuditExplicitFalse(t *testing.T) {
 	if !ok {
 		t.Fatal("route not found")
 	}
-	if route.Audit == nil || *route.Audit != false {
-		t.Fatalf("Audit = %v, want pointer to false", route.Audit)
+	if route.Audit == nil || *route.Audit != config.AuditModeOff {
+		t.Fatalf("Audit = %v, want pointer to off", route.Audit)
 	}
 }
 

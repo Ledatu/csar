@@ -145,6 +145,10 @@ type Config struct {
 	// Routes reference them via x-csar-redact: "policy_name".
 	RedactPolicies map[string]RedactConfig `yaml:"redact_policies,omitempty" json:"redact_policies,omitempty"`
 
+	// AuditCapturePolicies defines named request-body capture configs for router audit.
+	// Routes reference them via x-csar-audit-capture: "policy_name".
+	AuditCapturePolicies map[string]AuditCaptureConfig `yaml:"audit_capture_policies,omitempty" json:"audit_capture_policies,omitempty"`
+
 	// AuthValidatePolicies defines named, reusable auth validation configurations.
 	// Routes reference them via x-csar-authn-validate: "policy_name".
 	AuthValidatePolicies map[string]AuthValidateConfig `yaml:"auth_validate_policies,omitempty" json:"auth_validate_policies,omitempty"`
@@ -323,9 +327,13 @@ type RouteConfig struct {
 	// against csar-authz, and injects trusted headers (e.g. X-User-Roles).
 	Authz *AuthzRouteConfig `yaml:"x-csar-authz,omitempty" json:"x-csar-authz,omitempty"`
 
-	// Audit toggles router access audit for this route. When nil, POST/PUT/PATCH/DELETE
-	// are audited and GET/HEAD/OPTIONS are not. When true, audit requires a configured audit client.
-	Audit *bool `yaml:"x-csar-audit,omitempty" json:"x-csar-audit,omitempty"`
+	// Audit controls router access audit for this route. Accepts boolean (legacy),
+	// or "off", "all", "errors". When nil, POST/PUT/PATCH/DELETE default to all
+	// and GET/HEAD/OPTIONS default to off.
+	Audit *AuditMode `yaml:"x-csar-audit,omitempty" json:"x-csar-audit,omitempty"`
+
+	// AuditCapture configures optional redacted request-body capture for audit events.
+	AuditCapture *AuditCaptureConfig `yaml:"x-csar-audit-capture,omitempty" json:"x-csar-audit-capture,omitempty"`
 
 	// SourceInfo records which file and line each field was declared in.
 	// Populated during multi-file loading for diagnostics. Not serialized.
@@ -1479,6 +1487,9 @@ type AuditClientConfig struct {
 	// Address is the gRPC address of csar-audit (e.g. "localhost:9084").
 	Address string `yaml:"address" json:"address"`
 
+	// Capture holds global defaults for request-body audit capture.
+	Capture *AuditCaptureConfig `yaml:"capture,omitempty" json:"capture,omitempty"`
+
 	// TLS settings for the csar → csar-audit gRPC connection.
 	CAFile   string `yaml:"ca_file,omitempty" json:"ca_file,omitempty"`
 	CertFile string `yaml:"cert_file,omitempty" json:"cert_file,omitempty"`
@@ -1489,6 +1500,53 @@ type AuditClientConfig struct {
 
 	// Timeout is the per-call deadline for RecordEvents RPCs. Default: "500ms".
 	Timeout Duration `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+}
+
+// AuditCaptureConfig configures redacted request payload capture for router audit.
+//
+// Supports bare string syntax for policy references:
+//
+//	x-csar-audit-capture: "seller-mutation-audit"
+//	x-csar-audit-capture: { use: "seller-mutation-audit", max_bytes: 4096 }
+type AuditCaptureConfig struct {
+	// Use references a named audit_capture_policies entry.
+	Use string `yaml:"use,omitempty" json:"use,omitempty"`
+
+	// Request enables request body capture when true.
+	Request *bool `yaml:"request,omitempty" json:"request,omitempty"`
+
+	// MaxBytes caps stored request body size. Default: 16384.
+	MaxBytes int64 `yaml:"max_bytes,omitempty" json:"max_bytes,omitempty"`
+
+	// Redact references a redact_policies entry for extra dot-path fields.
+	Redact string `yaml:"redact,omitempty" json:"redact,omitempty"`
+
+	// Fields lists extra dot-path fields to redact (DLP syntax).
+	Fields []string `yaml:"fields,omitempty" json:"fields,omitempty"`
+
+	// SensitiveFields merges with built-in sensitive key patterns.
+	SensitiveFields []string `yaml:"sensitive_fields,omitempty" json:"sensitive_fields,omitempty"`
+
+	// IncludeQuery captures redacted query params in metadata (default true).
+	IncludeQuery *bool `yaml:"include_query,omitempty" json:"include_query,omitempty"`
+
+	// Mask replaces redacted values. Default: "[REDACTED]".
+	Mask string `yaml:"mask,omitempty" json:"mask,omitempty"`
+}
+
+// UnmarshalYAML handles bare string (policy reference) and inline object syntax.
+func (ac *AuditCaptureConfig) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		ac.Use = value.Value
+		return nil
+	}
+	type captureAlias AuditCaptureConfig
+	var alias captureAlias
+	if err := value.Decode(&alias); err != nil {
+		return err
+	}
+	*ac = AuditCaptureConfig(alias)
+	return nil
 }
 
 // AuthzRouteConfig configures per-route authorization via csar-authz.

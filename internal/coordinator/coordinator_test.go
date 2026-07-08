@@ -282,15 +282,33 @@ func TestCoordinator_SubscriberCount(t *testing.T) {
 	}
 }
 
+func TestRouteEntryToProto_PreservesAuditErrorsMode(t *testing.T) {
+	auditErrors := config.AuditModeErrors
+	entry := statestore.RouteEntry{
+		ID:     "GET:/seller/test",
+		Path:   "/seller/test",
+		Method: "GET",
+		Route: config.RouteConfig{
+			Backend: config.BackendConfig{TargetURL: "https://seller:8080"},
+			Audit:   &auditErrors,
+		},
+	}
+
+	pb := routeEntryToProto(&entry)
+	if pb.AuditMode != "errors" || pb.Audit {
+		t.Fatalf("AuditMode=%q Audit=%v, want errors,false", pb.AuditMode, pb.Audit)
+	}
+}
+
 func TestRouteEntryToProto_PreservesAuditAndCacheInvalidate(t *testing.T) {
-	auditFalse := false
+	auditOff := config.AuditModeOff
 	entry := statestore.RouteEntry{
 		ID:     "POST:/svc/s3",
 		Path:   "/svc/s3",
 		Method: "POST",
 		Route: config.RouteConfig{
 			Backend: config.BackendConfig{TargetURL: "https://s3:8087"},
-			Audit:   &auditFalse,
+			Audit:   &auditOff,
 			CacheInvalidate: &config.CacheInvalidationConfig{
 				Tags: []string{"t1"},
 			},
@@ -298,8 +316,9 @@ func TestRouteEntryToProto_PreservesAuditAndCacheInvalidate(t *testing.T) {
 	}
 
 	pb := routeEntryToProto(&entry)
-	if !pb.AuditSet || pb.Audit {
-		t.Fatalf("audit wire: AuditSet=%v Audit=%v, want true,false", pb.AuditSet, pb.Audit)
+	if !pb.AuditSet || pb.Audit || pb.AuditMode != "off" {
+		t.Fatalf("audit wire: AuditSet=%v Audit=%v AuditMode=%q, want true,false,off",
+			pb.AuditSet, pb.Audit, pb.AuditMode)
 	}
 	if pb.CacheInvalidate == nil || len(pb.CacheInvalidate.Tags) != 1 || pb.CacheInvalidate.Tags[0] != "t1" {
 		t.Fatalf("cache_invalidate = %v", pb.CacheInvalidate)

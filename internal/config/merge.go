@@ -98,6 +98,11 @@ func mergeConfigs(base, overlay *Config, overlayFile string) error {
 		return err
 	}
 
+	// AuditCapturePolicies
+	if err := mergeMap(base.AuditCapturePolicies, overlay.AuditCapturePolicies, &base.AuditCapturePolicies, overlayFile, "audit_capture_policies"); err != nil {
+		return err
+	}
+
 	// AuthValidatePolicies
 	if err := mergeMap(base.AuthValidatePolicies, overlay.AuthValidatePolicies, &base.AuthValidatePolicies, overlayFile, "auth_validate_policies"); err != nil {
 		return err
