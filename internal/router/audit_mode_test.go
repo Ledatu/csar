@@ -95,6 +95,7 @@ func TestWrapUpstreamWithAuditCapture(t *testing.T) {
 			Request:  &reqTrue,
 			MaxBytes: 4096,
 			Mask:     "[REDACTED]",
+			Fields:   []string{"wbToken"},
 		},
 		routeKey:     "POST /test",
 		originalPath: "/test",
@@ -106,7 +107,7 @@ func TestWrapUpstreamWithAuditCapture(t *testing.T) {
 	}))
 
 	body := `{"password":"secret","name":"item"}`
-	req := httptest.NewRequest(http.MethodPost, "/test?token=abc", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/test?token=abc&wbToken=secret", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-Email", "user@example.com")
 
@@ -137,6 +138,9 @@ func TestWrapUpstreamWithAuditCapture(t *testing.T) {
 	if query["token"] != "[REDACTED]" {
 		t.Fatalf("query token = %v", query["token"])
 	}
+	if query["wbToken"] != "[REDACTED]" {
+		t.Fatalf("query wbToken = %v", query["wbToken"])
+	}
 
 	recorder.events = nil
 	successHandler := r.wrapUpstreamWithAudit(rt, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -148,6 +152,100 @@ func TestWrapUpstreamWithAuditCapture(t *testing.T) {
 	successHandler.ServeHTTP(w2, req2)
 	if len(recorder.events) != 0 {
 		t.Fatal("expected no event on 200 for errors mode")
+	}
+}
+
+func TestWrapUpstreamWithAuditGETErrorsCapture(t *testing.T) {
+	recorder := &stubAuditRecorder{}
+	reqTrue := true
+	r := &Router{auditClient: recorder}
+
+	rt := &route{
+		auditMode: config.AuditModeErrors,
+		auditCapture: &config.AuditCaptureConfig{
+			Request:  &reqTrue,
+			MaxBytes: 4096,
+			Mask:     "[REDACTED]",
+		},
+		routeKey:     "GET /test",
+		originalPath: "/test",
+		method:       http.MethodGet,
+	}
+
+	handler := r.wrapUpstreamWithAudit(rt, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/test?campaignId=42", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if len(recorder.events) != 1 {
+		t.Fatalf("events = %d", len(recorder.events))
+	}
+
+	ev := recorder.events[0]
+	if len(ev.BeforeState) != 0 {
+		t.Fatalf("before_state = %s, want empty for GET", ev.BeforeState)
+	}
+
+	var meta map[string]any
+	if err := json.Unmarshal(ev.Metadata, &meta); err != nil {
+		t.Fatal(err)
+	}
+	query := meta["query"].(map[string]any)
+	if query["campaignId"] != "42" {
+		t.Fatalf("query campaignId = %v", query["campaignId"])
+	}
+}
+
+func TestWrapUpstreamWithAuditNoRedactionCapture(t *testing.T) {
+	recorder := &stubAuditRecorder{}
+	reqTrue := true
+	r := &Router{auditClient: recorder}
+
+	rt := &route{
+		auditMode: config.AuditModeAll,
+		auditCapture: &config.AuditCaptureConfig{
+			Request:  &reqTrue,
+			MaxBytes: 4096,
+		},
+		routeKey:     "POST /test",
+		originalPath: "/test",
+		method:       http.MethodPost,
+	}
+
+	handler := r.wrapUpstreamWithAudit(rt, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	body := `{"password":"secret","name":"item"}`
+	req := httptest.NewRequest(http.MethodPost, "/test?token=abc", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if len(recorder.events) != 1 {
+		t.Fatalf("events = %d", len(recorder.events))
+	}
+
+	ev := recorder.events[0]
+	var state map[string]any
+	if err := json.Unmarshal(ev.BeforeState, &state); err != nil {
+		t.Fatal(err)
+	}
+	if state["password"] != "secret" {
+		t.Fatalf("password = %v", state["password"])
+	}
+
+	var meta map[string]any
+	if err := json.Unmarshal(ev.Metadata, &meta); err != nil {
+		t.Fatal(err)
+	}
+	query := meta["query"].(map[string]any)
+	if query["token"] != "abc" {
+		t.Fatalf("query token = %v", query["token"])
 	}
 }
 

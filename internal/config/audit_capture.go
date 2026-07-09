@@ -143,3 +143,9 @@ func (c AuditCaptureConfig) CaptureRequestEnabled() bool {
 func (c AuditCaptureConfig) IncludeQueryEnabled() bool {
 	return c.IncludeQuery == nil || *c.IncludeQuery
 }
+
+// RedactionEnabled reports whether captured payloads should be redacted.
+// Policies without redact refs, fields, or sensitive_fields store raw values.
+func (c AuditCaptureConfig) RedactionEnabled() bool {
+	return len(c.Fields) > 0 || len(c.SensitiveFields) > 0
+}

@@ -115,7 +115,7 @@ func (r *Router) wrapUpstreamWithAudit(rt *route, next http.Handler) http.Handle
 			}
 		}
 		if rt.auditCapture != nil && rt.auditCapture.IncludeQueryEnabled() {
-			if queryMeta := captureQueryParams(req, rt.auditCapture.Mask); len(queryMeta) > 0 {
+			if queryMeta := captureQueryParams(req, rt.auditCapture); len(queryMeta) > 0 {
 				metaMap["query"] = queryMeta
 			}
 		}
@@ -187,13 +187,25 @@ func redactRequestBody(raw []byte, contentType string, cfg *config.AuditCaptureC
 		return nil
 	}
 
-	mask := cfg.Mask
-	if mask == "" {
-		mask = jsonredact.DefaultMask
-	}
-
 	ct := strings.ToLower(contentType)
 	if strings.Contains(ct, "application/json") || strings.Contains(ct, "+json") {
+		if !cfg.RedactionEnabled() {
+			if !json.Valid(raw) {
+				summary, _ := json.Marshal(map[string]any{
+					"_content_type": contentType,
+					"_size":         len(raw),
+					"_parse_error":  true,
+				})
+				return summary
+			}
+			return json.RawMessage(raw)
+		}
+
+		mask := cfg.Mask
+		if mask == "" {
+			mask = jsonredact.DefaultMask
+		}
+
 		redacted, err := jsonredact.ParseAndRedactJSON(raw, jsonredact.Config{
 			PathFields:    cfg.Fields,
 			SensitiveKeys: cfg.SensitiveFields,
@@ -217,16 +229,13 @@ func redactRequestBody(raw []byte, contentType string, cfg *config.AuditCaptureC
 	return summary
 }
 
-func captureQueryParams(req *http.Request, mask string) map[string]string {
-	if req.URL == nil {
+func captureQueryParams(req *http.Request, cfg *config.AuditCaptureConfig) map[string]string {
+	if req.URL == nil || cfg == nil {
 		return nil
 	}
 	values := req.URL.Query()
 	if len(values) == 0 {
 		return nil
-	}
-	if mask == "" {
-		mask = jsonredact.DefaultMask
 	}
 	out := make(map[string]string, len(values))
 	for k, vs := range values {
@@ -235,6 +244,15 @@ func captureQueryParams(req *http.Request, mask string) map[string]string {
 		}
 		out[k] = vs[0]
 	}
-	jsonredact.RedactQueryMap(out, mask)
+	if !cfg.RedactionEnabled() {
+		return out
+	}
+	mask := cfg.Mask
+	if mask == "" {
+		mask = jsonredact.DefaultMask
+	}
+	extraKeys := append([]string{}, cfg.Fields...)
+	extraKeys = append(extraKeys, cfg.SensitiveFields...)
+	jsonredact.RedactQueryMap(out, mask, extraKeys...)
 	return out
 }

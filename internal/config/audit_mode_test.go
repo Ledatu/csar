@@ -72,4 +72,34 @@ func TestResolveAuditCapturePolicies(t *testing.T) {
 	if len(route.AuditCapture.Fields) != 1 || route.AuditCapture.Fields[0] != "wbToken" {
 		t.Fatalf("fields = %v", route.AuditCapture.Fields)
 	}
+	if !route.AuditCapture.RedactionEnabled() {
+		t.Fatal("expected redaction enabled when redact policy resolved")
+	}
+}
+
+func TestResolveAuditCapturePoliciesNoRedaction(t *testing.T) {
+	reqTrue := true
+	cfg := &Config{
+		AuditCapturePolicies: map[string]AuditCaptureConfig{
+			"seller-audit-capture": {
+				Request: &reqTrue,
+			},
+		},
+		Paths: map[string]PathConfig{
+			"/seller/test": {
+				"post": {
+					AuditCapture: &AuditCaptureConfig{Use: "seller-audit-capture"},
+				},
+			},
+		},
+	}
+
+	if err := cfg.ResolveAuditCapturePolicies(); err != nil {
+		t.Fatal(err)
+	}
+
+	route := cfg.Paths["/seller/test"]["post"]
+	if route.AuditCapture.RedactionEnabled() {
+		t.Fatal("expected redaction disabled without redact policy")
+	}
 }
