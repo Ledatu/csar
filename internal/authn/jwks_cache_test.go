@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/ledatu/csar-core/gatewayctx"
 )
 
 func TestJWTValidator_JWKSCaching(t *testing.T) {
@@ -42,7 +44,7 @@ func TestJWTValidator_JWKSCaching(t *testing.T) {
 			key,
 		)
 		req := httptest.NewRequest(http.MethodGet, "/api", nil)
-		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set(gatewayctx.HeaderCsarAuthorization, "Bearer "+token)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {

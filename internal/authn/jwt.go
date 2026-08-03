@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/ledatu/csar-core/apierror"
+	"github.com/ledatu/csar-core/gatewayctx"
 	"github.com/ledatu/csar-core/jwtx"
 )
 
@@ -105,7 +106,12 @@ func NewJWTValidator(logger *slog.Logger, client *http.Client) *JWTValidator {
 // Wrap returns middleware that validates the JWT before calling next.
 func (v *JWTValidator) Wrap(cfg Config, next http.Handler) http.Handler {
 	if cfg.HeaderName == "" {
-		cfg.HeaderName = "Authorization"
+		// Not Authorization: that header belongs to the caller and is proxied
+		// to the upstream verbatim on routes without a credential-injection
+		// profile. Overriding header_name per policy is still possible, but the
+		// default has to be the gateway's own header so a route can never
+		// accidentally consume — and then forward — a caller credential.
+		cfg.HeaderName = gatewayctx.HeaderCsarAuthorization
 	}
 	if cfg.TokenPrefix == "" {
 		cfg.TokenPrefix = "Bearer "
@@ -127,11 +133,11 @@ func (v *JWTValidator) Wrap(cfg Config, next http.Handler) http.Handler {
 		} else {
 			authHeader := r.Header.Get(cfg.HeaderName)
 			if authHeader == "" {
-				v.reject(w, http.StatusUnauthorized, "missing authorization header")
+				v.reject(w, http.StatusUnauthorized, "missing "+cfg.HeaderName+" header")
 				return
 			}
 			if !strings.HasPrefix(authHeader, cfg.TokenPrefix) {
-				v.reject(w, http.StatusUnauthorized, "invalid token format")
+				v.reject(w, http.StatusUnauthorized, "invalid token format in "+cfg.HeaderName)
 				return
 			}
 			tokenStr = strings.TrimPrefix(authHeader, cfg.TokenPrefix)

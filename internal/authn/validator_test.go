@@ -13,6 +13,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/ledatu/csar-core/gatewayctx"
 )
 
 func TestJWTValidator_ValidToken(t *testing.T) {
@@ -57,7 +59,7 @@ func TestJWTValidator_ValidToken(t *testing.T) {
 	}, next)
 
 	req := httptest.NewRequest(http.MethodGet, "/api", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set(gatewayctx.HeaderCsarAuthorization, "Bearer "+token)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -114,7 +116,7 @@ func TestJWTValidator_ExpiredToken(t *testing.T) {
 	handler := validator.Wrap(Config{JWKSURL: jwksServer.URL}, next)
 
 	req := httptest.NewRequest(http.MethodGet, "/api", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set(gatewayctx.HeaderCsarAuthorization, "Bearer "+token)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -153,7 +155,7 @@ func TestJWTValidator_WrongIssuer(t *testing.T) {
 	}, next)
 
 	req := httptest.NewRequest(http.MethodGet, "/api", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set(gatewayctx.HeaderCsarAuthorization, "Bearer "+token)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -176,7 +178,7 @@ func TestJWTValidator_AlgNone_Rejected(t *testing.T) {
 	handler := validator.Wrap(Config{JWKSURL: "http://unused"}, next)
 
 	req := httptest.NewRequest(http.MethodGet, "/api", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set(gatewayctx.HeaderCsarAuthorization, "Bearer "+token)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -222,7 +224,7 @@ func TestJWTValidator_ForwardClaims(t *testing.T) {
 	}, next)
 
 	req := httptest.NewRequest(http.MethodGet, "/api", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set(gatewayctx.HeaderCsarAuthorization, "Bearer "+token)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -265,7 +267,7 @@ func TestJWTValidator_RequiredClaims(t *testing.T) {
 	}, next)
 
 	req := httptest.NewRequest(http.MethodGet, "/api", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set(gatewayctx.HeaderCsarAuthorization, "Bearer "+token)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -332,7 +334,7 @@ func TestJWTValidator_ECDSA(t *testing.T) {
 	handler := validator.Wrap(Config{JWKSURL: jwksServer.URL}, next)
 
 	req := httptest.NewRequest(http.MethodGet, "/api", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set(gatewayctx.HeaderCsarAuthorization, "Bearer "+token)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -370,7 +372,7 @@ func TestJWTValidator_MalformedToken(t *testing.T) {
 			if tt.token == "" {
 				authValue = "Bearer "
 			}
-			req.Header.Set("Authorization", authValue)
+			req.Header.Set(gatewayctx.HeaderCsarAuthorization, authValue)
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 
@@ -378,5 +380,106 @@ func TestJWTValidator_MalformedToken(t *testing.T) {
 				t.Errorf("status = %d, want 401 for %q", rec.Code, tt.name)
 			}
 		})
+	}
+}
+
+// TestJWTValidator_IgnoresAuthorizationHeader pins the hard cutover: a caller
+// presenting its gateway token in Authorization is rejected. Authorization is
+// caller-owned and gets proxied to the upstream verbatim on pass-through
+// routes, so the validator must never accept a credential from it.
+func TestJWTValidator_IgnoresAuthorizationHeader(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwk := rsaKeyToJWK(&key.PublicKey, "test-key-1")
+
+	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(jwksResponse{Keys: []JSONWebKey{jwk}})
+	}))
+	defer jwksServer.Close()
+
+	token := signJWT(
+		map[string]interface{}{"alg": "RS256", "kid": "test-key-1", "typ": "JWT"},
+		map[string]interface{}{
+			"sub": "user123",
+			"iss": "test-issuer",
+			"aud": "test-audience",
+			"exp": float64(time.Now().Add(time.Hour).Unix()),
+		},
+		key,
+	)
+
+	validator := NewJWTValidator(newTestLogger(), nil)
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("next handler should not be called for a token in Authorization")
+	})
+
+	handler := validator.Wrap(Config{
+		JWKSURL:   jwksServer.URL,
+		Issuer:    "test-issuer",
+		Audiences: []string{"test-audience"},
+	}, next)
+
+	req := httptest.NewRequest(http.MethodGet, "/api", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 — a valid token in Authorization must not authenticate", rec.Code)
+	}
+}
+
+// TestJWTValidator_PreservesAuthorizationHeader ensures validation leaves a
+// caller-supplied upstream credential alone, so it can be proxied through.
+func TestJWTValidator_PreservesAuthorizationHeader(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jwk := rsaKeyToJWK(&key.PublicKey, "test-key-1")
+
+	jwksServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(jwksResponse{Keys: []JSONWebKey{jwk}})
+	}))
+	defer jwksServer.Close()
+
+	token := signJWT(
+		map[string]interface{}{"alg": "RS256", "kid": "test-key-1", "typ": "JWT"},
+		map[string]interface{}{
+			"sub": "user123",
+			"iss": "test-issuer",
+			"aud": "test-audience",
+			"exp": float64(time.Now().Add(time.Hour).Unix()),
+		},
+		key,
+	)
+
+	validator := NewJWTValidator(newTestLogger(), nil)
+
+	var gotAuth string
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	})
+
+	handler := validator.Wrap(Config{
+		JWKSURL:   jwksServer.URL,
+		Issuer:    "test-issuer",
+		Audiences: []string{"test-audience"},
+	}, next)
+
+	req := httptest.NewRequest(http.MethodGet, "/api", nil)
+	req.Header.Set(gatewayctx.HeaderCsarAuthorization, "Bearer "+token)
+	req.Header.Set("Authorization", "Bearer upstream-api-key")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if want := "Bearer upstream-api-key"; gotAuth != want {
+		t.Errorf("Authorization = %q, want %q", gotAuth, want)
 	}
 }

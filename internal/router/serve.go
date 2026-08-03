@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ledatu/csar-core/gatewayctx"
 	"github.com/ledatu/csar-core/httpmiddleware"
 	"github.com/ledatu/csar/internal/apierror"
 	"github.com/ledatu/csar/internal/proxy"
@@ -161,7 +162,17 @@ func (r *Router) serveWithIPCheck(w http.ResponseWriter, req *http.Request, rt *
 }
 
 // serveAfterJWT runs authz evaluation if configured, then continues to serveAfterAuth.
+//
+// Every auth branch in serveWithIPCheck (session, jwt, none) funnels through
+// here before any backend dispatch, which makes it the one place guaranteed to
+// run on every proxied request.
 func (r *Router) serveAfterJWT(w http.ResponseWriter, req *http.Request, rt *route) {
+	// The gateway credential is hop-by-hop: inbound auth has already consumed
+	// it, and it must never reach a backend — least of all an external upstream
+	// on a route that proxies headers verbatim. Unconditional by design: routes
+	// with no auth and no security profile need this too.
+	req.Header.Del(gatewayctx.HeaderCsarAuthorization)
+
 	if rt.authzConfig != nil && r.authzClient != nil {
 		mw := authzmw.New(r.authzClient, r.requestID)
 		wrapped := mw.Wrap(authzmw.Config{
