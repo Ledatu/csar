@@ -92,7 +92,15 @@ func (s *S3TokenStore) FetchOne(ctx context.Context, tokenRef string) (TokenEntr
 // appropriate JSON format based on kmsMode and written via PutObject.
 // Returns the S3 ETag as the version string.
 func (s *S3TokenStore) UpsertToken(ctx context.Context, ref string, entry TokenEntry, meta TokenMetadata) (string, error) {
-	obj, err := s3store.EncodeToken(entry.EncryptedToken, entry.KMSKeyID, s.kmsMode)
+	var (
+		obj s3store.TokenObject
+		err error
+	)
+	if entry.Descriptor != nil {
+		obj, err = s3store.EncodeDescriptor(*entry.Descriptor)
+	} else {
+		obj, err = s3store.EncodeToken(entry.EncryptedToken, entry.KMSKeyID, s.kmsMode)
+	}
 	if err != nil {
 		return "", fmt.Errorf("s3 token store: encode %q: %w", ref, err)
 	}
@@ -142,6 +150,14 @@ func (s *S3TokenStore) parseObject(obj s3store.ObjectEntry) (TokenEntry, error) 
 	decoded, err := s3store.DecodeToken(&tokenObj, s.kmsMode)
 	if err != nil {
 		return TokenEntry{}, err
+	}
+
+	// A descriptor carries no token bytes. Returning it with an empty
+	// EncryptedToken is deliberate: AuthServiceImpl.isValid rejects entries
+	// with no token bytes, so if the minting decorator is ever bypassed a
+	// descriptor still cannot be served to a router as a credential.
+	if decoded.Descriptor != nil {
+		return TokenEntry{Descriptor: decoded.Descriptor, Version: obj.ETag}, nil
 	}
 
 	entry := TokenEntry{

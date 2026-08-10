@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"net"
 	"time"
+
+	"github.com/ledatu/csar-core/httpx/clientx"
 )
 
 // SSRFProtection configures outbound connection restrictions to prevent
@@ -42,28 +44,6 @@ func DefaultSSRFProtection() *SSRFProtection {
 		BlockMetadata:  true,
 		AllowedHosts:   make(map[string]bool),
 	}
-}
-
-// Well-known private/reserved subnets.
-var (
-	// RFC 1918 — Private IPv4
-	private10  = mustParseCIDR("10.0.0.0/8")
-	private172 = mustParseCIDR("172.16.0.0/12")
-	private192 = mustParseCIDR("192.168.0.0/16")
-	// RFC 3927 — Link-Local IPv4
-	linkLocal4 = mustParseCIDR("169.254.0.0/16")
-	// RFC 4291 — Link-Local IPv6
-	linkLocal6 = mustParseCIDR("fe80::/10")
-	// Cloud metadata endpoint
-	metadataAddr = net.ParseIP("169.254.169.254")
-)
-
-func mustParseCIDR(s string) *net.IPNet {
-	_, n, err := net.ParseCIDR(s)
-	if err != nil {
-		panic(err)
-	}
-	return n
 }
 
 // safeDialContextWithTimeout returns a DialContext function with the supplied
@@ -118,35 +98,16 @@ func safeDialContextWithTimeout(protection *SSRFProtection, timeout time.Duratio
 }
 
 // validateIP checks a single IP address against SSRF protection rules.
+//
+// The subnet classification itself lives in csar-core so that outbound clients
+// which dial an operator allowlist (e.g. the coordinator's token minter) share
+// exactly one definition of "internal address". Policy — which classes to
+// block, and which hosts bypass checks entirely — stays here.
 func validateIP(ip net.IP, p *SSRFProtection) error {
-	// Metadata check (most specific — check first).
-	if p.BlockMetadata && ip.Equal(metadataAddr) {
-		return fmt.Errorf("cloud metadata endpoint (169.254.169.254) is blocked")
-	}
-
-	// Loopback check.
-	if p.BlockLoopback && ip.IsLoopback() {
-		return fmt.Errorf("loopback address is blocked")
-	}
-
-	// Link-local check.
-	if p.BlockLinkLocal {
-		if linkLocal4.Contains(ip) || linkLocal6.Contains(ip) {
-			return fmt.Errorf("link-local address is blocked")
-		}
-	}
-
-	// Private subnet check.
-	if p.BlockPrivate {
-		if private10.Contains(ip) || private172.Contains(ip) || private192.Contains(ip) {
-			return fmt.Errorf("private network address is blocked")
-		}
-	}
-
-	// IPv6 private (unique local addresses fc00::/7).
-	if p.BlockPrivate && len(ip) == net.IPv6len && ip[0]&0xfe == 0xfc {
-		return fmt.Errorf("IPv6 unique local address is blocked")
-	}
-
-	return nil
+	return clientx.CheckInternalIP(ip, clientx.InternalIPClasses{
+		Private:   p.BlockPrivate,
+		Loopback:  p.BlockLoopback,
+		LinkLocal: p.BlockLinkLocal,
+		Metadata:  p.BlockMetadata,
+	})
 }

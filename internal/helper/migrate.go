@@ -51,6 +51,22 @@ func Migrate(ctx context.Context, opts MigrateOptions, logger *slog.Logger) (*Mi
 		return &MigrateResult{}, nil
 	}
 
+	// Mint descriptors carry no token value — the coordinator mints them on
+	// demand from the referenced credential pair. There is nothing to migrate,
+	// so drop them rather than failing the whole run on a missing value.
+	for ref, td := range tokens {
+		if td.IsDescriptor() {
+			logger.Info("skipping mint descriptor",
+				"token_ref", ref,
+				"grant_profile", td.GrantProfile,
+			)
+			delete(tokens, ref)
+		}
+	}
+	if len(tokens) == 0 {
+		return &MigrateResult{}, nil
+	}
+
 	// Encrypt plaintext tokens if requested
 	result := &MigrateResult{Total: len(tokens)}
 	if opts.Encrypt {

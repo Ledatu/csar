@@ -15,7 +15,10 @@ import (
 	"time"
 )
 
-var requestCount atomic.Int64
+var (
+	requestCount atomic.Int64
+	mintCount    atomic.Int64
+)
 
 func main() {
 	port := os.Getenv("PORT")
@@ -45,6 +48,12 @@ func main() {
 
 	// GET /stats — request counter
 	mux.HandleFunc("GET /stats", handleStats)
+
+	// POST /api/client/token — OAuth2 client_credentials grant, shaped like the
+	// Ozon Performance API. Lets the coordinator's minting path be exercised
+	// end to end without contacting a real marketplace.
+	// Tunable via query params: ?expires_in=60&status=429&retry_after=30
+	mux.HandleFunc("POST /api/client/token", handleClientCredentials)
 
 	// Catch-all
 	mux.HandleFunc("/", handleCatchAll)
@@ -142,6 +151,55 @@ func handleHealth(w http.ResponseWriter, _ *http.Request) {
 func handleStats(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"total_requests": requestCount.Load(),
+		"mint_count":     mintCount.Load(),
+	})
+}
+
+// handleClientCredentials implements an OAuth2 client_credentials grant.
+//
+// mint_count in /stats is the assertion that matters for minting tests: a
+// second request inside a token's lifetime must not increment it, and a
+// coordinator restart must not multiply it beyond one per node.
+func handleClientCredentials(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ClientID     string `json:"client_id"`
+		ClientSecret string `json:"client_secret"`
+		GrantType    string `json:"grant_type"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "invalid_request"})
+		return
+	}
+
+	q := r.URL.Query()
+
+	if status, err := strconv.Atoi(q.Get("status")); err == nil && status >= 400 {
+		if ra := q.Get("retry_after"); ra != "" {
+			w.Header().Set("Retry-After", ra)
+		}
+		writeJSON(w, status, map[string]interface{}{"error": q.Get("error_code")})
+		return
+	}
+
+	if body.GrantType != "client_credentials" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "unsupported_grant_type"})
+		return
+	}
+	if body.ClientID == "" || body.ClientSecret == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]interface{}{"error": "invalid_client"})
+		return
+	}
+
+	expiresIn := 1800
+	if v, err := strconv.Atoi(q.Get("expires_in")); err == nil && v > 0 {
+		expiresIn = v
+	}
+
+	n := mintCount.Add(1)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"access_token": fmt.Sprintf("mock-token-%d", n),
+		"expires_in":   expiresIn,
+		"token_type":   "Bearer",
 	})
 }
 

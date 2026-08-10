@@ -31,6 +31,7 @@ import (
 	"github.com/ledatu/csar-core/configsource"
 	"github.com/ledatu/csar-core/health"
 	"github.com/ledatu/csar-core/s3store"
+	"github.com/ledatu/csar-core/tokenmint"
 	"github.com/ledatu/csar-core/ycloud"
 
 	csarcfg "github.com/ledatu/csar/internal/config"
@@ -75,6 +76,14 @@ func main() {
 	s3OAuthToken := flag.String("s3-oauth-token", "", "OAuth token for S3 IAM exchange (oauth_token auth)")
 	s3SAKeyFile := flag.String("s3-sa-key-file", "", "Service account key JSON file for S3 (service_account auth)")
 	s3KMSMode := flag.String("s3-kms-mode", "kms", "S3 KMS mode: passthrough (SSE only), kms (CSAR KMS encrypted)")
+
+	// Token minting flags. Empty --token-mint-config disables the feature
+	// entirely: the decorator is never wired and descriptor objects, which
+	// nothing writes until this is on, are inert.
+	tokenMintConfig := flag.String("token-mint-config", "", "path to the OAuth2 client_credentials mint configuration (YAML); empty disables minting")
+	tokenMintRefreshTick := flag.Duration("token-mint-refresh-tick", 30*time.Second, "how often to refresh minted tokens nearing expiry and evict idle ones")
+	tokenMintRefreshConcurrency := flag.Int("token-mint-refresh-concurrency", 4, "maximum concurrent background mint refreshes")
+	tokenMintAllowPrivate := flag.Bool("token-mint-allow-private", false, "allow plain HTTP and internal addresses for token endpoints (development only — NEVER use in production)")
 
 	// State store flags
 	storeType := flag.String("store", "memory", "state store backend: memory, etcd")
@@ -361,6 +370,84 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Token minting. The decorator is wired into the AuthService read-through
+	// path only — tokenStore itself stays the raw store, so the admin API's
+	// copy endpoint can never materialize a live minted bearer as a permanent
+	// stored secret.
+	var (
+		mintRefresher *coordinator.MintRefresher
+		mintCfg       *tokenmint.Config
+	)
+	if *tokenMintConfig != "" {
+		if resolvedTokenSource != "s3" {
+			logger.Error("--token-mint-config requires --token-source=s3", "token_source", resolvedTokenSource)
+			store.Close()
+			os.Exit(1)
+		}
+		// A minted bearer is plaintext by construction; there is no ciphertext
+		// for a router to decrypt. In kms mode the router would try anyway.
+		if *s3KMSMode != "passthrough" {
+			logger.Error("--token-mint-config requires --s3-kms-mode=passthrough (minted tokens carry no ciphertext)",
+				"s3_kms_mode", *s3KMSMode,
+			)
+			store.Close()
+			os.Exit(1)
+		}
+
+		loadedCfg, err := tokenmint.LoadConfigFile(*tokenMintConfig)
+		if err != nil {
+			logger.Error("failed to load token mint config", "path", *tokenMintConfig, "error", err)
+			store.Close()
+			os.Exit(1)
+		}
+		mintCfg = loadedCfg
+
+		if *tokenMintAllowPrivate {
+			mintCfg.AllowPrivate = true
+			if err := mintCfg.Validate(); err != nil {
+				logger.Error("token mint config is invalid with --token-mint-allow-private", "error", err)
+				store.Close()
+				os.Exit(1)
+			}
+			logger.Warn("WARNING: token minting will accept plain HTTP and internal addresses. " +
+				"This mode is for development only.")
+		}
+
+		// A mint runs inside the AuthService read-through fetch, so the fetch
+		// deadline has to outlast the slowest token endpoint or every mint
+		// surfaces as a spurious timeout.
+		if slack := mintCfg.MaxTimeout() + 2*time.Second; slack > coordinator.DefaultFetchTimeout() {
+			authSvc.SetFetchTimeout(slack)
+			logger.Info("widened read-through fetch timeout to accommodate token minting", "fetch_timeout", slack)
+		}
+
+		minter, err := tokenmint.New(mintCfg, logger.With("component", "token_minter"))
+		if err != nil {
+			logger.Error("failed to create token minter", "error", err)
+			store.Close()
+			os.Exit(1)
+		}
+
+		mintingStore := coordinator.NewMintingTokenStore(tokenStore, minter, mintCfg, logger.With("component", "minting_store"))
+		authSvc.SetBackend(mintingStore)
+
+		mintRefresher = coordinator.NewMintRefresher(
+			authSvc, mintingStore, mintCfg,
+			*tokenMintRefreshTick, *tokenMintRefreshConcurrency,
+			logger.With("component", "mint_refresher"),
+		)
+
+		profiles := make([]string, 0, len(mintCfg.Profiles))
+		for name := range mintCfg.Profiles {
+			profiles = append(profiles, name)
+		}
+		logger.Info("token minting enabled",
+			"config", *tokenMintConfig,
+			"profiles", profiles,
+			"allowed_hosts", mintCfg.AllowedHosts,
+		)
+	}
+
 	// Build gRPC server options
 	var serverOpts []grpc.ServerOption
 
@@ -555,10 +642,17 @@ func main() {
 			logger.Info("KMS provider initialized for admin API", "provider", kmsProvider.Name())
 		}
 
+		// mutableStore is deliberately the raw token store, never the minting
+		// decorator: the admin copy endpoint fetches a source ref and writes
+		// the result elsewhere, so a decorated store would let a "copy" turn a
+		// live minted bearer into a permanent stored secret.
 		adminSrv = coordinator.NewAdminServer(
 			adminCfg, authSvc, coord, mutableStore, kmsProvider,
 			logger.With("component", "admin_api"),
 		)
+		if mintCfg != nil {
+			adminSrv.SetMintConfig(mintCfg)
+		}
 
 		go func() {
 			if err := adminSrv.ListenAndServe(); err != nil {
@@ -575,6 +669,10 @@ func main() {
 	if refresher != nil {
 		go refresher.RunPeriodicRefresh(ctx, refreshInterval, authSvc, coord)
 		logger.Info("token store refresh loop started", "interval", refreshInterval)
+	}
+
+	if mintRefresher != nil {
+		go mintRefresher.Run(ctx)
 	}
 
 	// Start config source watcher (if configured).

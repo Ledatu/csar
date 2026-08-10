@@ -54,6 +54,14 @@ func (s *S3Source) Load(ctx context.Context) (map[string]TokenData, error) {
 			return nil, fmt.Errorf("s3 source: token %q: %w", obj.TokenRef, err)
 		}
 
+		// A mint descriptor holds no token. Surface it so listings stay
+		// complete, but with no value — one descriptor in the bucket must not
+		// fail the entire listing.
+		if decoded.Descriptor != nil {
+			result[obj.TokenRef] = TokenData{GrantProfile: decoded.Descriptor.GrantProfile}
+			continue
+		}
+
 		result[obj.TokenRef] = TokenData{
 			Plaintext:      decoded.Plaintext,
 			EncryptedToken: decoded.EncryptedToken,

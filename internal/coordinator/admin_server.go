@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledatu/csar-core/tokenmint"
 	"github.com/ledatu/csar/internal/authn"
 	"github.com/ledatu/csar/internal/kms"
 )
@@ -26,6 +27,17 @@ type AdminServer struct {
 	logger      *slog.Logger
 	metrics     *AdminMetrics
 	server      *http.Server
+
+	// mintCfg is non-nil when token minting is enabled. It is used to reject
+	// descriptors naming an unconfigured grant profile at write time, and to
+	// apply the same namespace scope rule the read path enforces.
+	mintCfg *tokenmint.Config
+}
+
+// SetMintConfig enables descriptor writes. Without it, a descriptor PUT is
+// rejected: there would be no profile to validate it against.
+func (s *AdminServer) SetMintConfig(cfg *tokenmint.Config) {
+	s.mintCfg = cfg
 }
 
 // NewAdminServer creates an AdminServer wired to the coordinator's internal
@@ -145,6 +157,10 @@ type putTokenRequest struct {
 	KMSKeyID string            `json:"kms_key_id"`
 	Mode     string            `json:"mode"`
 	Metadata map[string]string `json:"metadata"`
+
+	// Descriptor registers a minted credential instead of storing a value.
+	// Mutually exclusive with Value.
+	Descriptor *tokenmint.Descriptor `json:"descriptor,omitempty"`
 }
 
 type tokenMutationResponse struct {
@@ -333,10 +349,12 @@ func (s *AdminServer) handleDeleteToken(w http.ResponseWriter, r *http.Request) 
 // --- GET (metadata only) ---
 
 type tokenMetadataResponse struct {
-	TokenRef string `json:"token_ref"`
-	KMSKeyID string `json:"kms_key_id,omitempty"`
-	Version  string `json:"version,omitempty"`
-	HasValue bool   `json:"has_value"`
+	TokenRef     string `json:"token_ref"`
+	KMSKeyID     string `json:"kms_key_id,omitempty"`
+	Version      string `json:"version,omitempty"`
+	HasValue     bool   `json:"has_value"`
+	Kind         string `json:"kind,omitempty"`
+	GrantProfile string `json:"grant_profile,omitempty"`
 }
 
 func (s *AdminServer) handleGetToken(w http.ResponseWriter, r *http.Request) {
@@ -368,12 +386,19 @@ func (s *AdminServer) handleGetToken(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.metrics.RequestsTotal.WithLabelValues("read", "success").Inc()
-	respondJSON(w, http.StatusOK, tokenMetadataResponse{
+	resp := tokenMetadataResponse{
 		TokenRef: tokenRef,
 		KMSKeyID: entry.KMSKeyID,
 		Version:  entry.Version,
 		HasValue: len(entry.EncryptedToken) > 0,
-	})
+	}
+	// A descriptor stores no value, so HasValue stays false — the token it
+	// stands for is minted on demand and never written back.
+	if entry.Descriptor != nil {
+		resp.Kind = entry.Descriptor.Kind
+		resp.GrantProfile = entry.Descriptor.GrantProfile
+	}
+	respondJSON(w, http.StatusOK, resp)
 }
 
 // --- POST (rotate or invalidate) ---

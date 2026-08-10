@@ -3,8 +3,11 @@ package coordinator
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/ledatu/csar-core/tokenmint"
 )
 
 // handleSvcPutToken handles PUT /svc/tokens/{tokenRef...} from services
@@ -31,16 +34,32 @@ func (s *AdminServer) handleSvcPutToken(w http.ResponseWriter, r *http.Request) 
 		adminRejectJSON(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if req.Value == "" {
+
+	var entry TokenEntry
+	switch {
+	case req.Descriptor != nil && req.Value != "":
 		s.metrics.FailuresTotal.WithLabelValues("svc_put", "validation").Inc()
-		adminRejectJSON(w, http.StatusBadRequest, "value is required")
+		adminRejectJSON(w, http.StatusBadRequest, "value and descriptor are mutually exclusive")
+		return
+
+	case req.Descriptor != nil:
+		if !s.validateSvcDescriptor(w, r, tokenRef, req.Descriptor) {
+			return
+		}
+		entry = TokenEntry{Descriptor: req.Descriptor}
+
+	case req.Value != "":
+		entry = TokenEntry{
+			EncryptedToken: []byte(req.Value),
+			KMSKeyID:       "",
+		}
+
+	default:
+		s.metrics.FailuresTotal.WithLabelValues("svc_put", "validation").Inc()
+		adminRejectJSON(w, http.StatusBadRequest, "value or descriptor is required")
 		return
 	}
 
-	entry := TokenEntry{
-		EncryptedToken: []byte(req.Value),
-		KMSKeyID:       "",
-	}
 	meta := TokenMetadata{
 		UpdatedBy: subject,
 	}
@@ -57,7 +76,15 @@ func (s *AdminServer) handleSvcPutToken(w http.ResponseWriter, r *http.Request) 
 	}
 
 	entry.Version = version
-	s.authSvc.LoadToken(tokenRef, entry)
+	if entry.Descriptor != nil {
+		// Never cache a descriptor: it holds no token bytes, and LoadToken
+		// bypasses the isValid check that would otherwise reject it. Evicting
+		// instead drops any bearer minted from the previous credential and
+		// forces the next request to resolve through the minting decorator.
+		s.authSvc.RemoveToken(tokenRef)
+	} else {
+		s.authSvc.LoadToken(tokenRef, entry)
+	}
 	s.metrics.CacheEntries.Set(float64(s.authSvc.TokenCount()))
 	s.coord.BroadcastTokenInvalidation([]string{tokenRef})
 	s.metrics.InvalidationBroadcasts.Inc()
@@ -65,6 +92,7 @@ func (s *AdminServer) handleSvcPutToken(w http.ResponseWriter, r *http.Request) 
 	s.logger.Info("svc token upserted",
 		"token_ref", tokenRef,
 		"caller", subject,
+		"descriptor", entry.Descriptor != nil,
 		"source_ip", sourceIP(r),
 	)
 
@@ -119,6 +147,16 @@ func (s *AdminServer) handleSvcCopyToken(w http.ResponseWriter, r *http.Request)
 		)
 		s.metrics.FailuresTotal.WithLabelValues("svc_copy", "fetch").Inc()
 		adminRejectJSON(w, http.StatusInternalServerError, "storage read failed")
+		return
+	}
+
+	// Copying a descriptor would duplicate a credential reference into a ref
+	// whose namespace no longer matches the credentials it points at, which
+	// the read-path scope check would then reject anyway. Refuse it here so
+	// the failure is a clear 400 rather than a puzzling 502 later.
+	if entry.Descriptor != nil {
+		s.metrics.FailuresTotal.WithLabelValues("svc_copy", "validation").Inc()
+		adminRejectJSON(w, http.StatusBadRequest, "source ref is a mint descriptor; register a new descriptor instead of copying")
 		return
 	}
 
@@ -228,4 +266,59 @@ func (s *AdminServer) validateSvcRequest(w http.ResponseWriter, r *http.Request,
 	}
 
 	return subject, true
+}
+
+// validateSvcDescriptor checks a descriptor before it is written.
+//
+// These checks are for the caller's benefit — a clear 400 at registration
+// beats a 502 at first use. They are NOT the security boundary: the same scope
+// rule is enforced again in MintingTokenStore on every read, because an object
+// can reach S3 without passing through this handler at all (the admin API, the
+// storage console, a leaked service-account key).
+func (s *AdminServer) validateSvcDescriptor(w http.ResponseWriter, r *http.Request, tokenRef string, desc *tokenmint.Descriptor) bool {
+	if s.mintCfg == nil {
+		s.metrics.FailuresTotal.WithLabelValues("svc_put", "configuration").Inc()
+		adminRejectJSON(w, http.StatusServiceUnavailable, "token minting is not enabled on this coordinator")
+		return false
+	}
+
+	if err := desc.Validate(); err != nil {
+		s.metrics.FailuresTotal.WithLabelValues("svc_put", "validation").Inc()
+		adminRejectJSON(w, http.StatusBadRequest, err.Error())
+		return false
+	}
+
+	// Only profiles the operator configured may be named. Accepting an
+	// arbitrary name would let a caller point a credential at an endpoint
+	// nobody chose for it as soon as such a profile were later added.
+	profile, ok := s.mintCfg.Profile(desc.GrantProfile)
+	if !ok {
+		s.metrics.FailuresTotal.WithLabelValues("svc_put", "validation").Inc()
+		adminRejectJSON(w, http.StatusBadRequest, fmt.Sprintf("unknown grant_profile %q", desc.GrantProfile))
+		return false
+	}
+
+	// Both credential refs must be inside the caller's own namespace.
+	for _, ref := range []string{desc.ClientIDRef, desc.ClientSecretRef} {
+		if _, ok := s.validateSvcRequest(w, r, ref, "svc_put"); !ok {
+			return false
+		}
+	}
+
+	scope, err := refScope(tokenRef, profile.SecretRefScopeSegments)
+	if err != nil {
+		s.metrics.FailuresTotal.WithLabelValues("svc_put", "validation").Inc()
+		adminRejectJSON(w, http.StatusBadRequest, err.Error())
+		return false
+	}
+	for _, ref := range []string{desc.ClientIDRef, desc.ClientSecretRef} {
+		if !strings.HasPrefix(ref, scope) {
+			s.metrics.FailuresTotal.WithLabelValues("svc_put", "authorization").Inc()
+			adminRejectJSON(w, http.StatusBadRequest,
+				fmt.Sprintf("credential ref %q must be within %q", ref, scope))
+			return false
+		}
+	}
+
+	return true
 }
