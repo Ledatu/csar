@@ -52,14 +52,20 @@ func (c *Config) resolveAuthzRoute(a *AuthzRouteConfig) (*AuthzRouteConfig, erro
 		if a.hasTerminalFields() {
 			return nil, fmt.Errorf("any_of cannot be combined with subject/resource/action/scope fields")
 		}
-		branches, err := c.resolveAuthzBranches(a.AnyOf, authzInlinePolicyName)
+		owner := a.PolicyName
+		if owner == "" {
+			owner = authzInlinePolicyName
+		}
+		branches, err := c.resolveAuthzBranches(a.AnyOf, owner)
 		if err != nil {
 			return nil, err
 		}
-		return &AuthzRouteConfig{AnyOf: branches, StripHeaders: a.StripHeaders}, nil
+		return &AuthzRouteConfig{AnyOf: branches, StripHeaders: a.StripHeaders, PolicyName: a.PolicyName}, nil
 	default:
 		resolved := *a
-		resolved.PolicyName = authzInlinePolicyName
+		if resolved.PolicyName == "" {
+			resolved.PolicyName = authzInlinePolicyName
+		}
 		return &resolved, nil
 	}
 }
@@ -122,7 +128,9 @@ func (c *Config) resolveAuthzBranches(branches []AuthzRouteConfig, owner string)
 		}
 		if branch.Use == "" {
 			inline := *branch
-			inline.PolicyName = fmt.Sprintf("%s[%d]", owner, i)
+			if inline.PolicyName == "" {
+				inline.PolicyName = fmt.Sprintf("%s[%d]", owner, i)
+			}
 			resolved = append(resolved, inline)
 			continue
 		}

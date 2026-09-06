@@ -442,3 +442,50 @@ paths:
 		t.Errorf("patch branch 1 PolicyName = %q", patch.AnyOf[1].PolicyName)
 	}
 }
+
+func TestParseBytes_CompiledPolicyNamesSurvive(t *testing.T) {
+	compiled := `
+listen_addr: ":8080"
+paths:
+  /campaigns/{marketplace}/{external_id}:
+    get:
+      x-csar-backend:
+        target_url: "https://campaigns:8082"
+      x-csar-authz:
+        policy_name: "campaign-read"
+        any_of:
+          - policy_name: "campaign-tenant-read"
+            subject: "{header.X-Gateway-Subject}"
+            resource: "campaign"
+            action: "read"
+            scope_type: "tenant"
+            scope_id: "{path.marketplace}:{path.external_id}"
+          - policy_name: "campaign-platform-read"
+            subject: "{header.X-Gateway-Subject}"
+            resource: "campaign"
+            action: "read"
+            scope_type: "platform"
+    patch:
+      x-csar-backend:
+        target_url: "https://campaigns:8082"
+      x-csar-authz:
+        policy_name: "campaign-tenant-write"
+        subject: "{header.X-Gateway-Subject}"
+        resource: "campaign"
+        action: "write"
+        scope_type: "tenant"
+        scope_id: "{path.marketplace}:{path.external_id}"
+`
+	cfg, err := ParseBytes([]byte(compiled))
+	if err != nil {
+		t.Fatalf("ParseBytes() error: %v", err)
+	}
+	get := cfg.Paths["/campaigns/{marketplace}/{external_id}"]["get"].Authz
+	if get.PolicyName != "campaign-read" || get.AnyOf[0].PolicyName != "campaign-tenant-read" || get.AnyOf[1].PolicyName != "campaign-platform-read" {
+		t.Errorf("compiled composite policy names not preserved: %q / %q / %q", get.PolicyName, get.AnyOf[0].PolicyName, get.AnyOf[1].PolicyName)
+	}
+	patch := cfg.Paths["/campaigns/{marketplace}/{external_id}"]["patch"].Authz
+	if patch.PolicyName != "campaign-tenant-write" {
+		t.Errorf("compiled terminal policy name = %q, want campaign-tenant-write", patch.PolicyName)
+	}
+}

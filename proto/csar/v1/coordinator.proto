@@ -494,6 +494,11 @@ message AuthzRouteConfigProto {
   string scope_type = 5;
   string scope_id = 6;
   repeated string strip_headers = 7;
+  // Alternative checks evaluated in order; the first allow grants access.
+  // Branches are terminal (no nested any_of). Mirrors config.AuthzRouteConfig.AnyOf.
+  repeated AuthzRouteConfigProto any_of = 8;
+  // Resolved policy or branch name, reported to backends as X-Gateway-Authz-Policy.
+  string policy_name = 9;
 }
 
 // ---------------------------------------------------------------------------

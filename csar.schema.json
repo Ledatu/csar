@@ -1654,6 +1654,10 @@
           "description": "Scope instance identifier. Supports placeholders.",
           "examples": ["{header.X-Tenant-Id}"]
         },
+        "policy_name": {
+          "type": "string",
+          "description": "Resolved policy or branch name reported to backends as X-Gateway-Authz-Policy. Written by the compiler (csar-helper inspect); hand-written configs get it from the referenced policy name and should not set it."
+        },
         "strip_headers": {
           "type": "array",
           "description": "Headers unconditionally removed from client requests to prevent spoofing.",

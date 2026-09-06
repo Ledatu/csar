@@ -3403,14 +3403,19 @@ func (x *DebugHeadersProto) GetRequestIdHeader() string {
 }
 
 type AuthzRouteConfigProto struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Use           string                 `protobuf:"bytes,1,opt,name=use,proto3" json:"use,omitempty"`
-	Subject       string                 `protobuf:"bytes,2,opt,name=subject,proto3" json:"subject,omitempty"`
-	Resource      string                 `protobuf:"bytes,3,opt,name=resource,proto3" json:"resource,omitempty"`
-	Action        string                 `protobuf:"bytes,4,opt,name=action,proto3" json:"action,omitempty"`
-	ScopeType     string                 `protobuf:"bytes,5,opt,name=scope_type,json=scopeType,proto3" json:"scope_type,omitempty"`
-	ScopeId       string                 `protobuf:"bytes,6,opt,name=scope_id,json=scopeId,proto3" json:"scope_id,omitempty"`
-	StripHeaders  []string               `protobuf:"bytes,7,rep,name=strip_headers,json=stripHeaders,proto3" json:"strip_headers,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Use          string                 `protobuf:"bytes,1,opt,name=use,proto3" json:"use,omitempty"`
+	Subject      string                 `protobuf:"bytes,2,opt,name=subject,proto3" json:"subject,omitempty"`
+	Resource     string                 `protobuf:"bytes,3,opt,name=resource,proto3" json:"resource,omitempty"`
+	Action       string                 `protobuf:"bytes,4,opt,name=action,proto3" json:"action,omitempty"`
+	ScopeType    string                 `protobuf:"bytes,5,opt,name=scope_type,json=scopeType,proto3" json:"scope_type,omitempty"`
+	ScopeId      string                 `protobuf:"bytes,6,opt,name=scope_id,json=scopeId,proto3" json:"scope_id,omitempty"`
+	StripHeaders []string               `protobuf:"bytes,7,rep,name=strip_headers,json=stripHeaders,proto3" json:"strip_headers,omitempty"`
+	// Alternative checks evaluated in order; the first allow grants access.
+	// Branches are terminal (no nested any_of). Mirrors config.AuthzRouteConfig.AnyOf.
+	AnyOf []*AuthzRouteConfigProto `protobuf:"bytes,8,rep,name=any_of,json=anyOf,proto3" json:"any_of,omitempty"`
+	// Resolved policy or branch name, reported to backends as X-Gateway-Authz-Policy.
+	PolicyName    string `protobuf:"bytes,9,opt,name=policy_name,json=policyName,proto3" json:"policy_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3492,6 +3497,20 @@ func (x *AuthzRouteConfigProto) GetStripHeaders() []string {
 		return x.StripHeaders
 	}
 	return nil
+}
+
+func (x *AuthzRouteConfigProto) GetAnyOf() []*AuthzRouteConfigProto {
+	if x != nil {
+		return x.AnyOf
+	}
+	return nil
+}
+
+func (x *AuthzRouteConfigProto) GetPolicyName() string {
+	if x != nil {
+		return x.PolicyName
+	}
+	return ""
 }
 
 // QuotaAssignment tells a router its allocated share of the global rate limits.
@@ -4088,7 +4107,7 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\"\n" +
 	"\remit_route_id\x18\x02 \x01(\bR\vemitRouteId\x12)\n" +
 	"\x11emit_route_id_set\x18\x03 \x01(\bR\x0eemitRouteIdSet\x12*\n" +
-	"\x11request_id_header\x18\x04 \x01(\tR\x0frequestIdHeader\"\xd6\x01\n" +
+	"\x11request_id_header\x18\x04 \x01(\tR\x0frequestIdHeader\"\xae\x02\n" +
 	"\x15AuthzRouteConfigProto\x12\x10\n" +
 	"\x03use\x18\x01 \x01(\tR\x03use\x12\x18\n" +
 	"\asubject\x18\x02 \x01(\tR\asubject\x12\x1a\n" +
@@ -4097,7 +4116,10 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\n" +
 	"scope_type\x18\x05 \x01(\tR\tscopeType\x12\x19\n" +
 	"\bscope_id\x18\x06 \x01(\tR\ascopeId\x12#\n" +
-	"\rstrip_headers\x18\a \x03(\tR\fstripHeaders\"\x9f\x01\n" +
+	"\rstrip_headers\x18\a \x03(\tR\fstripHeaders\x125\n" +
+	"\x06any_of\x18\b \x03(\v2\x1e.csar.v1.AuthzRouteConfigProtoR\x05anyOf\x12\x1f\n" +
+	"\vpolicy_name\x18\t \x01(\tR\n" +
+	"policyName\"\x9f\x01\n" +
 	"\x0fQuotaAssignment\x12<\n" +
 	"\x06quotas\x18\x01 \x03(\v2$.csar.v1.QuotaAssignment.QuotasEntryR\x06quotas\x1aN\n" +
 	"\vQuotasEntry\x12\x10\n" +
@@ -4289,32 +4311,33 @@ var file_proto_csar_v1_coordinator_proto_depIdxs = []int32{
 	64,  // 81: csar.v1.CacheInvalidationConfigProto.debounce:type_name -> google.protobuf.Duration
 	64,  // 82: csar.v1.CircuitBreakerProfileProto.interval:type_name -> google.protobuf.Duration
 	64,  // 83: csar.v1.CircuitBreakerProfileProto.timeout:type_name -> google.protobuf.Duration
-	61,  // 84: csar.v1.QuotaAssignment.quotas:type_name -> csar.v1.QuotaAssignment.QuotasEntry
-	62,  // 85: csar.v1.HealthReport.queue_depths:type_name -> csar.v1.HealthReport.QueueDepthsEntry
-	63,  // 86: csar.v1.HealthReport.metadata:type_name -> csar.v1.HealthReport.MetadataEntry
-	34,  // 87: csar.v1.FullConfigSnapshot.CircuitBreakersEntry.value:type_name -> csar.v1.CircuitBreakerProfileProto
-	10,  // 88: csar.v1.FullConfigSnapshot.SecurityProfilesEntry.value:type_name -> csar.v1.SecurityConfigProto
-	15,  // 89: csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry.value:type_name -> csar.v1.ThrottlingPolicyProto
-	21,  // 90: csar.v1.FullConfigSnapshot.CorsPoliciesEntry.value:type_name -> csar.v1.CORSConfigProto
-	18,  // 91: csar.v1.FullConfigSnapshot.RetryPoliciesEntry.value:type_name -> csar.v1.RetryConfigProto
-	19,  // 92: csar.v1.FullConfigSnapshot.RedactPoliciesEntry.value:type_name -> csar.v1.RedactConfigProto
-	17,  // 93: csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry.value:type_name -> csar.v1.AuthValidateConfigProto
-	37,  // 94: csar.v1.FullConfigSnapshot.AuthzPoliciesEntry.value:type_name -> csar.v1.AuthzRouteConfigProto
-	8,   // 95: csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry.value:type_name -> csar.v1.BackendTLSConfigProto
-	9,   // 96: csar.v1.FullConfigSnapshot.BackendPoolsEntry.value:type_name -> csar.v1.BackendPoolConfigProto
-	30,  // 97: csar.v1.FullConfigSnapshot.CachePoliciesEntry.value:type_name -> csar.v1.CacheConfigProto
-	31,  // 98: csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry.value:type_name -> csar.v1.CacheInvalidationConfigProto
-	20,  // 99: csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntry.value:type_name -> csar.v1.AuditCaptureConfigProto
-	39,  // 100: csar.v1.QuotaAssignment.QuotasEntry.value:type_name -> csar.v1.RouteQuota
-	0,   // 101: csar.v1.CoordinatorService.Subscribe:input_type -> csar.v1.SubscribeRequest
-	40,  // 102: csar.v1.CoordinatorService.ReportHealth:input_type -> csar.v1.HealthReport
-	1,   // 103: csar.v1.CoordinatorService.Subscribe:output_type -> csar.v1.ConfigUpdate
-	41,  // 104: csar.v1.CoordinatorService.ReportHealth:output_type -> csar.v1.HealthAck
-	103, // [103:105] is the sub-list for method output_type
-	101, // [101:103] is the sub-list for method input_type
-	101, // [101:101] is the sub-list for extension type_name
-	101, // [101:101] is the sub-list for extension extendee
-	0,   // [0:101] is the sub-list for field type_name
+	37,  // 84: csar.v1.AuthzRouteConfigProto.any_of:type_name -> csar.v1.AuthzRouteConfigProto
+	61,  // 85: csar.v1.QuotaAssignment.quotas:type_name -> csar.v1.QuotaAssignment.QuotasEntry
+	62,  // 86: csar.v1.HealthReport.queue_depths:type_name -> csar.v1.HealthReport.QueueDepthsEntry
+	63,  // 87: csar.v1.HealthReport.metadata:type_name -> csar.v1.HealthReport.MetadataEntry
+	34,  // 88: csar.v1.FullConfigSnapshot.CircuitBreakersEntry.value:type_name -> csar.v1.CircuitBreakerProfileProto
+	10,  // 89: csar.v1.FullConfigSnapshot.SecurityProfilesEntry.value:type_name -> csar.v1.SecurityConfigProto
+	15,  // 90: csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry.value:type_name -> csar.v1.ThrottlingPolicyProto
+	21,  // 91: csar.v1.FullConfigSnapshot.CorsPoliciesEntry.value:type_name -> csar.v1.CORSConfigProto
+	18,  // 92: csar.v1.FullConfigSnapshot.RetryPoliciesEntry.value:type_name -> csar.v1.RetryConfigProto
+	19,  // 93: csar.v1.FullConfigSnapshot.RedactPoliciesEntry.value:type_name -> csar.v1.RedactConfigProto
+	17,  // 94: csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry.value:type_name -> csar.v1.AuthValidateConfigProto
+	37,  // 95: csar.v1.FullConfigSnapshot.AuthzPoliciesEntry.value:type_name -> csar.v1.AuthzRouteConfigProto
+	8,   // 96: csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry.value:type_name -> csar.v1.BackendTLSConfigProto
+	9,   // 97: csar.v1.FullConfigSnapshot.BackendPoolsEntry.value:type_name -> csar.v1.BackendPoolConfigProto
+	30,  // 98: csar.v1.FullConfigSnapshot.CachePoliciesEntry.value:type_name -> csar.v1.CacheConfigProto
+	31,  // 99: csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry.value:type_name -> csar.v1.CacheInvalidationConfigProto
+	20,  // 100: csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntry.value:type_name -> csar.v1.AuditCaptureConfigProto
+	39,  // 101: csar.v1.QuotaAssignment.QuotasEntry.value:type_name -> csar.v1.RouteQuota
+	0,   // 102: csar.v1.CoordinatorService.Subscribe:input_type -> csar.v1.SubscribeRequest
+	40,  // 103: csar.v1.CoordinatorService.ReportHealth:input_type -> csar.v1.HealthReport
+	1,   // 104: csar.v1.CoordinatorService.Subscribe:output_type -> csar.v1.ConfigUpdate
+	41,  // 105: csar.v1.CoordinatorService.ReportHealth:output_type -> csar.v1.HealthAck
+	104, // [104:106] is the sub-list for method output_type
+	102, // [102:104] is the sub-list for method input_type
+	102, // [102:102] is the sub-list for extension type_name
+	102, // [102:102] is the sub-list for extension extendee
+	0,   // [0:102] is the sub-list for field type_name
 }
 
 func init() { file_proto_csar_v1_coordinator_proto_init() }

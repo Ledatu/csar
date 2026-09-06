@@ -1579,9 +1579,11 @@ type AuthzRouteConfig struct {
 	AnyOf []AuthzRouteConfig `yaml:"any_of,omitempty" json:"any_of,omitempty"`
 
 	// PolicyName is the resolved name of the policy (or any_of branch) this
-	// config came from. It is reported to backends as X-Gateway-Authz-Policy
-	// and is populated by ResolveAuthzPolicies.
-	PolicyName string `yaml:"-" json:"-"`
+	// config came from. It is reported to backends as X-Gateway-Authz-Policy.
+	// ResolveAuthzPolicies fills it from the referenced policy name; a compiled
+	// config (csar-helper inspect, coordinator snapshot) carries it explicitly
+	// so the name survives the loss of the "use" reference.
+	PolicyName string `yaml:"policy_name,omitempty" json:"policy_name,omitempty"`
 
 	// Subject is the principal identifier. Example: "{header.X-User-Id}".
 	Subject string `yaml:"subject,omitempty" json:"subject,omitempty"`

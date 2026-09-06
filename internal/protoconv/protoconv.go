@@ -647,8 +647,9 @@ func protoToAuthValidatePolicies(policies map[string]*csarv1.AuthValidateConfigP
 }
 
 func protoToAuthzRouteConfig(a *csarv1.AuthzRouteConfigProto) *config.AuthzRouteConfig {
-	return &config.AuthzRouteConfig{
+	out := &config.AuthzRouteConfig{
 		Use:          a.GetUse(),
+		PolicyName:   a.GetPolicyName(),
 		Subject:      a.GetSubject(),
 		Resource:     a.GetResource(),
 		Action:       a.GetAction(),
@@ -656,6 +657,13 @@ func protoToAuthzRouteConfig(a *csarv1.AuthzRouteConfigProto) *config.AuthzRoute
 		ScopeID:      a.GetScopeId(),
 		StripHeaders: a.GetStripHeaders(),
 	}
+	if branches := a.GetAnyOf(); len(branches) > 0 {
+		out.AnyOf = make([]config.AuthzRouteConfig, 0, len(branches))
+		for _, b := range branches {
+			out.AnyOf = append(out.AnyOf, *protoToAuthzRouteConfig(b))
+		}
+	}
+	return out
 }
 
 func protoToAuthzPolicies(policies map[string]*csarv1.AuthzRouteConfigProto) map[string]config.AuthzRouteConfig {

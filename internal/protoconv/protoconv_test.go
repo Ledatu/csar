@@ -327,3 +327,68 @@ func TestFullSnapshotToConfig_CachePolicyMaps(t *testing.T) {
 		t.Errorf("tags = %v", ci.Tags)
 	}
 }
+
+func TestProtoToAuthzRouteConfig_PreservesAnyOfAndPolicyName(t *testing.T) {
+	cfg := protoToAuthzRouteConfig(&csarv1.AuthzRouteConfigProto{
+		PolicyName: "campaign-read",
+		AnyOf: []*csarv1.AuthzRouteConfigProto{
+			{
+				PolicyName: "campaign-tenant-read",
+				Subject:    "{header.X-Gateway-Subject}",
+				Resource:   "campaign",
+				Action:     "read",
+				ScopeType:  "tenant",
+				ScopeId:    "{path.marketplace}:{path.external_id}",
+			},
+			{
+				PolicyName: "campaign-platform-read",
+				Subject:    "{header.X-Gateway-Subject}",
+				Resource:   "campaign",
+				Action:     "read",
+				ScopeType:  "platform",
+			},
+		},
+	})
+
+	if !cfg.IsComposite() || len(cfg.AnyOf) != 2 {
+		t.Fatalf("expected composite with 2 branches, got %+v", cfg)
+	}
+	if cfg.PolicyName != "campaign-read" {
+		t.Errorf("PolicyName = %q, want campaign-read", cfg.PolicyName)
+	}
+	if got := cfg.AnyOf[0]; got.PolicyName != "campaign-tenant-read" || got.ScopeType != "tenant" || got.ScopeID == "" {
+		t.Errorf("branch 0 = %+v", got)
+	}
+	if got := cfg.AnyOf[1]; got.PolicyName != "campaign-platform-read" || got.ScopeType != "platform" {
+		t.Errorf("branch 1 = %+v", got)
+	}
+}
+
+func TestFullSnapshotToConfig_CompositeAuthzResolves(t *testing.T) {
+	snap := &csarv1.FullConfigSnapshot{
+		Routes: []*csarv1.RouteConfig{{
+			Path:    "/campaigns/{marketplace}/{external_id}",
+			Method:  "GET",
+			Backend: &csarv1.BackendConfigProto{TargetUrl: "https://campaigns:8082"},
+			Authz: &csarv1.AuthzRouteConfigProto{
+				PolicyName: "campaign-read",
+				AnyOf: []*csarv1.AuthzRouteConfigProto{
+					{PolicyName: "campaign-tenant-read", Subject: "{header.X-Gateway-Subject}", Resource: "campaign", Action: "read", ScopeType: "tenant", ScopeId: "{path.marketplace}:{path.external_id}"},
+					{PolicyName: "campaign-platform-read", Subject: "{header.X-Gateway-Subject}", Resource: "campaign", Action: "read", ScopeType: "platform"},
+				},
+			},
+		}},
+	}
+
+	cfg := FullSnapshotToConfig(snap)
+	if err := cfg.ResolvePolicies(); err != nil {
+		t.Fatalf("ResolvePolicies() on snapshot: %v", err)
+	}
+	authz := cfg.Paths["/campaigns/{marketplace}/{external_id}"]["get"].Authz
+	if authz == nil || !authz.IsComposite() {
+		t.Fatalf("route authz not composite after snapshot conversion: %+v", authz)
+	}
+	if authz.PolicyName != "campaign-read" || authz.AnyOf[1].PolicyName != "campaign-platform-read" {
+		t.Errorf("policy names lost through snapshot: %q / %q", authz.PolicyName, authz.AnyOf[1].PolicyName)
+	}
+}
