@@ -251,11 +251,16 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 				"provide WithAuthzClient() or remove the authz config", key)
 		}
 		rt.authzConfig = fr.Route.Authz
+		branches := fr.Route.Authz.Branches()
+		branchSummary := make([]string, 0, len(branches))
+		for i := range branches {
+			b := &branches[i]
+			branchSummary = append(branchSummary, fmt.Sprintf("%s=%s:%s@%s", b.PolicyName, b.Resource, b.Action, b.ScopeType))
+		}
 		logger.Info("authz authorization enabled",
 			"route", key,
-			"subject", fr.Route.Authz.Subject,
-			"resource", fr.Route.Authz.Resource,
-			"action", fr.Route.Authz.Action,
+			"policy", fr.Route.Authz.PolicyName,
+			"branches", branchSummary,
 			"strip_headers", fr.Route.Authz.StripHeaders,
 		)
 	}

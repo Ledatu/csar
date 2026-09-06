@@ -187,6 +187,7 @@ coordinator:
 # Define reusable authz configurations. Routes reference them via:
 #   x-csar-authz: "tenant-docs"                       # bare string shorthand
 #   x-csar-authz: { use: "tenant-docs", action: "write" }  # with inline overrides
+#   x-csar-authz: { any_of: ["tenant-docs", "platform-docs"] }  # first allow wins
 # authz_policies:
 #   tenant-docs:
 #     subject: "{header.X-User-Id}"
@@ -197,6 +198,18 @@ coordinator:
 #     strip_headers:
 #       - "X-User-Roles"
 #       - "X-Authz-Decision"
+#   platform-docs:
+#     subject: "{header.X-User-Id}"
+#     resource: "document"
+#     action: "read"
+#     scope_type: "platform"
+#   # Composite policy: tenant members need document:read in the tenant,
+#   # platform staff need document:read platform-wide. Branches must be
+#   # terminal policies (no nested any_of). The branch that allowed the
+#   # request is reported to the backend as X-Gateway-Authz-Policy, and
+#   # csar-authz reports the granting scope as X-Gateway-Authz-Scope.
+#   docs-read:
+#     any_of: ["tenant-docs", "platform-docs"]
 #   platform-admin:
 #     subject: "{header.X-User-Id}"
 #     resource: "admin:{path.resource}"
@@ -536,6 +549,17 @@ paths:
   #     x-csar-authz:
   #       use: "tenant-docs"                      # inherit from policy
   #       action: "delete"                        # override action for this route
+  #
+  # Alternatives (tenant members OR platform staff), inline or via a
+  # composite policy name such as "docs-read" above:
+  # /api/v1/documents/{id:[0-9]+}:
+  #   get:
+  #     x-csar-backend:
+  #       target_url: "https://docs-api.internal"
+  #     x-csar-authz:
+  #       any_of:
+  #         - "tenant-docs"                       # evaluated first
+  #         - { use: "platform-docs", action: "read" }
 
   # --- Payload Redaction / DLP ---
   # Masks specified JSON fields in upstream responses before returning to client.

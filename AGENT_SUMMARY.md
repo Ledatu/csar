@@ -14,7 +14,7 @@ and internal admin surfaces.
 
 ## Trust/Auth Model
 - Inbound JWTs are validated at the router against JWKS.
-- `x-csar-authz` policies gate routes before proxying.
+- `x-csar-authz` policies gate routes before proxying; a policy or route may list `any_of` branches (first allow wins) so tenant members and platform staff can share a route.
 - `gatewayctx` is the trusted identity carrier for backends, but it is only safe
   when paired with mTLS, `TrustedMiddleware`, or equivalent network isolation.
 - Coordinator admin access is mTLS-protected and profile-guarded.

@@ -575,10 +575,11 @@ func (c *Config) Validate() error {
 					"call ResolveAuthValidatePolicies() before Validate()", path, method, route.AuthValidate.Use)
 			}
 
-			// Validate unresolved authz policy references.
-			if route.Authz != nil && route.Authz.Use != "" {
-				return fmt.Errorf("path %s method %s: x-csar-authz has unresolved policy reference %q — "+
-					"call ResolveAuthzPolicies() before Validate()", path, method, route.Authz.Use)
+			// Validate resolved authz config (terminal fields, scope, any_of shape).
+			if route.Authz != nil {
+				if err := route.Authz.validate(); err != nil {
+					return fmt.Errorf("path %s method %s: x-csar-authz %w", path, method, err)
+				}
 			}
 
 			if route.AuditCapture != nil && route.AuditCapture.Use != "" {

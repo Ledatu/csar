@@ -1557,11 +1557,31 @@ func (ac *AuditCaptureConfig) UnmarshalYAML(value *yaml.Node) error {
 //	x-csar-authz: "tenant-docs"                       # bare string → policy ref
 //	x-csar-authz: { subject: "{header.X-User-Id}", ... } # inline object
 //	x-csar-authz: { use: "tenant-docs", action: "write" } # policy ref + overrides
+//
+// A route (or a named policy) may instead list alternatives; the first branch
+// that csar-authz allows grants access. This is how one route admits both
+// tenant members and platform-wide staff with different checks:
+//
+//	x-csar-authz:
+//	  any_of: ["campaign-tenant-read", "campaign-platform-read"]
+//
+// Branches are terminal: a branch may reference a terminal policy or be an
+// inline object, but may not itself contain any_of.
 type AuthzRouteConfig struct {
 	// Use is an optional reference to a named authz_policies entry.
 	// When set, all other fields are inherited from the policy; any
 	// inline fields override the policy's values (shallow merge).
 	Use string `yaml:"use,omitempty" json:"use,omitempty"`
+
+	// AnyOf lists alternative checks evaluated in order. Access is granted by
+	// the first branch csar-authz allows. When set, the terminal fields
+	// (subject, resource, action, scope_type, scope_id) must be empty.
+	AnyOf []AuthzRouteConfig `yaml:"any_of,omitempty" json:"any_of,omitempty"`
+
+	// PolicyName is the resolved name of the policy (or any_of branch) this
+	// config came from. It is reported to backends as X-Gateway-Authz-Policy
+	// and is populated by ResolveAuthzPolicies.
+	PolicyName string `yaml:"-" json:"-"`
 
 	// Subject is the principal identifier. Example: "{header.X-User-Id}".
 	Subject string `yaml:"subject,omitempty" json:"subject,omitempty"`
@@ -1596,4 +1616,24 @@ func (a *AuthzRouteConfig) UnmarshalYAML(value *yaml.Node) error {
 	}
 	*a = AuthzRouteConfig(alias)
 	return nil
+}
+
+// IsComposite reports whether this config is an any_of list rather than a
+// single terminal check.
+func (a *AuthzRouteConfig) IsComposite() bool {
+	return len(a.AnyOf) > 0
+}
+
+// Branches returns the terminal checks to evaluate: the any_of branches for a
+// composite config, or the config itself.
+func (a *AuthzRouteConfig) Branches() []AuthzRouteConfig {
+	if a.IsComposite() {
+		return a.AnyOf
+	}
+	return []AuthzRouteConfig{*a}
+}
+
+// hasTerminalFields reports whether any single-check field is set.
+func (a *AuthzRouteConfig) hasTerminalFields() bool {
+	return a.Subject != "" || a.Resource != "" || a.Action != "" || a.ScopeType != "" || a.ScopeID != ""
 }

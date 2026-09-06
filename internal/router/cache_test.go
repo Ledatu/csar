@@ -29,12 +29,32 @@ func TestRouter_ResponseCacheInvalidationByTag(t *testing.T) {
 	}))
 	defer upstream.Close()
 
+	// The {tenant} placeholder reads the trusted X-Gateway-Tenant header, which
+	// only a validator may set: the router strips client-supplied copies.
+	authnServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if c, err := r.Cookie("csar_session"); err != nil || c.Value != "sess-1" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set(gatewayctx.HeaderTenant, "tenant-1")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer authnServer.Close()
+
+	sessionAuth := &config.AuthValidateConfig{
+		Mode:            "session",
+		SessionEndpoint: authnServer.URL,
+		CookieName:      "csar_session",
+		ForwardHeaders:  []string{gatewayctx.HeaderTenant},
+	}
+
 	cfg := &config.Config{
 		ListenAddr: ":0",
 		Paths: map[string]config.PathConfig{
 			"/analytics/skus": {
 				"get": {
-					Backend: config.BackendConfig{TargetURL: upstream.URL},
+					Backend:      config.BackendConfig{TargetURL: upstream.URL},
+					AuthValidate: sessionAuth,
 					Cache: &config.CacheConfig{
 						Key:     "analytics:skus:{tenant}:{query.marketplace}",
 						TTL:     config.Duration{Duration: 5 * time.Second},
@@ -45,7 +65,8 @@ func TestRouter_ResponseCacheInvalidationByTag(t *testing.T) {
 			},
 			"/skus/{sku_id}": {
 				"patch": {
-					Backend: config.BackendConfig{TargetURL: upstream.URL},
+					Backend:      config.BackendConfig{TargetURL: upstream.URL},
+					AuthValidate: sessionAuth,
 					CacheInvalidate: &config.CacheInvalidationConfig{
 						Tags: []string{"analytics:skus:{tenant}"},
 					},
@@ -60,7 +81,8 @@ func TestRouter_ResponseCacheInvalidationByTag(t *testing.T) {
 
 	get := func() string {
 		req := httptest.NewRequest(http.MethodGet, "/analytics/skus?marketplace=wb", nil)
-		req.Header.Set(gatewayctx.HeaderTenant, "tenant-1")
+		req.AddCookie(&http.Cookie{Name: "csar_session", Value: "sess-1"})
+		req.Header.Set(gatewayctx.HeaderTenant, "spoofed-tenant")
 		rec := httptest.NewRecorder()
 		r.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -80,7 +102,7 @@ func TestRouter_ResponseCacheInvalidationByTag(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPatch, "/skus/sku-1", nil)
-	req.Header.Set(gatewayctx.HeaderTenant, "tenant-1")
+	req.AddCookie(&http.Cookie{Name: "csar_session", Value: "sess-1"})
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNoContent {

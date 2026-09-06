@@ -142,6 +142,12 @@ func (r *Router) serveWithIPCheck(w http.ResponseWriter, req *http.Request, rt *
 		defer span.End()
 	}
 
+	// Gateway identity headers are asserted by this router only. Drop whatever
+	// the client sent before any validator re-injects the values it vouches
+	// for, so a backend never sees a spoofed subject, tenant, role, or
+	// authz decision — including on routes without inbound auth.
+	gatewayctx.StripTrusted(req.Header)
+
 	// Step 0a: Inbound auth validation (audit §3.3.1).
 	if rt.sessionConfig != nil && rt.sessionValidator != nil {
 		validated := rt.sessionValidator.Wrap(*rt.sessionConfig, http.HandlerFunc(func(vw http.ResponseWriter, vr *http.Request) {

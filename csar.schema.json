@@ -1616,12 +1616,18 @@
     },
     "AuthzRouteConfigObject": {
       "type": "object",
-      "description": "Per-route authorization via csar-authz. Strips spoofable headers, evaluates access policy, injects trusted headers.",
+      "description": "Per-route authorization via csar-authz. Strips spoofable headers, evaluates the access policy (or each any_of branch in order), injects trusted X-Gateway-* headers when access is granted.",
       "additionalProperties": false,
       "properties": {
         "use": {
           "type": "string",
           "description": "Reference to a named authz_policies entry. Inline fields override policy values."
+        },
+        "any_of": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Alternative checks evaluated in order; the first branch csar-authz allows grants access. Lets one route admit both tenant members and platform-wide staff with different checks. Branches are terminal (a policy reference or an inline object, never a nested any_of). When set, subject/resource/action/scope_type/scope_id must be empty; strip_headers may stay.",
+          "items": { "$ref": "#/$defs/AuthzRouteConfig" }
         },
         "subject": {
           "type": "string",
