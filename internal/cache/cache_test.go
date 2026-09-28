@@ -15,6 +15,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/ledatu/csar-core/gatewayctx"
+	"github.com/ledatu/csar/internal/redisx"
 	"github.com/ledatu/csar/pkg/middleware/authzmw"
 	"github.com/redis/go-redis/v9"
 )
@@ -255,6 +256,56 @@ func TestResponseCache_FailOpenWhenRedisDown(t *testing.T) {
 	}
 	if upstreamCalls != 1 {
 		t.Fatalf("upstreamCalls = %d, want 1", upstreamCalls)
+	}
+}
+
+func TestResponseCache_FailOpenAndReportsRedisAuthFailure(t *testing.T) {
+	mr := miniredis.RunT(t)
+	mr.RequireAuth("secret")
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+
+	var mu sync.Mutex
+	var subsystems []string
+	client.AddHook(redisx.NewErrorHook(func(subsystem, _ string) {
+		mu.Lock()
+		defer mu.Unlock()
+		subsystems = append(subsystems, subsystem)
+	}))
+
+	rc := NewResponseCache(slog.Default(), WithRedisStore(NewRedisStore(client, "csar:")))
+	upstreamCalls := 0
+	handler := rc.Wrap(Config{
+		RouteKey:         "GET:/analytics/skus",
+		Store:            "redis",
+		KeyTemplate:      "analytics:{query.marketplace}",
+		Namespaces:       []string{"analytics:{query.marketplace}"},
+		OperationTimeout: time.Second,
+	}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("fresh"))
+	}))
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/analytics/skus?marketplace=wb", nil))
+
+	if rec.Code != http.StatusOK || rec.Body.String() != "fresh" || upstreamCalls != 1 {
+		t.Fatalf("status = %d, body = %q, upstreamCalls = %d; want 200, fresh, 1", rec.Code, rec.Body.String(), upstreamCalls)
+	}
+	if rec.Header().Get("X-CSAR-Cache") != "BYPASS" {
+		t.Fatalf("X-CSAR-Cache = %q, want BYPASS", rec.Header().Get("X-CSAR-Cache"))
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(subsystems) == 0 {
+		t.Fatal("Redis auth failure was not reported")
+	}
+	for _, s := range subsystems {
+		if s != redisx.SubsystemCache {
+			t.Fatalf("reported subsystems = %v, want only %q", subsystems, redisx.SubsystemCache)
+		}
 	}
 }
 

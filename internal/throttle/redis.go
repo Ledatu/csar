@@ -2,15 +2,21 @@ package throttle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync/atomic"
 	"time"
 
+	"github.com/ledatu/csar/internal/redisx"
 	"github.com/redis/go-redis/v9"
 )
 
 // Compile-time check: RedisThrottler satisfies Waiter.
 var _ Waiter = (*RedisThrottler)(nil)
+
+// ErrBackendUnavailable means the rate-limit decision could not be made
+// because the Redis backend failed, as opposed to the caller being over limit.
+var ErrBackendUnavailable = errors.New("throttle backend unavailable")
 
 // gcraScript implements the Generic Cell Rate Algorithm (GCRA) in Redis.
 //
@@ -133,12 +139,9 @@ func (rt *RedisThrottler) Wait(ctx context.Context) error {
 			return fmt.Errorf("client cancelled: %w", ctx.Err())
 		}
 
-		nowMS := time.Now().UnixMilli()
-		result, err := rt.script.Run(ctx, rt.client, []string{key},
-			emissionIntervalMS, burstOffsetMS, nowMS, maxWaitMS,
-		).Int64()
+		result, err := runGCRA(ctx, rt.client, rt.script, key, emissionIntervalMS, burstOffsetMS, maxWaitMS)
 		if err != nil {
-			return fmt.Errorf("redis GCRA error: %w", err)
+			return err
 		}
 
 		switch {
@@ -172,6 +175,19 @@ func (rt *RedisThrottler) Wait(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func runGCRA(ctx context.Context, client *redis.Client, script *redis.Script, key string, emissionIntervalMS, burstOffsetMS, maxWaitMS int64) (int64, error) {
+	result, err := script.Run(redisx.WithSubsystem(ctx, redisx.SubsystemThrottle), client, []string{key},
+		emissionIntervalMS, burstOffsetMS, time.Now().UnixMilli(), maxWaitMS,
+	).Int64()
+	if err == nil {
+		return result, nil
+	}
+	if ctx.Err() != nil {
+		return 0, fmt.Errorf("client cancelled: %w", ctx.Err())
+	}
+	return 0, fmt.Errorf("%w: redis GCRA: %w", ErrBackendUnavailable, err)
 }
 
 // Waiting returns the number of requests currently waiting.

@@ -24,5 +24,9 @@ const (
 	CodeSecurityError     = core.CodeSecurityError
 )
 
+// CodeThrottleUnavailable means the rate-limit backend failed, so the router
+// could not decide whether the request was within its limit.
+const CodeThrottleUnavailable = "throttle_unavailable"
+
 // Re-export constructors.
 var New = core.New

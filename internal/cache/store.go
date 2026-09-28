@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledatu/csar/internal/redisx"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -293,7 +294,7 @@ func (s *RedisStore) get(ctx context.Context, key string, namespaceVersions map[
 		return nil, err
 	}
 
-	raw, err := s.client.Get(ctx, s.responseKey(key)).Bytes()
+	raw, err := s.client.Get(withCacheSubsystem(ctx), s.responseKey(key)).Bytes()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return nil, ErrCacheMiss
@@ -353,6 +354,7 @@ func (s *RedisStore) Set(ctx context.Context, key string, entry *Entry, opts Set
 		expireAfter = opts.TTL
 	}
 	rkey := s.responseKey(key)
+	ctx = withCacheSubsystem(ctx)
 	pipe := s.client.Pipeline()
 	pipe.Set(ctx, rkey, payload, expireAfter)
 	for _, tag := range opts.Tags {
@@ -374,7 +376,7 @@ func (s *RedisStore) BumpNamespace(ctx context.Context, namespace string) error 
 	if err := s.health.check(); err != nil {
 		return err
 	}
-	if err := s.client.Incr(ctx, s.namespaceKey(namespace)).Err(); err != nil {
+	if err := s.client.Incr(withCacheSubsystem(ctx), s.namespaceKey(namespace)).Err(); err != nil {
 		s.health.recordError(true)
 		return err
 	}
@@ -390,6 +392,7 @@ func (s *RedisStore) GetNamespaceVersions(ctx context.Context, namespaces []stri
 	if len(namespaces) == 0 {
 		return versions, nil
 	}
+	ctx = withCacheSubsystem(ctx)
 	pipe := s.client.Pipeline()
 	cmds := make(map[string]*redis.StringCmd, len(namespaces))
 	for _, namespace := range namespaces {
@@ -417,6 +420,7 @@ func (s *RedisStore) DeleteByTag(ctx context.Context, tag string) error {
 	}
 
 	tkey := s.tagKey(tag)
+	ctx = withCacheSubsystem(ctx)
 	keys, err := s.client.SMembers(ctx, tkey).Result()
 	if err != nil {
 		s.health.recordError(true)
@@ -438,6 +442,10 @@ func (s *RedisStore) DeleteByTag(ctx context.Context, tag string) error {
 
 	s.health.recordSuccess()
 	return nil
+}
+
+func withCacheSubsystem(ctx context.Context) context.Context {
+	return redisx.WithSubsystem(ctx, redisx.SubsystemCache)
 }
 
 func (s *RedisStore) responseKey(key string) string {

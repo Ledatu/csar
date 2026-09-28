@@ -62,6 +62,11 @@ type Metrics struct {
 	// ResponseCacheEvents counts response-cache outcomes by route and event.
 	ResponseCacheEvents *prometheus.CounterVec
 
+	// --- Redis metrics ---
+
+	// RedisCommandErrors counts failed commands on the shared Redis client by subsystem and command.
+	RedisCommandErrors *prometheus.CounterVec
+
 	// --- Coordinator metrics ---
 
 	// ConnectedRouters is a gauge of currently connected routers.
@@ -210,6 +215,14 @@ func New(registry *prometheus.Registry) *Metrics {
 			Name:      "events_total",
 			Help:      "Response cache events by route and event.",
 		}, []string{"route", "event"}),
+
+		// --- Redis ---
+		RedisCommandErrors: factory.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "csar",
+			Subsystem: "redis",
+			Name:      "command_errors_total",
+			Help:      "Failed commands on the shared Redis client by subsystem (cache, throttle, startup) and command.",
+		}, []string{"subsystem", "command"}),
 
 		// --- Coordinator ---
 		ConnectedRouters: factory.NewGauge(prometheus.GaugeOpts{

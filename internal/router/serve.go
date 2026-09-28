@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -25,6 +26,8 @@ import (
 // ProtocolVersion is the CSAR wire protocol version.
 // Bump when breaking changes are made to header semantics.
 const ProtocolVersion = "1"
+
+const csarStatusThrottleUnavailable = "throttle_unavailable"
 
 // requestID extracts the request ID from the request using the configured header.
 func (r *Router) requestID(req *http.Request) string {
@@ -272,6 +275,25 @@ func (r *Router) serveAfterAuth(w http.ResponseWriter, req *http.Request, rt *ro
 	r.servePipeline(w, req, rt)
 }
 
+// writeThrottleUnavailable rejects a request whose throttle backend failed.
+// It stays fail-closed but omits Retry-After and X-CSAR-Wait-MS, so clients do
+// not mistake an infrastructure failure for a rate limit and back off for
+// max_wait.
+func (r *Router) writeThrottleUnavailable(w http.ResponseWriter, req *http.Request, rt *route, err error) {
+	r.logger.Error("throttle backend unavailable, request rejected",
+		"route", rt.routeKey,
+		"path", req.URL.Path,
+		"method", req.Method,
+		"error", err,
+	)
+	w.Header().Set("X-CSAR-Status", csarStatusThrottleUnavailable)
+	if r.metrics != nil {
+		r.metrics.RecordSDKThrottled(rt.routeKey, csarStatusThrottleUnavailable)
+	}
+	apierror.New(apierror.CodeThrottleUnavailable, http.StatusServiceUnavailable,
+		"rate limiter unavailable").WithRequestID(r.requestID(req)).Write(w)
+}
+
 // servePipeline runs the throttle -> circuit breaker -> proxy pipeline.
 //
 // csar-ts protocol: The router emits X-CSAR-Status and X-CSAR-Wait-MS headers
@@ -382,6 +404,11 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 
 			if r.metrics != nil {
 				r.metrics.SetThrottleQueueDepth(rt.routeKey, activeThrottler.Waiting())
+			}
+
+			if errors.Is(err, throttle.ErrBackendUnavailable) {
+				r.writeThrottleUnavailable(w, req, rt, err)
+				return
 			}
 
 			if err != nil {

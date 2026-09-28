@@ -345,3 +345,35 @@ func TestMetricsHandler_ServesPrometheus(t *testing.T) {
 		t.Error("metrics response should contain csar_router_requests_total")
 	}
 }
+
+func TestRecordRedisCommandError(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := New(reg)
+
+	m.RecordRedisCommandError("throttle", "evalsha")
+	m.RecordRedisCommandError("throttle", "evalsha")
+	m.RecordRedisCommandError("cache", "pipeline")
+
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+
+	got := map[string]float64{}
+	for _, f := range families {
+		if f.GetName() != "csar_redis_command_errors_total" {
+			continue
+		}
+		for _, metric := range f.GetMetric() {
+			labels := map[string]string{}
+			for _, lp := range metric.GetLabel() {
+				labels[lp.GetName()] = lp.GetValue()
+			}
+			got[labels["subsystem"]+"/"+labels["command"]] = metric.GetCounter().GetValue()
+		}
+	}
+
+	if got["throttle/evalsha"] != 2 || got["cache/pipeline"] != 1 {
+		t.Fatalf("csar_redis_command_errors_total = %v, want throttle/evalsha=2 cache/pipeline=1", got)
+	}
+}

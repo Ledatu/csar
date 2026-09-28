@@ -117,12 +117,9 @@ func (dt *DynamicThrottler) Wait(ctx context.Context) error {
 			return fmt.Errorf("client cancelled: %w", ctx.Err())
 		}
 
-		nowMS := time.Now().UnixMilli()
-		result, err := dt.script.Run(ctx, dt.client, []string{key},
-			emissionIntervalMS, burstOffsetMS, nowMS, maxWaitMS,
-		).Int64()
+		result, err := runGCRA(ctx, dt.client, dt.script, key, emissionIntervalMS, burstOffsetMS, maxWaitMS)
 		if err != nil {
-			return fmt.Errorf("redis GCRA error: %w", err)
+			return err
 		}
 
 		switch {

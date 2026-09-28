@@ -101,6 +101,11 @@ func (m *Metrics) RecordResponseCache(route, event string) {
 	m.ResponseCacheEvents.WithLabelValues(route, event).Inc()
 }
 
+// RecordRedisCommandError records a failed command on the shared Redis client.
+func (m *Metrics) RecordRedisCommandError(subsystem, command string) {
+	m.RedisCommandErrors.WithLabelValues(subsystem, command).Inc()
+}
+
 // responseRecorder captures the HTTP status code from the response.
 type responseRecorder struct {
 	http.ResponseWriter

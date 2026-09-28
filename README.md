@@ -85,7 +85,7 @@ Each request passes through these stages in order:
 CSAR implements a versioned wire protocol for SDK clients. Every response includes:
 
 - `X-CSAR-Protocol-Version: 1` — protocol version for SDK compatibility detection
-- `X-CSAR-Status` — present only on CSAR-originated errors (`throttled`, `circuit_open`, `circuit_half_open`, `backpressure`)
+- `X-CSAR-Status` — present only on CSAR-originated errors (`throttled`, `throttle_unavailable`, `circuit_open`, `circuit_half_open`, `backpressure`)
 - `X-CSAR-Wait-MS` — milliseconds spent in CSAR's internal queue
 - `Retry-After` — standard HTTP retry hint (seconds)
 

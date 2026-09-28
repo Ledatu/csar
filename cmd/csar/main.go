@@ -26,11 +26,13 @@ import (
 	"github.com/ledatu/csar/internal/logging"
 	"github.com/ledatu/csar/internal/metrics"
 	"github.com/ledatu/csar/internal/proxy"
+	"github.com/ledatu/csar/internal/redisx"
 	"github.com/ledatu/csar/internal/router"
 	"github.com/ledatu/csar/internal/telemetry"
 	"github.com/ledatu/csar/internal/throttle"
 	"github.com/ledatu/csar/pkg/middleware"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
+	"github.com/redis/go-redis/v9"
 )
 
 // Version is set at build time via ldflags.
@@ -176,11 +178,9 @@ func run() error {
 			KeyPrefix: cfg.Redis.KeyPrefix,
 		})
 		defer redisClient.Close()
+		redisClient.AddHook(redisx.NewErrorHook(m.RecordRedisCommandError))
 		routerOpts = append(routerOpts, router.WithRedisClient(redisClient))
-		logger.Info("Redis client for distributed router policies configured",
-			"address", cfg.Redis.Address,
-			"db", cfg.Redis.DB,
-		)
+		pingRedis(redisClient, logger, cfg.Redis.Address, cfg.Redis.DB)
 	}
 
 	// --- Authz client (csar-authz gRPC) ---
@@ -536,4 +536,25 @@ func run() error {
 
 	logger.Info("server stopped gracefully")
 	return nil
+}
+
+const redisStartupPingTimeout = 3 * time.Second
+
+// pingRedis surfaces a broken Redis at startup without failing boot: the
+// response cache fails open and redis throttles report their own errors.
+func pingRedis(client *redis.Client, logger *slog.Logger, address string, db int) {
+	ctx, cancel := context.WithTimeout(context.Background(), redisStartupPingTimeout)
+	defer cancel()
+	if err := client.Ping(redisx.WithSubsystem(ctx, redisx.SubsystemStartup)).Err(); err != nil {
+		logger.Warn("Redis for distributed router policies unreachable at startup; response cache will bypass and redis throttles will reject until it recovers",
+			"address", address,
+			"db", db,
+			"error", err,
+		)
+		return
+	}
+	logger.Info("Redis client for distributed router policies connected",
+		"address", address,
+		"db", db,
+	)
 }
