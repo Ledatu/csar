@@ -23,6 +23,10 @@ var inspectCmd = &cobra.Command{
 	Long: `Loads the configuration through the full include/merge/resolve pipeline
 and outputs the final resolved config that the router would apply at runtime.
 
+${VAR} references are expanded from this machine's environment and secrets
+are omitted, so the output is for reading only. Use compile to produce a
+config for S3, HTTP or manifest sources.
+
 Optionally filter to a single route with --route "METHOD /path".`,
 	Example: `  # Show full resolved config
   csar-helper inspect --config config.yaml

@@ -683,6 +683,16 @@ Shows the fully resolved config after all includes and policy merges, with sourc
 | `--route` | *(empty)* | Filter to a single route: `"METHOD /path"` |
 | `--format` | `yaml` | Output format: `yaml` or `json` |
 
+Values are expanded from the local environment and secrets are omitted, so the output is for reading, not for publishing.
+
+#### `csar-helper compile`
+
+Validates the config, merges all includes and resolves named policies into one YAML document for S3, HTTP or manifest config sources. `${VAR}` references, including secret fields, are kept as written, so every router expands them from its own environment when it loads the document.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--config` | `config.yaml` | Path to config file |
+
 #### `csar-helper simulate`
 
 Dry-runs route matching against your config without network requests.
