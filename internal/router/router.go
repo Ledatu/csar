@@ -22,6 +22,7 @@ import (
 	"github.com/ledatu/csar/internal/metrics"
 	"github.com/ledatu/csar/internal/proxy"
 	"github.com/ledatu/csar/internal/resilience"
+	"github.com/ledatu/csar/internal/routepattern"
 	"github.com/ledatu/csar/internal/telemetry"
 	"github.com/ledatu/csar/internal/tenant"
 	"github.com/ledatu/csar/internal/throttle"
@@ -55,6 +56,7 @@ type route struct {
 	method              string                     // HTTP method for this route (uppercase)
 	originalPath        string                     // the original path definition (e.g. "/api/v1/users/{id:[0-9]+}")
 	pathVarNames        []string                   // ordered variable names extracted from originalPath (e.g. ["id"])
+	specificity         routepattern.Specificity   // matching precedence among regex routes
 	jwtConfig           *authn.Config              // nil if no inbound JWT validation
 	jwtValidator        *authn.JWTValidator        // per-route ref to the validator for this route's TLS profile
 	sessionConfig       *authn.SessionConfig       // nil if no session-based validation

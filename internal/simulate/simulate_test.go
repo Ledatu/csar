@@ -96,3 +96,37 @@ func TestSimulate_ExactBeatsRegex(t *testing.T) {
 		t.Errorf("target = %q, want %q", result.TargetURL, "http://exact-backend")
 	}
 }
+
+func TestSimulate_MostPreciseRegexRouteWins(t *testing.T) {
+	cfg := &config.Config{Paths: map[string]config.PathConfig{
+		"/svc/wb/{marketplace}/{external_id}/finance/{rest:.*}": {
+			"post": config.RouteConfig{Backend: config.BackendConfig{TargetURL: "https://wide.example.com"}},
+		},
+		"/svc/wb/{marketplace}/{external_id}/finance/api/finance/v1/sales-reports/list": {
+			"post": config.RouteConfig{Backend: config.BackendConfig{TargetURL: "https://narrow.example.com"}},
+		},
+	}}
+
+	res := Simulate(cfg, Request{Method: "POST", Path: "/svc/wb/wb/4242/finance/api/finance/v1/sales-reports/list"})
+	if res.TargetURL != "https://narrow.example.com" {
+		t.Fatalf("matched %s (%s), want the sales-reports/list route", res.RoutePath, res.TargetURL)
+	}
+	res = Simulate(cfg, Request{Method: "POST", Path: "/svc/wb/wb/4242/finance/api/v1/balance"})
+	if res.TargetURL != "https://wide.example.com" {
+		t.Fatalf("matched %s (%s), want the finance/{rest:.*} route", res.RoutePath, res.TargetURL)
+	}
+}
+
+func TestSimulate_LiteralDotIsNotAWildcard(t *testing.T) {
+	cfg := &config.Config{Paths: map[string]config.PathConfig{
+		"/files/{name}.json": {
+			"get": config.RouteConfig{Backend: config.BackendConfig{TargetURL: "https://files.example.com"}},
+		},
+	}}
+	if res := Simulate(cfg, Request{Method: "GET", Path: "/files/reportXjson"}); res.Matched {
+		t.Fatalf("matched %s; a literal '.' must not match any character, as in the router", res.RoutePath)
+	}
+	if res := Simulate(cfg, Request{Method: "GET", Path: "/files/report.json"}); !res.Matched {
+		t.Fatal("expected /files/report.json to match")
+	}
+}

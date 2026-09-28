@@ -454,6 +454,23 @@ paths:
       max_response_size: 10485760               # 10MB — prevents DLP/retry buffer DoS
 ```
 
+### Route Matching Precedence
+
+A request is served by exactly one route, chosen the same way on every router and after every reload:
+
+1. **Exact path**: a path without `{...}` that equals the request path.
+2. **Path templates**: paths with `{var}` or `{var:regex}`, tried from the most precise to the widest. Two templates are compared segment by segment from the left; at the first segment where they differ, the more precise one wins:
+   1. a literal segment (`list`);
+   2. literal text mixed with variables (`v{version}`, `{id}.json`);
+   3. a regex-constrained variable (`{id:[0-9]+}`, `{report:list/goods|quarantine/goods}`);
+   4. a plain variable (`{id}`);
+   5. a variable whose regex can span segments (`{rest:.*}`).
+
+   Ties go to the template with more segments, then more literal characters, then the template text.
+3. **Longest prefix**: the longest path without `{...}` that is a prefix of the request path on a `/` boundary.
+
+So `/svc/wb/{marketplace}/{external_id}/finance/api/finance/v1/sales-reports/list` always wins over `/svc/wb/{marketplace}/{external_id}/finance/{rest:.*}` for that request, and the wide route serves the rest of `finance/`. `csar-helper simulate` uses the same order.
+
 ### KMS Configuration
 
 ```yaml

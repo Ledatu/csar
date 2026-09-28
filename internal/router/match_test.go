@@ -334,3 +334,49 @@ func TestRouter_PrefixStillMatchesWhenNoRegex(t *testing.T) {
 		t.Errorf("body = %q, want %q — prefix should match when no regex route exists", string(body), "prefix")
 	}
 }
+
+func TestRouter_MostPreciseRegexRouteWinsOnEveryBuild(t *testing.T) {
+	serve := func(name string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(name))
+		}))
+	}
+	narrow, wide := serve("narrow"), serve("wide")
+	defer narrow.Close()
+	defer wide.Close()
+
+	cfg := newTestConfig(map[string]config.PathConfig{
+		"/svc/wb/{marketplace}/{external_id}/finance/api/finance/v1/sales-reports/list": {
+			"post": config.RouteConfig{Backend: config.BackendConfig{TargetURL: narrow.URL}},
+		},
+		"/svc/wb/{marketplace}/{external_id}/finance/{rest:.*}": {
+			"post": config.RouteConfig{Backend: config.BackendConfig{TargetURL: wide.URL}},
+		},
+		"/svc/wb/{marketplace}/{external_id}/content/content/v2/get/cards/list": {
+			"post": config.RouteConfig{Backend: config.BackendConfig{TargetURL: narrow.URL}},
+		},
+		"/svc/wb/{marketplace}/{external_id}/content/{rest:.*}": {
+			"post": config.RouteConfig{Backend: config.BackendConfig{TargetURL: wide.URL}},
+		},
+	})
+
+	requests := map[string]string{
+		"/svc/wb/wb/4242/finance/api/finance/v1/sales-reports/list": "narrow",
+		"/svc/wb/wb/4242/finance/api/v1/balance":                    "wide",
+		"/svc/wb/wb/4242/content/content/v2/get/cards/list":         "narrow",
+		"/svc/wb/wb/4242/content/content/v2/cards/update":           "wide",
+	}
+	for build := 0; build < 40; build++ {
+		r, err := New(cfg, newTestLogger())
+		if err != nil {
+			t.Fatalf("New() error: %v", err)
+		}
+		for path, want := range requests {
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, nil))
+			if got := rec.Body.String(); got != want {
+				t.Fatalf("build %d: POST %s served by %q route, want %q", build, path, got, want)
+			}
+		}
+	}
+}

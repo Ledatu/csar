@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ledatu/csar/internal/config"
+	"github.com/ledatu/csar/internal/routepattern"
 )
 
 // Request describes a simulated inbound request.
@@ -48,11 +49,12 @@ type MiddlewareInfo struct {
 
 // compiledRoute is a pre-processed route for matching.
 type compiledRoute struct {
-	path    string
-	method  string
-	route   config.RouteConfig
-	isRegex bool
-	pattern *regexp.Regexp // non-nil for regex routes
+	path        string
+	method      string
+	route       config.RouteConfig
+	isRegex     bool
+	pattern     *regexp.Regexp // non-nil for regex routes
+	specificity routepattern.Specificity
 }
 
 // buildRouteTable pre-processes config paths into a deterministic sorted table,
@@ -70,9 +72,10 @@ func buildRouteTable(cfg *config.Config) (exact map[string]*compiledRoute, prefi
 				route:  route,
 			}
 
-			if strings.Contains(path, "{") {
+			if pattern, _, ok := routepattern.Compile(path); ok {
 				cr.isRegex = true
-				cr.pattern = patternToRegex(path)
+				cr.pattern = pattern
+				cr.specificity = routepattern.SpecificityOf(path)
 				regex = append(regex, cr)
 			} else {
 				// Exact-match key: "GET:/api/users"
@@ -89,9 +92,8 @@ func buildRouteTable(cfg *config.Config) (exact map[string]*compiledRoute, prefi
 		return len(prefix[i].path) > len(prefix[j].path)
 	})
 
-	// Sort regex routes by path for deterministic order
 	sort.Slice(regex, func(i, j int) bool {
-		return regex[i].path < regex[j].path
+		return regex[i].specificity.MorePreciseThan(regex[j].specificity)
 	})
 
 	return exact, prefix, regex
@@ -102,7 +104,7 @@ func buildRouteTable(cfg *config.Config) (exact map[string]*compiledRoute, prefi
 // Simulate runs a local route match against the config.
 // Matching precedence mirrors internal/router/match.go matchRoute:
 //  1. Exact key match
-//  2. Regex pattern match
+//  2. Regex pattern match, most precise template first
 //  3. Longest prefix match (path-boundary aware)
 func Simulate(cfg *config.Config, req Request) *MatchResult {
 	method := strings.ToUpper(req.Method)
@@ -159,24 +161,6 @@ func fillResult(result *MatchResult, cr *compiledRoute, matchType string) {
 	result.TargetURL = cr.route.Backend.TargetURL
 	result.IsRegex = cr.isRegex
 	result.MatchType = matchType
-}
-
-// ─── Path matching ─────────────────────────────────────────────────────────────
-
-func patternToRegex(pattern string) *regexp.Regexp {
-	// Convert {name:regex} patterns to regex groups
-	re := regexp.MustCompile(`\{[^}]*:([^}]+)\}`)
-	regexStr := "^" + re.ReplaceAllString(pattern, "($1)") + "$"
-
-	// Also handle simple {name} patterns (match any non-slash)
-	simple := regexp.MustCompile(`\{[^}:]+\}`)
-	regexStr = simple.ReplaceAllString(regexStr, "([^/]+)")
-
-	compiled, err := regexp.Compile(regexStr)
-	if err != nil {
-		return nil
-	}
-	return compiled
 }
 
 // ─── Middleware resolution ──────────────────────────────────────────────────────

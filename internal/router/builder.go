@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/ledatu/csar/internal/proxy"
 	"github.com/ledatu/csar/internal/resilience"
 	"github.com/ledatu/csar/internal/retry"
+	"github.com/ledatu/csar/internal/routepattern"
 	"github.com/ledatu/csar/internal/tenant"
 	"github.com/ledatu/csar/internal/throttle"
 )
@@ -106,6 +108,9 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 			return nil, err
 		}
 	}
+	sort.Slice(r.regexRoutes, func(i, j int) bool {
+		return r.regexRoutes[i].specificity.MorePreciseThan(r.regexRoutes[j].specificity)
+	})
 
 	return r, nil
 }
@@ -150,9 +155,10 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 	}
 
 	// Compile regex path pattern if path contains {var:regex} segments.
-	if pat, varNames, hasRegex := compilePathPattern(fr.Path); hasRegex {
+	if pat, varNames, hasRegex := routepattern.Compile(fr.Path); hasRegex {
 		rt.pathPattern = pat
 		rt.pathVarNames = varNames
+		rt.specificity = routepattern.SpecificityOf(fr.Path)
 		if fr.Route.Backend.PathRewrite != "" {
 			rt.pathRewrite = fr.Route.Backend.PathRewrite
 		}
