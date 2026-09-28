@@ -265,6 +265,41 @@ paths:
 	}
 }
 
+func TestLoad_VIPOverridePolicyPathPlaceholders(t *testing.T) {
+	yaml := `
+listen_addr: ":8080"
+
+redis:
+  address: "redis.internal:6379"
+
+throttling_policies:
+  vip:
+    rate: 10
+    burst: 10
+    backend: "redis"
+    key: "vip:{path.seller}"
+
+paths:
+  /ext/{tenant}/items:
+    get:
+      x-csar-backend:
+        target_url: "https://items.example.com"
+      x-csar-traffic:
+        rps: 1
+        burst: 1
+        backend: "redis"
+        key: "items:{path.tenant}"
+        vip_overrides:
+          - header: "X-Tier"
+            values:
+              gold: "vip"
+`
+	_, err := Load(writeTemp(t, yaml))
+	if err == nil || !strings.Contains(err.Error(), "{path.seller}") {
+		t.Fatalf("VIP policy with an undeclared path variable must be rejected, got: %v", err)
+	}
+}
+
 func TestLoad_ThrottlePolicyExcludeIPs(t *testing.T) {
 	yaml := `
 listen_addr: ":8080"

@@ -342,6 +342,10 @@ func (m *Middleware) suspend(r *http.Request, d time.Duration) {
 // Unix timestamps (GitHub and similar).
 const epochThreshold = 1_000_000_000
 
+// maxUpstreamWait bounds an upstream-dictated wait, so a garbage or hostile
+// header cannot suspend a bucket for years or overflow time.Duration.
+const maxUpstreamWait = 24 * time.Hour
+
 // extractWaitTime reads the wait duration from upstream response headers.
 // Checks headers in the order specified by RespectHeaders.
 // Supports:
@@ -349,6 +353,10 @@ const epochThreshold = 1_000_000_000
 //     allowed, or HTTP-date (RFC 7231)
 //   - X-RateLimit-Reset: seconds from now, or a Unix timestamp (epoch seconds)
 func (m *Middleware) extractWaitTime(headers http.Header) time.Duration {
+	return min(m.rawWaitTime(headers), maxUpstreamWait)
+}
+
+func (m *Middleware) rawWaitTime(headers http.Header) time.Duration {
 	for _, h := range m.cfg.RespectHeaders {
 		val := strings.TrimSpace(headers.Get(h))
 		if val == "" {
@@ -372,7 +380,7 @@ func (m *Middleware) extractWaitTime(headers http.Header) time.Duration {
 
 		seconds, err := strconv.ParseFloat(val, 64)
 		if err == nil && seconds > 0 && !math.IsInf(seconds, 1) {
-			return time.Duration(seconds * float64(time.Second))
+			return time.Duration(min(seconds, maxUpstreamWait.Seconds()) * float64(time.Second))
 		}
 
 		// Retry-After: HTTP-date (RFC 7231 / RFC 1123)

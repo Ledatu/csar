@@ -299,6 +299,9 @@ func (r *Router) writeThrottleUnavailable(w http.ResponseWriter, req *http.Reque
 //
 // csar-ts protocol: The router emits X-CSAR-Status and X-CSAR-Wait-MS headers
 // so the csar-ts client SDK can distinguish throttle vs circuit-breaker vs success.
+// On a throttled 503 X-CSAR-Wait-MS is the wait the SDK should apply before
+// retrying (SDKs prefer it over Retry-After); on success it is the time the
+// request spent queued.
 // See: https://github.com/ledatu/csar-ts
 func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *route) {
 	var totalWait time.Duration
@@ -348,7 +351,7 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 			retryAfterSec := globalT.EstimateRetryAfter()
 			w.Header().Set("X-CSAR-Status", "throttled")
 			w.Header().Set("Retry-After", strconv.Itoa(retryAfterSec))
-			w.Header().Set("X-CSAR-Wait-MS", strconv.FormatInt(time.Since(waitStart).Milliseconds(), 10))
+			w.Header().Set("X-CSAR-Wait-MS", strconv.Itoa(retryAfterSec*1000))
 			if r.metrics != nil {
 				r.metrics.RecordSDKThrottled(rt.routeKey, "throttled")
 			}
@@ -440,7 +443,7 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 				}
 				w.Header().Set("X-CSAR-Status", "throttled")
 				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-				w.Header().Set("X-CSAR-Wait-MS", strconv.FormatInt(waitDur.Milliseconds(), 10))
+				w.Header().Set("X-CSAR-Wait-MS", strconv.FormatInt(retryAfterMS, 10))
 				if r.metrics != nil {
 					r.metrics.RecordSDKThrottled(rt.routeKey, "throttled")
 				}

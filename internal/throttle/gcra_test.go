@@ -129,3 +129,20 @@ func TestRedisThrottler_SuspendsWholeRoute(t *testing.T) {
 		t.Errorf("Key = %q, want the route key", next.Key)
 	}
 }
+
+func TestThrottleManager_UpdateQuotaLeavesDistributedBucketsAlone(t *testing.T) {
+	client := newMiniRedis(t)
+	m := NewManager()
+	dt := NewDynamicThrottler(client, "t:", "k:{path.tenant}", 1.0/20, 3, 0)
+	m.RegisterWaiter("GET:/ext/{tenant}/items", dt)
+	m.RegisterWaiter("GET:/static", NewRedisThrottler(client, "t:", "GET:/static", 1, 1, 0))
+
+	if m.UpdateQuota("GET:/ext/{tenant}/items", 1.0/60, 1) || m.UpdateQuota("GET:/static", 0.3, 1) {
+		t.Fatal("UpdateQuota reported applying a per-router share to a distributed bucket")
+	}
+	for i := 0; i < 3; i++ {
+		if err := waitFor(dt, requestFor("a")); err != nil {
+			t.Fatalf("burst %d after ignored quota: %v", i, err)
+		}
+	}
+}

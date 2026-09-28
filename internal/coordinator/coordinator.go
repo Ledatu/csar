@@ -382,7 +382,7 @@ func (c *Coordinator) sendQuotaAssignment(_ string, stream csarv1.CoordinatorSer
 
 	quotas := make(map[string]*csarv1.RouteQuota)
 	for i := range routes {
-		if routes[i].Route.Traffic != nil {
+		if routes[i].Route.Traffic != nil && routes[i].Route.Traffic.Backend != "redis" {
 			burst := routes[i].Route.Traffic.Burst / activeRouters
 			if burst > math.MaxInt32 {
 				burst = math.MaxInt32

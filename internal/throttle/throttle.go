@@ -292,11 +292,18 @@ func (m *ThrottleManager) Get(key string) Waiter {
 // Called by the coordinator client when quota assignments change.
 // If the route key does not exist, the update is silently ignored
 // (the route may not have traffic shaping configured).
+//
+// Distributed throttlers (Redis, dynamic-key) already enforce one global
+// bucket, so a per-router share would divide their limit by the router count;
+// quotas for them are ignored.
 func (m *ThrottleManager) UpdateQuota(key string, rps float64, burst int) bool {
 	m.mu.RLock()
 	t, ok := m.throttlers[key]
 	m.mu.RUnlock()
 	if !ok {
+		return false
+	}
+	if _, distributed := t.(RequestSuspendable); distributed {
 		return false
 	}
 	t.UpdateLimit(rps, burst)

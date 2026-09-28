@@ -447,3 +447,50 @@ func TestCacheConfigFullSnapshotRoundTrip(t *testing.T) {
 		t.Fatalf("enabled: %v", got.Enabled)
 	}
 }
+
+func TestCoordinator_Subscribe_NoQuotaForRedisBackedRoutes(t *testing.T) {
+	client, coord, cleanup := testEnv(t)
+	defer cleanup()
+
+	err := coord.store.PutRoute(context.Background(), statestore.RouteEntry{
+		ID:     "GET:/ext/{tenant}/items",
+		Path:   "/ext/{tenant}/items",
+		Method: "GET",
+		Route: config.RouteConfig{
+			Backend: config.BackendConfig{TargetURL: "http://upstream:8080"},
+			Traffic: &config.TrafficConfig{
+				RPS:     0.05,
+				Burst:   3,
+				Backend: "redis",
+				Key:     "items:{path.tenant}",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("PutRoute: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stream, err := client.Subscribe(ctx, &csarv1.SubscribeRequest{
+		RouterId:      "router-test-redis",
+		RouterAddress: "127.0.0.1:9000",
+	})
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	if _, err := stream.Recv(); err != nil {
+		t.Fatalf("Recv snapshot: %v", err)
+	}
+	msg, err := stream.Recv()
+	if err != nil {
+		t.Fatalf("Recv quota: %v", err)
+	}
+	quotas := msg.GetQuotaAssignment().GetQuotas()
+	if _, ok := quotas["GET:/api/v1"]; !ok {
+		t.Error("local route lost its quota")
+	}
+	if q, ok := quotas["GET:/ext/{tenant}/items"]; ok {
+		t.Errorf("redis-backed route got a per-router share %v; its bucket is already global", q)
+	}
+}

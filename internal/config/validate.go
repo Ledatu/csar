@@ -621,9 +621,14 @@ func (c *Config) Validate() error {
 						return fmt.Errorf("path %s method %s: x-csar-traffic.vip_overrides[].header is required", path, method)
 					}
 					for val, policyName := range vip.Values {
-						if _, ok := c.ThrottlingPolicies[policyName]; !ok {
+						policy, ok := c.ThrottlingPolicies[policyName]
+						if !ok {
 							return fmt.Errorf("path %s method %s: vip_override header %q value %q references unknown policy %q",
 								path, method, vip.Header, val, policyName)
+						}
+						if name, ok := unknownPathPlaceholder(policy.Key, path); !ok {
+							return fmt.Errorf("path %s method %s: vip_override policy %q key uses {path.%s}, which is not a variable of this path",
+								path, method, policyName, name)
 						}
 					}
 				}
@@ -713,7 +718,6 @@ func validateBackendPool(name string, pool BackendPoolConfig) error {
 	return nil
 }
 
-// validateCIDROrIP checks that a string is a valid CIDR range or IP address.
 var (
 	keyPathPlaceholderRe = regexp.MustCompile(`\{path\.([^}]+)\}`)
 	routePathVarRe       = regexp.MustCompile(`\{([^}:]+)(?::[^}]*)?\}`)
@@ -735,6 +739,7 @@ func unknownPathPlaceholder(key, routePath string) (string, bool) {
 	return "", true
 }
 
+// validateCIDROrIP checks that a string is a valid CIDR range or IP address.
 func validateCIDROrIP(s string) error {
 	// Try parsing as CIDR first (e.g. "10.0.0.0/24", "::1/128")
 	if strings.Contains(s, "/") {

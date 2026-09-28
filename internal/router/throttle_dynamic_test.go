@@ -76,6 +76,10 @@ func TestRouter_PathKeyedThrottle_PausesOnlyTheTenantThatGot429(t *testing.T) {
 	if ra, _ := strconv.Atoi(rec.Header().Get("Retry-After")); ra < 29 || ra > 30 {
 		t.Errorf("Retry-After = %q, want the remaining suspension (~30s)", rec.Header().Get("Retry-After"))
 	}
+	if ms, _ := strconv.Atoi(rec.Header().Get("X-CSAR-Wait-MS")); ms < 29000 || ms > 30000 {
+		t.Errorf("X-CSAR-Wait-MS = %q, want the wait SDKs should apply (~30000), not the time queued",
+			rec.Header().Get("X-CSAR-Wait-MS"))
+	}
 	var body struct {
 		RetryAfterMS int64 `json:"retry_after_ms"`
 	}

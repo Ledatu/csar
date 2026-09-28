@@ -36,6 +36,8 @@ func TestExtractWaitTime(t *testing.T) {
 		{"header order wins", http.Header{"X-Ratelimit-Retry": {"3"}, "Retry-After": {"60"}}, 3 * time.Second, 3 * time.Second},
 		{"garbage falls through", http.Header{"X-Ratelimit-Retry": {"soon"}, "Retry-After": {"4"}}, 4 * time.Second, 4 * time.Second},
 		{"nothing usable", http.Header{"X-Ratelimit-Reset": {"0"}}, 0, 0},
+		{"absurd seconds are clamped", http.Header{"Retry-After": {"1e300"}}, maxUpstreamWait, maxUpstreamWait},
+		{"far epoch is clamped", http.Header{"X-Ratelimit-Reset": {"99999999999"}}, maxUpstreamWait, maxUpstreamWait},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

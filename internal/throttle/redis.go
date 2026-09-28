@@ -91,8 +91,7 @@ type RetryAfterError struct {
 }
 
 func (e *RetryAfterError) Error() string {
-	return fmt.Sprintf("queue timeout exceeded (%s): rate limit reached for key %q, next slot in %s",
-		e.MaxWait, e.Key, e.Wait)
+	return fmt.Sprintf("queue timeout exceeded (%s): rate limit reached, next slot in %s", e.MaxWait, e.Wait)
 }
 
 type gcraParams struct {
