@@ -23,6 +23,7 @@ import (
 	"bytes"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -254,15 +255,7 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// Step 1: Suspend the token bucket.
-	if m.cfg.SuspendBucket && waitDur > 0 && m.throttler != nil {
-		if s, ok := m.throttler.(throttle.Suspendable); ok {
-			s.SuspendFor(waitDur)
-			m.logger.Info("token bucket suspended due to upstream backpressure",
-				"duration", waitDur,
-				"route", r.URL.Path,
-			)
-		}
-	}
+	m.suspend(r, waitDur)
 
 	// Step 2: Transparent retry (if enabled and within max wait).
 	if m.cfg.AutoRetry && waitDur > 0 && waitDur <= m.cfg.MaxInternalWait {
@@ -295,11 +288,7 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			)
 			// Extend suspension if the retry also 429'd.
 			retryWait := m.extractWaitTime(retryPW.headers429)
-			if m.cfg.SuspendBucket && retryWait > 0 && m.throttler != nil {
-				if s, ok := m.throttler.(throttle.Suspendable); ok {
-					s.SuspendFor(retryWait)
-				}
-			}
+			m.suspend(r, retryWait)
 			// Convert the 429 into a csar-ts-compatible 503.
 			writeThrottledResponse(w, r, retryWait, m.throttler)
 			return
@@ -323,37 +312,67 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// suspend holds the route's bucket back for d. Distributed throttlers are
+// asked per request, so a dynamic-key route only pauses the entity whose
+// upstream answered 429.
+func (m *Middleware) suspend(r *http.Request, d time.Duration) {
+	if !m.cfg.SuspendBucket || d <= 0 || m.throttler == nil {
+		return
+	}
+	switch s := m.throttler.(type) {
+	case throttle.RequestSuspendable:
+		if err := s.SuspendRequestFor(r, d); err != nil {
+			m.logger.Warn("backpressure: bucket suspension failed",
+				"error", err, "duration", d, "route", r.URL.Path)
+			return
+		}
+	case throttle.Suspendable:
+		s.SuspendFor(d)
+	default:
+		return
+	}
+	m.logger.Info("token bucket suspended due to upstream backpressure",
+		"duration", d,
+		"route", r.URL.Path,
+	)
+}
+
+// epochThreshold separates X-RateLimit-Reset flavours: values below it are
+// seconds from now (IETF RateLimit draft, Wildberries), values above it are
+// Unix timestamps (GitHub and similar).
+const epochThreshold = 1_000_000_000
+
 // extractWaitTime reads the wait duration from upstream response headers.
 // Checks headers in the order specified by RespectHeaders.
 // Supports:
-//   - Retry-After: integer seconds or HTTP-date (RFC 7231)
-//   - X-RateLimit-Reset: Unix timestamp (epoch seconds)
+//   - Retry-After and similar (e.g. X-RateLimit-Retry): seconds, fractional
+//     allowed, or HTTP-date (RFC 7231)
+//   - X-RateLimit-Reset: seconds from now, or a Unix timestamp (epoch seconds)
 func (m *Middleware) extractWaitTime(headers http.Header) time.Duration {
 	for _, h := range m.cfg.RespectHeaders {
-		val := headers.Get(h)
+		val := strings.TrimSpace(headers.Get(h))
 		if val == "" {
 			continue
 		}
 
 		lowerH := strings.ToLower(h)
 
-		// X-RateLimit-Reset: Unix epoch timestamp
 		if lowerH == "x-ratelimit-reset" {
-			epoch, err := strconv.ParseInt(val, 10, 64)
-			if err == nil {
-				resetTime := time.Unix(epoch, 0)
-				d := time.Until(resetTime)
-				if d > 0 {
+			n, err := strconv.ParseInt(val, 10, 64)
+			if err == nil && n > 0 && n < epochThreshold {
+				return time.Duration(n) * time.Second
+			}
+			if err == nil && n >= epochThreshold {
+				if d := time.Until(time.Unix(n, 0)); d > 0 {
 					return d
 				}
 			}
 			continue
 		}
 
-		// Retry-After: integer seconds
-		seconds, err := strconv.Atoi(val)
-		if err == nil && seconds > 0 {
-			return time.Duration(seconds) * time.Second
+		seconds, err := strconv.ParseFloat(val, 64)
+		if err == nil && seconds > 0 && !math.IsInf(seconds, 1) {
+			return time.Duration(seconds * float64(time.Second))
 		}
 
 		// Retry-After: HTTP-date (RFC 7231 / RFC 1123)

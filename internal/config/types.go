@@ -678,8 +678,10 @@ type TrafficConfig struct {
 	Backend string `yaml:"backend,omitempty" json:"backend,omitempty"`
 
 	// Key is a dynamic throttle key template for per-entity rate limiting.
-	// Uses placeholders like {query.seller_id} or {header.X-API-Key}.
-	// When set, each unique resolved key gets its own rate limiter (requires Redis backend).
+	// Uses placeholders like {query.seller_id}, {header.X-API-Key} or
+	// {path.external_id}. When set, each unique resolved key gets its own rate
+	// limiter (requires Redis backend), and adaptive backpressure suspends
+	// only the key of the request that received the upstream 429.
 	Key string `yaml:"key,omitempty" json:"key,omitempty"`
 
 	// ExcludeIPs is a list of IPs/CIDRs that bypass this route's throttle entirely.
@@ -742,7 +744,7 @@ type ThrottlingPolicy struct {
 	Backend string `yaml:"backend,omitempty" json:"backend,omitempty"`
 
 	// Key is a dynamic throttle key template for per-entity rate limiting.
-	// Uses placeholders: {query.seller_id}, {header.X-API-Key}.
+	// Uses placeholders: {query.seller_id}, {header.X-API-Key}, {path.external_id}.
 	Key string `yaml:"key,omitempty" json:"key,omitempty"`
 
 	// ExcludeIPs is a list of IPs/CIDRs that bypass this throttle entirely.

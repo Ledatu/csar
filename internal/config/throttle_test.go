@@ -234,6 +234,37 @@ paths:
 	}
 }
 
+func TestLoad_DynamicKeyPathPlaceholders(t *testing.T) {
+	const tmpl = `
+listen_addr: ":8080"
+
+redis:
+  address: "redis.internal:6379"
+
+throttling_policies:
+  per-cabinet:
+    rate: 0.05
+    burst: 1
+    max_wait: "2s"
+    backend: "redis"
+    key: "search-report:{path.%s}"
+
+paths:
+  /ext/wb/{marketplace}/{external_id}/analytics/api/v2/search-report/{rest:.*}:
+    post:
+      x-csar-backend:
+        target_url: "https://seller-analytics-api.wildberries.ru"
+      x-csar-traffic: "per-cabinet"
+`
+	if _, err := Load(writeTemp(t, strings.Replace(tmpl, "%s", "external_id", 1))); err != nil {
+		t.Fatalf("declared path variable rejected: %v", err)
+	}
+	_, err := Load(writeTemp(t, strings.Replace(tmpl, "%s", "seller", 1)))
+	if err == nil || !strings.Contains(err.Error(), "{path.seller}") {
+		t.Fatalf("undeclared path variable must be rejected, got: %v", err)
+	}
+}
+
 func TestLoad_ThrottlePolicyExcludeIPs(t *testing.T) {
 	yaml := `
 listen_addr: ":8080"

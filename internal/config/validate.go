@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/textproto"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -598,6 +599,10 @@ func (c *Config) Validate() error {
 					return fmt.Errorf("path %s method %s: x-csar-traffic.key requires backend \"redis\" (dynamic keys are distributed by nature)",
 						path, method)
 				}
+				if name, ok := unknownPathPlaceholder(route.Traffic.Key, path); !ok {
+					return fmt.Errorf("path %s method %s: x-csar-traffic.key uses {path.%s}, which is not a variable of this path",
+						path, method, name)
+				}
 			}
 
 			// Validate exclude_ips entries.
@@ -709,6 +714,27 @@ func validateBackendPool(name string, pool BackendPoolConfig) error {
 }
 
 // validateCIDROrIP checks that a string is a valid CIDR range or IP address.
+var (
+	keyPathPlaceholderRe = regexp.MustCompile(`\{path\.([^}]+)\}`)
+	routePathVarRe       = regexp.MustCompile(`\{([^}:]+)(?::[^}]*)?\}`)
+)
+
+// unknownPathPlaceholder reports the first {path.name} in key that the route
+// path does not declare; an unresolved one would silently collapse every
+// entity into a single "_unknown_" bucket.
+func unknownPathPlaceholder(key, routePath string) (string, bool) {
+	declared := map[string]bool{}
+	for _, m := range routePathVarRe.FindAllStringSubmatch(routePath, -1) {
+		declared[m[1]] = true
+	}
+	for _, m := range keyPathPlaceholderRe.FindAllStringSubmatch(key, -1) {
+		if !declared[m[1]] {
+			return m[1], false
+		}
+	}
+	return "", true
+}
+
 func validateCIDROrIP(s string) error {
 	// Try parsing as CIDR first (e.g. "10.0.0.0/24", "::1/128")
 	if strings.Contains(s, "/") {

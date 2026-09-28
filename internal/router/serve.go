@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -421,16 +422,21 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 					"error", err,
 				)
 				// csar-ts protocol: X-CSAR-Status: throttled + Retry-After.
-				// Compute Retry-After from the active throttler's real state
-				// (rate, queue depth, suspension). Falls back to max_wait config.
-				retryAfter := 1
-				if est, ok := activeThrottler.(throttle.RetryEstimator); ok {
-					retryAfter = est.EstimateRetryAfter()
+				// GCRA throttlers report the exact distance to the key's next
+				// slot; otherwise estimate from the throttler's real state
+				// (rate, queue depth, suspension), falling back to max_wait.
+				retryAfterMS := int64(1000)
+				var nextSlot *throttle.RetryAfterError
+				if errors.As(err, &nextSlot) {
+					retryAfterMS = nextSlot.Wait.Milliseconds()
+				} else if est, ok := activeThrottler.(throttle.RetryEstimator); ok {
+					retryAfterMS = int64(est.EstimateRetryAfter()) * 1000
 				} else if rt.config.Traffic != nil && rt.config.Traffic.MaxWait.Duration > 0 {
-					retryAfter = int(rt.config.Traffic.MaxWait.Seconds())
-					if retryAfter < 1 {
-						retryAfter = 1
-					}
+					retryAfterMS = rt.config.Traffic.MaxWait.Milliseconds()
+				}
+				retryAfter := int(math.Ceil(float64(retryAfterMS) / 1000))
+				if retryAfter < 1 {
+					retryAfter = 1
 				}
 				w.Header().Set("X-CSAR-Status", "throttled")
 				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
@@ -439,7 +445,7 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 					r.metrics.RecordSDKThrottled(rt.routeKey, "throttled")
 				}
 				apierror.New(apierror.CodeThrottled, http.StatusServiceUnavailable,
-					"service temporarily unavailable").WithRetryAfterMS(int64(retryAfter) * 1000).
+					"service temporarily unavailable").WithRetryAfterMS(retryAfterMS).
 					WithDetail(err.Error()).WithRequestID(r.requestID(req)).Write(w)
 				return
 			}

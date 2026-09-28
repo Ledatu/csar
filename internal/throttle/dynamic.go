@@ -2,7 +2,6 @@ package throttle
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -11,10 +10,13 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/ledatu/csar/pkg/middleware/authzmw"
 )
 
 // Compile-time check: DynamicThrottler satisfies Waiter.
 var _ Waiter = (*DynamicThrottler)(nil)
+var _ RequestSuspendable = (*DynamicThrottler)(nil)
 
 // requestContextKey is the context key type for storing the HTTP request.
 type requestContextKey struct{}
@@ -48,8 +50,9 @@ func originalQueryFromContext(ctx context.Context) url.Values {
 	return v
 }
 
-// placeholderPattern matches {query.param} and {header.Header-Name} placeholders.
-var placeholderPattern = regexp.MustCompile(`\{(query|header)\.([^}]+)\}`)
+// placeholderPattern matches {query.param}, {header.Header-Name} and
+// {path.var} placeholders.
+var placeholderPattern = regexp.MustCompile(`\{(query|header|path)\.([^}]+)\}`)
 
 // DynamicThrottler implements per-entity rate limiting using dynamic key templates.
 // Each unique resolved key gets its own Redis GCRA rate limiter.
@@ -97,53 +100,17 @@ func (dt *DynamicThrottler) Wait(ctx context.Context) error {
 	dt.waiting.Add(1)
 	defer dt.waiting.Add(-1)
 
-	// Resolve the dynamic key from the request
-	req := requestFromContext(ctx)
-	resolvedKey := dt.resolveKey(req)
-	key := dt.keyPrefix + resolvedKey
+	resolvedKey := dt.resolveKey(requestFromContext(ctx))
+	return gcraWait(ctx, dt.client, dt.script, dt.keyPrefix+resolvedKey, resolvedKey,
+		newGCRAParams(dt.rps, dt.burst), dt.maxWait)
+}
 
-	// GCRA parameters in milliseconds
-	emissionIntervalMS := int64(1000.0 / dt.rps)
-	if emissionIntervalMS < 1 {
-		emissionIntervalMS = 1
-	}
-	burstOffsetMS := emissionIntervalMS * int64(dt.burst)
-	maxWaitMS := dt.maxWait.Milliseconds()
-
-	deadline := time.Now().Add(dt.maxWait)
-
-	for {
-		if ctx.Err() != nil {
-			return fmt.Errorf("client cancelled: %w", ctx.Err())
-		}
-
-		result, err := runGCRA(ctx, dt.client, dt.script, key, emissionIntervalMS, burstOffsetMS, maxWaitMS)
-		if err != nil {
-			return err
-		}
-
-		switch {
-		case result == 0:
-			return nil
-		case result == -1:
-			return fmt.Errorf("queue timeout exceeded (%s): rate limit reached for key %q", dt.maxWait, resolvedKey)
-		case result > 0:
-			parkDuration := time.Duration(result) * time.Millisecond
-			remaining := time.Until(deadline)
-			if remaining <= 0 {
-				return fmt.Errorf("queue timeout exceeded (%s): rate limit reached for key %q", dt.maxWait, resolvedKey)
-			}
-			if parkDuration > remaining {
-				parkDuration = remaining
-			}
-			select {
-			case <-ctx.Done():
-				return fmt.Errorf("client cancelled: %w", ctx.Err())
-			case <-time.After(parkDuration):
-				continue
-			}
-		}
-	}
+// SuspendRequestFor holds back only the key that r resolves to, so an
+// upstream 429 for one entity does not pause the others.
+func (dt *DynamicThrottler) SuspendRequestFor(r *http.Request, d time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), suspendTimeout)
+	defer cancel()
+	return gcraSuspend(ctx, dt.client, dt.keyPrefix+dt.resolveKey(r), newGCRAParams(dt.rps, dt.burst), d)
 }
 
 // Waiting returns the number of requests currently waiting.
@@ -160,6 +127,7 @@ func (dt *DynamicThrottler) UpdateLimit(rps float64, burst int) {
 // resolveKey replaces placeholders in the key template with values from the request.
 // {query.param} → URL query parameter value
 // {header.Name} → HTTP header value
+// {path.var}    → route path variable, as captured before path rewriting
 // Unresolved placeholders are replaced with "_unknown_".
 //
 // For {query.*} lookups, resolveKey first checks for a pre-strip query snapshot
@@ -196,6 +164,12 @@ func (dt *DynamicThrottler) resolveKey(req *http.Request) string {
 			return sanitizeKeyPart(v)
 		case "header":
 			v := req.Header.Get(name)
+			if v == "" {
+				return "_unknown_"
+			}
+			return sanitizeKeyPart(v)
+		case "path":
+			v := authzmw.PathVarsFromContext(req.Context())[name]
 			if v == "" {
 				return "_unknown_"
 			}

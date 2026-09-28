@@ -54,9 +54,9 @@ Each request passes through these stages in order:
 | Area | Details |
 |---|---|
 | **Credential Injection** | Fetch encrypted tokens (file or gRPC AuthService), decrypt via KMS, inject into upstream headers. Supports multi-credential, dynamic per-account resolution (`{query.param}`, `{header.Name}`), and `Bearer {token}` / custom formats. |
-| **Rate Limiting** | Per-route token-bucket throttling with `rps`, `burst`, and `max_wait`. Three backends: local (in-memory), Redis (distributed GCRA), or coordinator (dynamic quota assignment). Supports dynamic per-entity keys and VIP overrides. |
+| **Rate Limiting** | Per-route token-bucket throttling with `rps`, `burst`, and `max_wait`. Three backends: local (in-memory), Redis (distributed GCRA), or coordinator (dynamic quota assignment). Supports dynamic per-entity keys (`{query.*}`, `{header.*}`, `{path.*}`) and VIP overrides. |
 | **Global Throttle** | Safety-net rate limit applied to all routes before per-route throttle. Fast in-memory atomic counter prevents runaway traffic. |
-| **Adaptive Backpressure** | Reads upstream `Retry-After` / `X-RateLimit-Reset` headers from 429 responses and suspends the token bucket accordingly. |
+| **Adaptive Backpressure** | Reads upstream wait headers (`Retry-After`, `X-RateLimit-Reset` as seconds or epoch, or any configured header such as `X-Ratelimit-Retry`) from 429 responses and suspends the token bucket accordingly — on Redis backends only the key of the entity that got the 429. |
 | **Circuit Breaking** | Named profiles with configurable failure thresholds, intervals, and recovery timeouts. |
 | **Load Balancing** | Round-robin and random strategies across multiple upstream targets. Active health checking (HTTP/TCP) with configurable thresholds automatically removes unhealthy targets. |
 | **CORS** | Per-route Cross-Origin Resource Sharing with O(1) origin lookups and automatic OPTIONS preflight short-circuiting. |
@@ -410,7 +410,7 @@ paths:
         burst: 10
         max_wait: "30s"
         backend: "local"                        # "local", "redis", or "coordinator"
-        key: "seller:{query.seller_id}"         # per-entity rate limiting
+        key: "seller:{query.seller_id}"         # per-entity rate limiting ({query.*}, {header.*}, {path.*})
         vip_overrides:                          # header-based policy switching
           - header: "X-API-Key"
             values:

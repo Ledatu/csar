@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,6 +33,14 @@ type Waiter interface {
 type Suspendable interface {
 	SuspendFor(d time.Duration)
 }
+
+// RequestSuspendable is the per-request variant of Suspendable for
+// distributed throttlers: the request selects which bucket to hold back.
+type RequestSuspendable interface {
+	SuspendRequestFor(r *http.Request, d time.Duration) error
+}
+
+const suspendTimeout = 2 * time.Second
 
 // RetryEstimator is an optional interface for throttlers that can compute
 // a meaningful Retry-After value from their real internal state (rate,
