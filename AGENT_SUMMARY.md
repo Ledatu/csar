@@ -25,6 +25,13 @@ and internal admin surfaces.
 - Config loading supports file, S3, and HTTP sources with profile validation.
 - KMS-backed token injection and coordinator-driven quota/token sync are core
   prod flows.
+- Each router holds one coordinator `Subscribe` stream through HAProxy, which
+  closes connections idle for 2 minutes. The coordinator's gRPC keepalive
+  (`--grpc-keepalive-time`) keeps the stream open. A reconnect replays the
+  current snapshot, and the router skips rebuilding when it is unchanged.
+- Path templates match from the most precise to the widest
+  (`internal/routepattern`), identically on every router build and in
+  `csar-helper simulate`.
 - Readiness and health sidecars are part of the operational contract.
 
 ## Config And Secrets

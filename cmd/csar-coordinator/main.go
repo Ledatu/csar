@@ -93,6 +93,9 @@ func main() {
 	invalidationBufferSize := flag.Int("invalidation-buffer-size", 1000, "number of token invalidation events to buffer for replay on router reconnect (minimum: 100)")
 
 	healthListen := flag.String("health-listen", "", "plain HTTP health probe listen address (e.g. :9190)")
+	keepaliveTime := flag.Duration("grpc-keepalive-time", coordinator.DefaultKeepaliveTime, "ping a gRPC connection after this long without activity; keeps router streams alive through idle-closing proxies")
+	keepaliveTimeout := flag.Duration("grpc-keepalive-timeout", coordinator.DefaultKeepaliveTimeout, "close a gRPC connection whose keepalive ping is not acknowledged within this time")
+	snapshotDebounce := flag.Duration("snapshot-debounce", coordinator.DefaultSnapshotDebounce, "wait until route changes have been quiet this long before pushing one config snapshot (0 pushes on every change)")
 
 	// Config source flags — load route configuration from file, S3, HTTP, or manifest.
 	cfgFlags := configload.NewSourceFlags()
@@ -140,6 +143,15 @@ func main() {
 		"store", *storeType,
 	)
 
+	if *keepaliveTime <= 0 || *keepaliveTimeout <= 0 || *snapshotDebounce < 0 {
+		logger.Error("--grpc-keepalive-time and --grpc-keepalive-timeout must be positive and --snapshot-debounce must not be negative",
+			"grpc_keepalive_time", *keepaliveTime,
+			"grpc_keepalive_timeout", *keepaliveTimeout,
+			"snapshot_debounce", *snapshotDebounce,
+		)
+		os.Exit(1)
+	}
+
 	// Initialize state store
 	var store statestore.StateStore
 	switch *storeType {
@@ -175,6 +187,7 @@ func main() {
 	// Create coordinator (before config watcher so we can wire the OnConfigParsed callback).
 	coord := coordinator.New(store, logger)
 	coord.SetInvalidationBufferSize(*invalidationBufferSize)
+	coord.SetSnapshotDebounce(*snapshotDebounce)
 
 	// Initialize config source watcher (loads route configuration into StateStore).
 	var configWatcher *configsource.ConfigWatcher
@@ -503,6 +516,16 @@ func main() {
 		store.Close()
 		os.Exit(1)
 	}
+
+	serverOpts = append(serverOpts, coordinator.ServerKeepalive{
+		Time:    *keepaliveTime,
+		Timeout: *keepaliveTimeout,
+	}.ServerOptions()...)
+	logger.Info("gRPC keepalive configured",
+		"time", *keepaliveTime,
+		"timeout", *keepaliveTimeout,
+		"snapshot_debounce", *snapshotDebounce,
+	)
 
 	// Set up gRPC server
 	srv := grpc.NewServer(serverOpts...)

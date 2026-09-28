@@ -8,8 +8,8 @@ package coordclient
 
 import (
 	"context"
+	"crypto/sha256"
 	"log/slog"
-	"math"
 	"time"
 
 	"github.com/ledatu/csar/internal/config"
@@ -17,6 +17,7 @@ import (
 	"github.com/ledatu/csar/internal/throttle"
 	"github.com/ledatu/csar/pkg/middleware"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
+	"google.golang.org/protobuf/proto"
 )
 
 // ConfigApplier is called when a full config snapshot is received from the
@@ -42,6 +43,10 @@ type Client struct {
 	// Backoff config
 	initialBackoff time.Duration
 	maxBackoff     time.Duration
+	wait           func(ctx context.Context, d time.Duration) bool
+
+	appliedSnapshot    [sha256.Size]byte
+	hasAppliedSnapshot bool
 }
 
 // Option configures the coordinator client.
@@ -75,6 +80,7 @@ func New(
 		throttleMgr:    throttleMgr,
 		initialBackoff: 1 * time.Second,
 		maxBackoff:     60 * time.Second,
+		wait:           waitOrDone,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -83,7 +89,8 @@ func New(
 }
 
 // Run starts the subscription loop. It blocks until ctx is cancelled.
-// On stream errors it reconnects with exponential backoff.
+// On stream errors it reconnects with exponential backoff, which starts over
+// once a stream has delivered a message.
 func (c *Client) Run(ctx context.Context) {
 	backoff := c.initialBackoff
 
@@ -95,9 +102,12 @@ func (c *Client) Run(ctx context.Context) {
 		default:
 		}
 
-		err := c.subscribe(ctx)
+		received, err := c.subscribe(ctx)
 		if ctx.Err() != nil {
 			return // context cancelled — clean shutdown
+		}
+		if received {
+			backoff = c.initialBackoff
 		}
 
 		c.logger.Warn("coordinator stream disconnected, reconnecting",
@@ -105,29 +115,35 @@ func (c *Client) Run(ctx context.Context) {
 			"backoff", backoff,
 		)
 
-		select {
-		case <-ctx.Done():
+		if !c.wait(ctx, backoff) {
 			return
-		case <-time.After(backoff):
 		}
 
-		// Exponential backoff with cap
-		backoff = time.Duration(math.Min(
-			float64(backoff)*2,
-			float64(c.maxBackoff),
-		))
+		backoff = min(backoff*2, c.maxBackoff)
 	}
 }
 
-// subscribe opens a single subscription stream and processes messages until error.
-func (c *Client) subscribe(ctx context.Context) error {
+func waitOrDone(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+// subscribe opens a single subscription stream and processes messages until
+// error. It reports whether the stream delivered at least one message.
+func (c *Client) subscribe(ctx context.Context) (bool, error) {
 	stream, err := c.coordClient.Subscribe(ctx, &csarv1.SubscribeRequest{
 		RouterId:        c.routerID,
 		RouterAddress:   c.routerAddr,
 		LastSeenVersion: c.lastSeenVersion,
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	c.logger.Info("subscribed to coordinator",
@@ -135,11 +151,13 @@ func (c *Client) subscribe(ctx context.Context) error {
 		"last_seen_version", c.lastSeenVersion,
 	)
 
+	received := false
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
-			return err
+			return received, err
 		}
+		received = true
 
 		// Track watermark for replay on reconnect.
 		if msg.Version > c.lastSeenVersion {
@@ -186,6 +204,15 @@ func (c *Client) handleFullConfigSnapshot(snap *csarv1.FullConfigSnapshot, versi
 		return
 	}
 
+	sum, hashed := snapshotSum(snap)
+	if hashed && c.hasAppliedSnapshot && sum == c.appliedSnapshot {
+		c.logger.Info("config snapshot unchanged, router rebuild skipped",
+			"version", version,
+			"routes", len(snap.GetRoutes()),
+		)
+		return
+	}
+
 	cfg := protoconv.FullSnapshotToConfig(snap)
 	if err := cfg.ResolvePolicies(); err != nil {
 		c.logger.Error("failed to resolve policies on coordinator snapshot",
@@ -205,7 +232,19 @@ func (c *Client) handleFullConfigSnapshot(snap *csarv1.FullConfigSnapshot, versi
 			"version", version,
 			"routes", len(cfg.Paths),
 		)
+		if hashed {
+			c.appliedSnapshot = sum
+			c.hasAppliedSnapshot = true
+		}
 	}
+}
+
+func snapshotSum(snap *csarv1.FullConfigSnapshot) ([sha256.Size]byte, bool) {
+	b, err := proto.MarshalOptions{Deterministic: true}.Marshal(snap)
+	if err != nil {
+		return [sha256.Size]byte{}, false
+	}
+	return sha256.Sum256(b), true
 }
 
 // handleQuotaAssignment applies coordinator-assigned quotas to local throttlers.

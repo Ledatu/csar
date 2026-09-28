@@ -33,7 +33,17 @@ type Coordinator struct {
 
 	// topLevelConfig holds top-level policy maps pushed alongside routes.
 	topLevelConfig *config.Config
+
+	snapshotDebounce time.Duration
 }
+
+// DefaultSnapshotDebounce is how long the coordinator waits for route changes
+// to settle before pushing one config snapshot to routers.
+const DefaultSnapshotDebounce = time.Second
+
+// maxSnapshotDebounceFactor caps the wait at this many debounce periods so a
+// steady stream of route changes still reaches routers.
+const maxSnapshotDebounceFactor = 5
 
 // InvalidationOutbox is a bounded ring buffer of token invalidation events
 // for durable replay on router reconnect.
@@ -107,6 +117,13 @@ func New(store statestore.StateStore, logger *slog.Logger) *Coordinator {
 // Must be called before any subscribers connect.
 func (c *Coordinator) SetInvalidationBufferSize(size int) {
 	c.invalidationOutbox = NewInvalidationOutbox(size)
+}
+
+// SetSnapshotDebounce sets how long route changes must be quiet before a
+// snapshot is pushed; 0 pushes one snapshot per route change.
+// Must be called before any subscribers connect.
+func (c *Coordinator) SetSnapshotDebounce(d time.Duration) {
+	c.snapshotDebounce = d
 }
 
 // SetTopLevelConfig stores the top-level config (policies, global settings)
@@ -221,6 +238,9 @@ func (c *Coordinator) Subscribe(req *csarv1.SubscribeRequest, stream csarv1.Coor
 			if !ok {
 				return nil
 			}
+			if !c.waitForQuietRoutes(stream.Context(), routeCh) {
+				return nil
+			}
 			if err := c.sendFullConfigSnapshot(stream); err != nil {
 				c.logger.Error("failed to send route update",
 					"router_id", req.RouterId,
@@ -228,6 +248,35 @@ func (c *Coordinator) Subscribe(req *csarv1.SubscribeRequest, stream csarv1.Coor
 				)
 				return err
 			}
+		}
+	}
+}
+
+// waitForQuietRoutes absorbs further route events until none has arrived for
+// the debounce period, so a publish that writes many routes reaches routers as
+// one snapshot instead of one router rebuild per route. It reports false when
+// the stream or the watch has ended.
+func (c *Coordinator) waitForQuietRoutes(ctx context.Context, routeCh <-chan []statestore.RouteEntry) bool {
+	if c.snapshotDebounce <= 0 {
+		return true
+	}
+	quiet := time.NewTimer(c.snapshotDebounce)
+	defer quiet.Stop()
+	limit := time.NewTimer(maxSnapshotDebounceFactor * c.snapshotDebounce)
+	defer limit.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case _, ok := <-routeCh:
+			if !ok {
+				return false
+			}
+			quiet.Reset(c.snapshotDebounce)
+		case <-quiet.C:
+			return true
+		case <-limit.C:
+			return true
 		}
 	}
 }

@@ -548,6 +548,9 @@ coordinator:
 When the coordinator is enabled, the router automatically subscribes to its gRPC stream and:
 - Applies **quota assignments** to local throttlers in real time
 - Processes **token invalidation** events to clear stale-cached credentials
+- Rebuilds the router from **full config snapshots**, skipping a snapshot identical to the one already applied (a reconnect replays the current snapshot)
+
+The coordinator pings each router connection after `--grpc-keepalive-time` of silence, so a proxy with an idle timeout (the prod HAProxy closes connections idle for 2 minutes) does not cut healthy streams. If the stream does drop, the router retries after 1 s, doubling up to 60 s while the coordinator stays unreachable; the delay starts over once a stream delivers a message.
 
 ## CLI Flags
 
@@ -581,6 +584,9 @@ When the coordinator is enabled, the router automatically subscribes to its gRPC
 | `--client-ca` | *(empty)* | Client CA for mTLS |
 | `--allowed-routers` | *(empty)* | Comma-separated CN/SAN allowlist |
 | `--allow-insecure-dev` | `false` | Allow running without TLS (dev only) |
+| `--grpc-keepalive-time` | `30s` | Ping a connection after this long without activity, so router streams stay open through idle-closing proxies |
+| `--grpc-keepalive-timeout` | `10s` | Close a connection whose ping is not acknowledged in time; a silently dead router is unregistered and leaves the quota split |
+| `--snapshot-debounce` | `1s` | Wait until route changes have been quiet this long, then push one config snapshot (`0` pushes one per change) |
 
 #### Token source (choose one)
 
