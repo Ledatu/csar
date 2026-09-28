@@ -621,7 +621,9 @@ func (r *Router) setupBackpressure(rt *route, fr config.FlatRoute, key string, l
 
 	if hasAutoRetry {
 		bpCfg.AutoRetry = true
-		bpCfg.MaxInternalWait = fr.Route.Retry.MaxInternalWait.Duration
+		if fr.Route.Retry != nil {
+			bpCfg.MaxInternalWait = fr.Route.Retry.MaxInternalWait.Duration
+		}
 		if bpCfg.MaxInternalWait == 0 {
 			bpCfg.MaxInternalWait = 30 * time.Second
 		}

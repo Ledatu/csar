@@ -90,3 +90,18 @@ func TestRouter_PathKeyedThrottle_PausesOnlyTheTenantThatGot429(t *testing.T) {
 		t.Fatalf("b: %d, want 200 — the 429 for a must not pause b", rec.Code)
 	}
 }
+
+func TestRouter_TransparentRetryWithoutRetryBlockBuilds(t *testing.T) {
+	enabled := true
+	cfg := newTestConfig(map[string]config.PathConfig{
+		"/x": {
+			"get": config.RouteConfig{
+				Backend:  config.BackendConfig{TargetURL: "http://127.0.0.1:1"},
+				Protocol: &config.ProtocolPolicy{TransparentRetry: &enabled},
+			},
+		},
+	})
+	if _, err := New(cfg, newTestLogger()); err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+}
