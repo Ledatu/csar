@@ -14,6 +14,9 @@ and internal admin surfaces.
 
 ## Trust/Auth Model
 - Inbound JWTs are validated at the router against JWKS.
+- Opaque seller personal keys use mTLS introspection against `csar-authn`.
+  The router bounds token caching to 15 seconds, checks `adverts:read` and
+  the bound seller ID, strips the raw token, then evaluates current authz.
 - `x-csar-authz` policies gate routes before proxying; a policy or route may list `any_of` branches (first allow wins) so tenant members and platform staff can share a route.
 - `gatewayctx` is the trusted identity carrier for backends, but it is only safe
   when paired with mTLS, `TrustedMiddleware`, or equivalent network isolation.

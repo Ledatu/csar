@@ -213,6 +213,10 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 			if err := r.setupSession(rt, fr, cfg, key, logger); err != nil {
 				return err
 			}
+		case "token":
+			if err := r.setupToken(rt, fr, cfg, key, logger); err != nil {
+				return err
+			}
 		case "", "jwt":
 			if err := r.setupJWT(rt, fr, cfg, key, logger); err != nil {
 				return err
@@ -746,6 +750,32 @@ func (r *Router) setupSession(rt *route, fr config.FlatRoute, cfg *config.Config
 		"tls_policy", tlsRef,
 		"issue_tokens", len(issueTokens),
 	)
+	return nil
+}
+
+// setupToken configures opaque seller API key introspection over mTLS.
+func (r *Router) setupToken(rt *route, fr config.FlatRoute, cfg *config.Config, key string, logger *slog.Logger) error {
+	tlsRef := fr.Route.AuthValidate.IntrospectionTLS
+	if r.tokenValidators == nil {
+		r.tokenValidators = make(map[string]*authn.TokenValidator)
+	}
+	validator, ok := r.tokenValidators[tlsRef]
+	if !ok {
+		policy := cfg.BackendTLSPolicies[tlsRef]
+		transport, err := buildSessionTransport(&policy)
+		if err != nil {
+			return fmt.Errorf("route %s: build introspection mTLS transport: %w", key, err)
+		}
+		validator = authn.NewTokenValidator(logger, &http.Client{Transport: transport, Timeout: 5 * time.Second})
+		r.tokenValidators[tlsRef] = validator
+	}
+	rt.tokenValidator = validator
+	rt.tokenConfig = &authn.TokenConfig{
+		Endpoint:        fr.Route.AuthValidate.IntrospectionEndpoint,
+		RequiredScope:   fr.Route.AuthValidate.RequiredScope,
+		SellerPathParam: fr.Route.AuthValidate.SellerPathParam,
+		CacheTTL:        fr.Route.AuthValidate.CacheTTL.Duration,
+	}
 	return nil
 }
 

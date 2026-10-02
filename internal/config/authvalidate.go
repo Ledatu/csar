@@ -38,6 +38,18 @@ func (c *Config) ResolveAuthValidatePolicies() error {
 			if route.AuthValidate.SessionTLS != "" {
 				merged.SessionTLS = route.AuthValidate.SessionTLS
 			}
+			if route.AuthValidate.IntrospectionEndpoint != "" {
+				merged.IntrospectionEndpoint = route.AuthValidate.IntrospectionEndpoint
+			}
+			if route.AuthValidate.IntrospectionTLS != "" {
+				merged.IntrospectionTLS = route.AuthValidate.IntrospectionTLS
+			}
+			if route.AuthValidate.RequiredScope != "" {
+				merged.RequiredScope = route.AuthValidate.RequiredScope
+			}
+			if route.AuthValidate.SellerPathParam != "" {
+				merged.SellerPathParam = route.AuthValidate.SellerPathParam
+			}
 			if len(route.AuthValidate.ForwardHeaders) > 0 {
 				merged.ForwardHeaders = route.AuthValidate.ForwardHeaders
 			}

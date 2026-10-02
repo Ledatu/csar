@@ -922,7 +922,7 @@ type AuthValidateConfig struct {
 	Use string `yaml:"use,omitempty" json:"use,omitempty"`
 
 	// Mode selects the validation strategy: "" or "jwt" (default) performs local
-	// JWT/JWKS validation; "session" makes a subrequest to SessionEndpoint.
+	// JWT/JWKS validation; "session" or "token" make authn subrequests.
 	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 
 	// JWKSURL is the endpoint serving the JSON Web Key Set (jwt mode).
@@ -941,6 +941,16 @@ type AuthValidateConfig struct {
 	// SessionTLS is a reference to a backend_tls_policies entry for the
 	// subrequest HTTP client in session mode.
 	SessionTLS string `yaml:"session_tls,omitempty" json:"session_tls,omitempty"`
+
+	// IntrospectionEndpoint and IntrospectionTLS are used for opaque personal
+	// API keys in token mode. The endpoint must be reachable over mTLS.
+	IntrospectionEndpoint string `yaml:"introspection_endpoint,omitempty" json:"introspection_endpoint,omitempty"`
+	IntrospectionTLS      string `yaml:"introspection_tls,omitempty" json:"introspection_tls,omitempty"`
+
+	// RequiredScope and SellerPathParam constrain a token route to one scope
+	// and its selected Wildberries cabinet. SellerPathParam defaults to seller_id.
+	RequiredScope   string `yaml:"required_scope,omitempty" json:"required_scope,omitempty"`
+	SellerPathParam string `yaml:"seller_path_param,omitempty" json:"seller_path_param,omitempty"`
 
 	// ForwardHeaders lists response headers to copy from the session
 	// validation response into the proxied request (session mode).
