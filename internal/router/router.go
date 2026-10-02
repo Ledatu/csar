@@ -61,6 +61,8 @@ type route struct {
 	jwtValidator        *authn.JWTValidator        // per-route ref to the validator for this route's TLS profile
 	sessionConfig       *authn.SessionConfig       // nil if no session-based validation
 	sessionValidator    *authn.SessionValidator    // per-route ref to the validator for this route's TLS profile
+	tokenConfig         *authn.TokenConfig
+	tokenValidator      *authn.TokenValidator
 	dlpConfig           *dlp.Config                // nil if no response redaction
 	tenantConfig        *tenant.Config             // nil if no multi-tenant routing
 	corsConfig          *config.CORSConfig         // nil if no CORS configuration
@@ -92,21 +94,22 @@ type Router struct {
 	authInjector         *middleware.AuthInjector           // nil if no auth injection configured
 	jwtValidators        map[string]*authn.JWTValidator     // keyed by jwks_tls policy name ("" = default)
 	sessionValidators    map[string]*authn.SessionValidator // keyed by session_tls policy name ("" = default)
-	authzClient          *authz.Client                      // nil if no route uses authz
-	auditClient          auditRecorder                      // nil if audit ingest is not configured
-	dlpRedactor          *dlp.Redactor                      // nil if no route uses DLP redaction
-	tenantRouter         *tenant.Router                     // nil if no route uses tenant routing
-	responseCache        *cache.ResponseCache               // nil if no route uses response caching
-	ssrfProtection       *proxy.SSRFProtection              // nil if SSRF protection is disabled
-	transportRegistry    *transportRegistry                 // explicit outbound transport pools
-	throttleManager      *throttle.ThrottleManager          // manages all per-route throttlers
-	redisClient          *redis.Client                      // shared Redis client for distributed throttling (nil if not configured)
-	pools                []*loadbalancer.Pool               // tracked for Close() cleanup on reload
-	globalCIDRs          []*net.IPNet                       // parsed global access_control.allow_cidrs
-	hasGlobalACL         bool                               // true if global access_control is configured
-	globalTrustProxy     bool                               // global default for trust_proxy (from access_control)
-	globalTrustedProxies []*net.IPNet                       // parsed global access_control.trusted_proxy_cidrs
-	reqIDHeader          string                             // resolved request ID header name (default: "X-Request-ID")
+	tokenValidators      map[string]*authn.TokenValidator
+	authzClient          *authz.Client             // nil if no route uses authz
+	auditClient          auditRecorder             // nil if audit ingest is not configured
+	dlpRedactor          *dlp.Redactor             // nil if no route uses DLP redaction
+	tenantRouter         *tenant.Router            // nil if no route uses tenant routing
+	responseCache        *cache.ResponseCache      // nil if no route uses response caching
+	ssrfProtection       *proxy.SSRFProtection     // nil if SSRF protection is disabled
+	transportRegistry    *transportRegistry        // explicit outbound transport pools
+	throttleManager      *throttle.ThrottleManager // manages all per-route throttlers
+	redisClient          *redis.Client             // shared Redis client for distributed throttling (nil if not configured)
+	pools                []*loadbalancer.Pool      // tracked for Close() cleanup on reload
+	globalCIDRs          []*net.IPNet              // parsed global access_control.allow_cidrs
+	hasGlobalACL         bool                      // true if global access_control is configured
+	globalTrustProxy     bool                      // global default for trust_proxy (from access_control)
+	globalTrustedProxies []*net.IPNet              // parsed global access_control.trusted_proxy_cidrs
+	reqIDHeader          string                    // resolved request ID header name (default: "X-Request-ID")
 }
 
 // GetThrottler returns the throttler for a given route key (for observability).

@@ -278,6 +278,25 @@ func (c *Config) Validate() error {
 					if route.AuthValidate.CookieName == "" {
 						return fmt.Errorf("path %s method %s: x-csar-authn-validate.cookie_name is required for session mode", path, method)
 					}
+				case "token":
+					if len(route.AuthValidate.IssueTokens) > 0 || route.AuthValidate.CookieName != "" || route.AuthValidate.HeaderName != "" || route.AuthValidate.TokenPrefix != "" {
+						return fmt.Errorf("path %s method %s: token mode cannot use session or JWT header options", path, method)
+					}
+					if !strings.HasPrefix(route.AuthValidate.IntrospectionEndpoint, "https://") {
+						return fmt.Errorf("path %s method %s: token introspection_endpoint must use https", path, method)
+					}
+					if route.AuthValidate.IntrospectionTLS == "" {
+						return fmt.Errorf("path %s method %s: token introspection_tls is required", path, method)
+					}
+					if _, ok := c.BackendTLSPolicies[route.AuthValidate.IntrospectionTLS]; !ok {
+						return fmt.Errorf("path %s method %s: token introspection_tls policy not found", path, method)
+					}
+					if route.AuthValidate.RequiredScope == "" {
+						return fmt.Errorf("path %s method %s: token required_scope is required", path, method)
+					}
+					if route.AuthValidate.CacheTTL.Duration > 30*time.Second {
+						return fmt.Errorf("path %s method %s: token cache_ttl exceeds 30s", path, method)
+					}
 				case "", "jwt":
 					if len(route.AuthValidate.IssueTokens) > 0 {
 						return fmt.Errorf("path %s method %s: x-csar-authn-validate.issue_tokens requires mode \"session\"", path, method)
@@ -295,7 +314,7 @@ func (c *Config) Validate() error {
 						}
 					}
 				default:
-					return fmt.Errorf("path %s method %s: x-csar-authn-validate.mode %q is not recognized (expected \"jwt\" or \"session\")", path, method, route.AuthValidate.Mode)
+					return fmt.Errorf("path %s method %s: x-csar-authn-validate.mode %q is not recognized (expected \"jwt\", \"session\", or \"token\")", path, method, route.AuthValidate.Mode)
 				}
 				for i := range route.AuthValidate.IssueTokens {
 					token := &route.AuthValidate.IssueTokens[i]

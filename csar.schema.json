@@ -834,9 +834,10 @@
     },
     "AuthValidateConfigObject": {
       "type": "object",
-      "description": "Validates inbound bearer tokens against a JWKS endpoint before proxying.",
+      "description": "Validates inbound JWTs, browser sessions, or opaque seller API keys before proxying.",
       "additionalProperties": false,
       "properties": {
+        "mode": { "type": "string", "enum": ["jwt", "session", "token"] },
         "use": {
           "type": "string",
           "description": "Reference to an auth_validate_policies entry. Inline fields override the policy's values."
@@ -850,6 +851,13 @@
           "type": "string",
           "description": "Reference to a backend_tls_policies entry for the JWKS fetch client."
         },
+        "session_endpoint": { "type": "string" },
+        "session_tls": { "type": "string" },
+        "forward_headers": { "type": "array", "items": { "type": "string" } },
+        "introspection_endpoint": { "type": "string", "format": "uri" },
+        "introspection_tls": { "type": "string" },
+        "required_scope": { "type": "string" },
+        "seller_path_param": { "type": "string" },
         "issuer": {
           "type": "string",
           "description": "Validates the \"iss\" claim matches this value."

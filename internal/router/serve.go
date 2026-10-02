@@ -160,6 +160,13 @@ func (r *Router) serveWithIPCheck(w http.ResponseWriter, req *http.Request, rt *
 		validated.ServeHTTP(w, req)
 		return
 	}
+	if rt.tokenConfig != nil && rt.tokenValidator != nil {
+		validated := rt.tokenValidator.Wrap(*rt.tokenConfig, http.HandlerFunc(func(vw http.ResponseWriter, vr *http.Request) {
+			r.serveAfterJWT(vw, vr, rt)
+		}))
+		validated.ServeHTTP(w, req)
+		return
+	}
 	if rt.jwtConfig != nil && rt.jwtValidator != nil {
 		validated := rt.jwtValidator.Wrap(*rt.jwtConfig, http.HandlerFunc(func(vw http.ResponseWriter, vr *http.Request) {
 			r.serveAfterJWT(vw, vr, rt)
