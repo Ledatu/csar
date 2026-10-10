@@ -74,3 +74,10 @@ and internal admin surfaces.
 - `make test-race`
 - `make lint-strict` and `make lint-security` when routing/security behavior changes
   touch the router surface
+
+## Authn session schema validation
+The core dependency includes `legacy_users_sync.lock_database_dsn`, required for
+enabled PostgreSQL sync apply. Release this matching csar-helper before publishing
+that config; router/coordinator source behavior is unchanged in this update.
+CI covers the actual default branch master as well as main, and prepares the
+existing MCP schema embed input before scanning/building all Go packages.
