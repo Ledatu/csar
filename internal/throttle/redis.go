@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -100,7 +101,8 @@ type gcraParams struct {
 }
 
 func newGCRAParams(rps float64, burst int) gcraParams {
-	emission := int64(1000.0 / rps)
+	// Round up: truncation would admit requests faster than the configured rate.
+	emission := int64(math.Ceil(1000.0 / rps))
 	if emission < 1 {
 		emission = 1
 	}

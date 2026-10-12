@@ -6,10 +6,28 @@ import "fmt"
 // ThrottlingPolicy from throttling_policies. Inline fields override policy
 // values (shallow merge). Must be called after Load / before Validate.
 func (c *Config) ResolveThrottlePolicies() error {
+	for name := range c.ThrottlingPolicies {
+		policy := c.ThrottlingPolicies[name]
+		if err := normalizeRate(&policy.RPS, &policy.Requests, &policy.Period); err != nil {
+			return fmt.Errorf("throttling_policies.%s: %w", name, err)
+		}
+		c.ThrottlingPolicies[name] = policy
+	}
+	if global := c.GlobalThrottle; global != nil {
+		if err := normalizeRate(&global.RPS, &global.Requests, &global.Period); err != nil {
+			return fmt.Errorf("global_throttle: %w", err)
+		}
+	}
 	for path, methods := range c.Paths {
 		for method := range methods {
 			route := methods[method]
-			if route.Traffic == nil || route.Traffic.Use == "" {
+			if route.Traffic == nil {
+				continue
+			}
+			if err := normalizeRate(&route.Traffic.RPS, &route.Traffic.Requests, &route.Traffic.Period); err != nil {
+				return fmt.Errorf("path %s method %s: x-csar-traffic: %w", path, method, err)
+			}
+			if route.Traffic.Use == "" {
 				continue
 			}
 			policyName := route.Traffic.Use
@@ -44,6 +62,14 @@ func (c *Config) ResolveThrottlePolicies() error {
 			}
 			if len(merged.VIPOverrides) == 0 {
 				merged.VIPOverrides = policy.VIPOverrides
+			}
+			if merged.AdaptiveBackpressure == nil && policy.AdaptiveBackpressure != nil {
+				adaptive := *policy.AdaptiveBackpressure
+				adaptive.RespectHeaders = append([]string(nil), adaptive.RespectHeaders...)
+				merged.AdaptiveBackpressure = &adaptive
+			}
+			if merged.ClientLimitMode == "" {
+				merged.ClientLimitMode = policy.ClientLimitMode
 			}
 			merged.Use = "" // clear ref after resolution
 			route.Traffic = merged

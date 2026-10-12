@@ -665,6 +665,10 @@ type TrafficConfig struct {
 	// RPS is the allowed requests per second.
 	RPS float64 `yaml:"rps,omitempty" json:"rps,omitempty"`
 
+	// Requests and Period are an alternative to RPS, normalized during resolution.
+	Requests *int      `yaml:"requests,omitempty" json:"requests,omitempty"`
+	Period   *Duration `yaml:"period,omitempty" json:"period,omitempty"`
+
 	// Burst is the maximum burst size for the token bucket.
 	Burst int `yaml:"burst,omitempty" json:"burst,omitempty"`
 
@@ -723,6 +727,9 @@ func (tc *TrafficConfig) UnmarshalYAML(value *yaml.Node) error {
 	if err := value.Decode(&alias); err != nil {
 		return err
 	}
+	if err := validateRateSyntax(value, "rps"); err != nil {
+		return err
+	}
 	*tc = TrafficConfig(alias)
 	return nil
 }
@@ -731,7 +738,11 @@ func (tc *TrafficConfig) UnmarshalYAML(value *yaml.Node) error {
 // Defined at the top-level throttling_policies map, referenced by name in routes.
 type ThrottlingPolicy struct {
 	// RPS is the allowed requests per second.
-	RPS float64 `yaml:"rate" json:"rate"`
+	RPS float64 `yaml:"rate,omitempty" json:"rate,omitempty"`
+
+	// Requests and Period are an alternative to RPS, normalized during resolution.
+	Requests *int      `yaml:"requests,omitempty" json:"requests,omitempty"`
+	Period   *Duration `yaml:"period,omitempty" json:"period,omitempty"`
 
 	// Burst is the maximum burst size for the token bucket.
 	Burst int `yaml:"burst" json:"burst"`
@@ -753,6 +764,10 @@ type ThrottlingPolicy struct {
 	// VIPOverrides allows header-based policy switching for VIP clients.
 	VIPOverrides []VIPOverride `yaml:"vip_overrides,omitempty" json:"vip_overrides,omitempty"`
 
+	// AdaptiveBackpressure supplies the default upstream backpressure settings.
+	// An inline route block replaces the whole policy block, including false values.
+	AdaptiveBackpressure *AdaptiveBackpressureConfig `yaml:"adaptive_backpressure,omitempty" json:"adaptive_backpressure,omitempty"`
+
 	// ClientLimitMode controls how the X-CSAR-Client-Limit header is handled.
 	// "ignore" (default), "advisory", or "enforce".
 	ClientLimitMode string `yaml:"client_limit_mode,omitempty" json:"client_limit_mode,omitempty"`
@@ -762,7 +777,11 @@ type ThrottlingPolicy struct {
 // Uses a fast in-memory atomic counter (not Redis). Checked before per-route throttle.
 type GlobalThrottleConfig struct {
 	// RPS is the global requests per second limit across all routes.
-	RPS float64 `yaml:"rate" json:"rate"`
+	RPS float64 `yaml:"rate,omitempty" json:"rate,omitempty"`
+
+	// Requests and Period are an alternative to RPS, normalized during resolution.
+	Requests *int      `yaml:"requests,omitempty" json:"requests,omitempty"`
+	Period   *Duration `yaml:"period,omitempty" json:"period,omitempty"`
 
 	// Burst is the maximum burst size.
 	Burst int `yaml:"burst" json:"burst"`

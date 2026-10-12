@@ -1045,7 +1045,8 @@ func throttlingPoliciesToProto(policies map[string]config.ThrottlingPolicy) map[
 		return nil
 	}
 	out := make(map[string]*csarv1.ThrottlingPolicyProto, len(policies))
-	for name, p := range policies {
+	for name := range policies {
+		p := policies[name]
 		tp := &csarv1.ThrottlingPolicyProto{
 			Rps:             p.RPS,
 			Burst:           safeInt32(p.Burst),
