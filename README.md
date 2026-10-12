@@ -317,7 +317,7 @@ paths:
 | `retry_policies` | Named reusable retry configurations |
 | `redact_policies` | Named reusable redaction configurations |
 | `auth_validate_policies` | Named reusable auth validation configurations |
-| `global_throttle` | Global rate limit safety net (`rate`, `burst`, `max_wait`) |
+| `global_throttle` | Global rate limit safety net (`rate` or `requests` + `period`, `burst`, `max_wait`) |
 | `paths` | Route definitions using OpenAPI-style `x-csar-*` extensions |
 
 ### Named Policies
@@ -493,6 +493,60 @@ kms:
   # local_keys:                                 # for provider: "local" (dev only)
   #   key1: "passphrase1"
 ```
+
+### Readable rate configuration
+
+Named `throttling_policies`, `global_throttle`, and inline `x-csar-traffic`
+accept an integer request count and a positive duration:
+
+```yaml
+throttling_policies:
+  finance:
+    requests: 1
+    period: 1m
+    burst: 1
+  prices:
+    requests: 10
+    period: 6s
+    burst: 5
+paths:
+  /report:
+    get:
+      x-csar-backend: {target_url: "https://example.com/report"}
+      x-csar-traffic: finance
+```
+
+`requests / period` sets the replenishment rate. `burst` controls the initial
+capacity independently; this is pacing, not a fixed calendar window. Redis GCRA
+rounds each emission interval up to whole milliseconds (3 requests/second means
+334 ms between replenishments); local token buckets use the normalized RPS.
+
+The existing `rate` field on policies/global limits and `rps` on inline traffic
+remain supported. Set either the legacy field or both `requests` and `period`.
+Mixed forms, incomplete pairs, non-positive counts/durations and fractional
+counts are rejected. Inline overrides replace the policy rate as a complete
+pair, e.g. `{use: finance, requests: 3, period: 1m}`. A legacy `rps` override
+also works on a period-based policy, and a pair can override a legacy policy.
+
+Resolution converts authoring units into the existing RPS fields. Compiled YAML
+and coordinator snapshots retain the legacy wire representation; no protobuf
+upgrade is needed. Upgrade tools, coordinators and routers that load authored
+YAML before publishing the new syntax: older parsers ignore unknown fields.
+Upgrade routers to receive the Redis interval rounding fix as well.
+
+### Backpressure defaults in throttle policies
+
+Put `adaptive_backpressure` in a named `throttling_policies` entry to share
+`enabled`, `respect_headers`, `suspend_bucket` and `max_body_buffer` settings.
+Routes can then use just `x-csar-traffic: {use: finance}`. A route inherits the
+whole block when omitted; an explicit route block replaces it completely,
+including `{enabled: false}` to disable backpressure. `client_limit_mode` also
+inherits unless the route specifies a value such as `ignore`.
+
+Resolved routes carry these settings through compilation and the existing
+coordinator route protocol. Backpressure does not enable retries: configure
+`max_attempts: 1`, `auto_retry_429: false` and
+`x-csar-protocol: {transparent_retry: false}` to keep replay disabled.
 
 ### Global Throttle
 

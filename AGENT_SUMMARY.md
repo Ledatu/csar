@@ -38,6 +38,16 @@ and internal admin surfaces.
 - Readiness and health sidecars are part of the operational contract.
 
 ## Config And Secrets
+- Throttle policies, inline traffic and global limits accept `requests` +
+  `period` as an alternative to legacy RPS fields. Resolution consumes the pair
+  before inheritance/distribution; compiled YAML and protobuf remain canonical
+  RPS. Mixed units and invalid pairs fail config loading. Redis GCRA rounds
+  emission intervals up to milliseconds. See `README.md` for semantics
+  and the required reader upgrade before publishing authored period configs.
+- Named throttle policies also provide adaptive backpressure and client-limit
+  defaults. Omitted route blocks inherit detached copies; explicit blocks
+  replace the whole object and can disable it with `enabled: false`. Resolved
+  route protobufs already carry these settings; no protocol change is needed.
 - `profile:` and `ValidateResolvedKMSProvider` are security-critical; the runtime
   KMS provider must match the active deployment profile.
 - `tls`, `coordinator`, `authz`, `audit`, and token source settings are the
