@@ -419,12 +419,54 @@
       "type": "object",
       "description": "Named reusable throttling configuration.",
       "additionalProperties": false,
-      "required": ["rate", "burst"],
+      "required": ["burst"],
+      "oneOf": [
+        {
+          "required": [
+            "rate"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "requests"
+                ]
+              },
+              {
+                "required": [
+                  "period"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "requests",
+            "period"
+          ],
+          "not": {
+            "required": [
+              "rate"
+            ]
+          }
+        }
+      ],
       "properties": {
         "rate": {
           "type": "number",
           "description": "Allowed requests per second.",
           "exclusiveMinimum": 0
+        },
+        "requests": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Requests replenished per period; use together with period instead of rate. Burst is independent."
+        },
+        "period": {
+          "allOf": [{ "$ref": "#/$defs/Duration" }, { "pattern": "[1-9]" }],
+          "description": "Positive pacing duration, e.g. 1m or 6s; requires requests.",
+          "examples": ["1s", "6s", "1m", "1h"]
         },
         "burst": {
           "type": "integer",
@@ -456,6 +498,7 @@
           "description": "Header-based throttle policy switching for VIP clients.",
           "items": { "$ref": "#/$defs/VIPOverride" }
         },
+        "adaptive_backpressure": { "$ref": "#/$defs/AdaptiveBackpressureConfig" },
         "client_limit_mode": {
           "type": "string",
           "description": "How to handle X-CSAR-Client-Limit header from SDK clients.",
@@ -468,12 +511,54 @@
       "type": "object",
       "description": "Global rate limit safety net applied to ALL routes before per-route throttle. Uses fast in-memory atomic counter.",
       "additionalProperties": false,
-      "required": ["rate", "burst"],
+      "required": ["burst"],
+      "oneOf": [
+        {
+          "required": [
+            "rate"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "requests"
+                ]
+              },
+              {
+                "required": [
+                  "period"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "requests",
+            "period"
+          ],
+          "not": {
+            "required": [
+              "rate"
+            ]
+          }
+        }
+      ],
       "properties": {
         "rate": {
           "type": "number",
           "description": "Global requests per second limit across all routes.",
           "exclusiveMinimum": 0
+        },
+        "requests": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Requests replenished per period; use together with period instead of rate. Burst is independent."
+        },
+        "period": {
+          "allOf": [{ "$ref": "#/$defs/Duration" }, { "pattern": "[1-9]" }],
+          "description": "Positive pacing duration, e.g. 1m or 6s; requires requests.",
+          "examples": ["1s", "6s", "1m", "1h"]
         },
         "burst": {
           "type": "integer",
@@ -592,6 +677,59 @@
       "type": "object",
       "description": "Inline traffic shaping configuration.",
       "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": [
+            "rps"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "requests"
+                ]
+              },
+              {
+                "required": [
+                  "period"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "required": [
+            "requests",
+            "period"
+          ],
+          "not": {
+            "required": [
+              "rps"
+            ]
+          }
+        },
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "rps"
+                ]
+              },
+              {
+                "required": [
+                  "requests"
+                ]
+              },
+              {
+                "required": [
+                  "period"
+                ]
+              }
+            ]
+          }
+        }
+      ],
       "properties": {
         "use": {
           "type": "string",
@@ -601,6 +739,16 @@
           "type": "number",
           "description": "Allowed requests per second.",
           "exclusiveMinimum": 0
+        },
+        "requests": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Requests replenished per period; use together with period instead of rps. Burst is independent."
+        },
+        "period": {
+          "allOf": [{ "$ref": "#/$defs/Duration" }, { "pattern": "[1-9]" }],
+          "description": "Positive pacing duration, e.g. 1m or 6s; requires requests.",
+          "examples": ["1s", "6s", "1m", "1h"]
         },
         "burst": {
           "type": "integer",
