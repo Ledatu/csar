@@ -19,6 +19,85 @@ import (
 	"github.com/ledatu/csar/internal/resilience"
 )
 
+func TestAuditedRoutesCaptureErrorsByDefault(t *testing.T) {
+	all, errorsOnly, off := config.AuditModeAll, config.AuditModeErrors, config.AuditModeOff
+	for _, tc := range []struct {
+		name       string
+		method     string
+		mode       *config.AuditMode
+		capture    *config.AuditCaptureConfig
+		status     int
+		wantEvents int
+		wantBody   bool
+	}{
+		{"errors without capture", "GET", &errorsOnly, nil, 403, 1, true},
+		{"all without capture", "GET", &all, nil, 503, 1, true},
+		{"implicit mutation audit", "POST", nil, nil, 403, 1, true},
+		{"empty capture block", "GET", &errorsOnly, &config.AuditCaptureConfig{}, 403, 1, true},
+		{"explicit response off", "GET", &errorsOnly, &config.AuditCaptureConfig{Response: "off"}, 403, 1, false},
+		{"audit off", "POST", &off, nil, 403, 0, false},
+		{"implicit read audit off", "GET", nil, nil, 403, 0, false},
+		{"errors skips success", "GET", &errorsOnly, nil, 200, 0, false},
+		{"all keeps success event only", "GET", &all, nil, 200, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"code":"denied","message":"Authorization: Bearer privatecredential","apiKey":"privatecredential","business_data":"must not persist"}`
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if tc.method == "POST" {
+					b, err := io.ReadAll(req.Body)
+					if err != nil || string(b) != `{"requestSecret":"must not persist"}` {
+						t.Error("request body changed")
+					}
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, body)
+			}))
+			defer upstream.Close()
+			cfg := newTestConfig(map[string]config.PathConfig{"/test": {strings.ToLower(tc.method): {
+				Backend: config.BackendConfig{TargetURL: upstream.URL}, Audit: tc.mode, AuditCapture: tc.capture,
+			}}})
+			recorder := &stubAuditRecorder{}
+			r, err := New(cfg, newTestLogger(), func(r *Router) { r.auditClient = recorder })
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			req := httptest.NewRequest(tc.method, "/test?querySecret=must-not-persist", strings.NewReader(`{"requestSecret":"must not persist"}`))
+			req.Header.Set("Authorization", "Bearer privatecredential")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			if w.Code != tc.status || w.Body.String() != body || len(recorder.events) != tc.wantEvents {
+				t.Fatalf("status=%d body=%s events=%d", w.Code, w.Body.String(), len(recorder.events))
+			}
+			if tc.wantEvents == 0 {
+				return
+			}
+			event := recorder.events[0]
+			var meta struct {
+				Response *auditcore.HTTPResponse `json:"http_response"`
+				Query    map[string]any          `json:"query"`
+			}
+			if err := json.Unmarshal(event.Metadata, &meta); err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantBody {
+				if meta.Response == nil || meta.Response.Status != tc.status || meta.Response.State != "captured" || meta.Response.Code != "denied" {
+					t.Fatalf("missing safe error diagnostics: %+v", meta.Response)
+				}
+				if strings.Contains(string(event.Metadata), "privatecredential") || strings.Contains(string(event.Metadata), "business_data") {
+					t.Fatal("unsafe response fields persisted")
+				}
+			} else if meta.Response != nil {
+				t.Fatalf("unexpected response diagnostics: %+v", meta.Response)
+			}
+			if len(event.BeforeState) != 0 || (tc.capture == nil && len(meta.Query) != 0) {
+				t.Fatal("response defaults enabled request or query capture")
+			}
+		})
+	}
+}
+
 func TestAuditResponseBoundedAndUnchanged(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
@@ -77,7 +156,7 @@ func TestAuditResponseRecordsEarlyDenialWithoutSpoofedIdentity(t *testing.T) {
 	r.auditClient = recorder
 	rt, _ := r.matchRoute("GET", "/private")
 	rt.auditMode = config.AuditModeAll
-	rt.auditCapture = &config.AuditCaptureConfig{Response: "errors"}
+	rt.auditCapture = nil
 	rt.hasRouteACL = true
 	_, cidr, err := net.ParseCIDR("203.0.113.0/24")
 	if err != nil {

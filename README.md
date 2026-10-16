@@ -1021,32 +1021,33 @@ Private — all rights reserved.
 
 ## Audit error response diagnostics
 
-A route's existing `x-csar-audit` mode still decides whether it emits an event.
-Response diagnostics are separately opt-in; they neither enable request-body
-capture nor override `x-csar-audit: false`:
+A route's existing `x-csar-audit` mode decides whether it emits an event.
+Every audited route attempts sanitized error-response diagnostics by default,
+including `errors`, `all`/`true` and the existing method-based audit default.
+No `x-csar-audit-capture` block is required:
 
 ```yaml
-audit_capture_policies:
-  error-response:
-    request: false
-    response: errors
-    response_max_bytes: 4096
-    include_query: false
 paths:
   /example:
     get:
       x-csar-audit: errors
-      x-csar-audit-capture:
-        use: error-response
       x-csar-backend:
         target_url: https://example.com
 ```
 
-`response` accepts `off` (the default) or `errors`. `response_max_bytes` accepts
-0–4096 bytes; 0 selects the 4096-byte default. Policy/route/global defaults are
-resolved before coordinator distribution, including hot reload. Invalid global
-and unused named response policies also fail config loading. A global capture
-default only applies to routes that have an audit-capture block.
+`errors` emits only final HTTP errors, with safe diagnostics. `all` also emits
+successful events, but never captures successful response bodies. Neither mode
+implicitly enables request-body or query capture. `x-csar-audit: false`/`off`
+still excludes the route entirely. To retain error events without response
+inspection, set `x-csar-audit-capture: {response: off}` on the route (or use an
+existing named capture policy with `response: off`).
+
+`response` accepts `off` or `errors`; an unspecified mode defaults to `errors`
+at runtime on audited routes. `response_max_bytes` accepts 0–4096 bytes;
+0 selects the 4096-byte default. Explicit policy/route/global capture defaults
+are resolved before coordinator distribution, including hot reload. Invalid
+global and unused named response policies fail config loading. Global capture
+defaults retain their existing scope: routes with an audit-capture block.
 
 For a final HTTP status of at least 400, the matched-route audit wrapper observes
 the final response sent to the caller, including local authentication, security,

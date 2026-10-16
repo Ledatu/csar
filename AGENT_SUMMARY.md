@@ -56,12 +56,15 @@ and internal admin surfaces.
   validated.
 
 ## Audit Hotspots
-- Opt-in `x-csar-audit-capture.response: errors` adds a versioned, bounded,
-  sanitized final-client-response diagnostic to `metadata.http_response`.
+- Every active audit mode (errors/all/implicit mutating-method audit) attempts
+  a versioned, bounded, sanitized final-client error diagnostic in
+  `metadata.http_response` by default, even without an audit-capture block.
+  Explicit `x-csar-audit-capture.response: off` opts out; request/query capture
+  is never implicitly enabled and successful response bodies are omitted.
   `csar-core/audit` owns the envelope and sanitization; no audit storage/proto
   migration is needed. Coordinator `AuditCaptureConfigProto` fields 11–12 carry
-  response mode/limit. Upgrade helper, coordinator and router before publishing
-  these configs; `off` remains the default.
+  explicit response mode/limit. No protobuf/storage change is needed for the
+  runtime default; upgrade routers for routes without explicit response capture.
 - Auditing wraps matched routes before auth/security/admission refusals, emits
   only once after retries/response shaping, and preserves preflight/unmatched
   exclusions. Identity/email must come from validated gateway/forwarded claims,
