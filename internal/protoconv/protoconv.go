@@ -725,12 +725,14 @@ func protoToAuditCaptureConfig(ac *csarv1.AuditCaptureConfigProto) *config.Audit
 		return nil
 	}
 	cfg := &config.AuditCaptureConfig{
-		Use:             ac.GetUse(),
-		MaxBytes:        ac.GetMaxBytes(),
-		Redact:          ac.GetRedact(),
-		Fields:          ac.GetFields(),
-		SensitiveFields: ac.GetSensitiveFields(),
-		Mask:            ac.GetMask(),
+		Response:         ac.GetResponse(),
+		ResponseMaxBytes: ac.GetResponseMaxBytes(),
+		Use:              ac.GetUse(),
+		MaxBytes:         ac.GetMaxBytes(),
+		Redact:           ac.GetRedact(),
+		Fields:           ac.GetFields(),
+		SensitiveFields:  ac.GetSensitiveFields(),
+		Mask:             ac.GetMask(),
 	}
 	if ac.GetRequestSet() {
 		v := ac.GetRequest()

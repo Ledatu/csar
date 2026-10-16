@@ -103,3 +103,64 @@ func TestResolveAuditCapturePoliciesNoRedaction(t *testing.T) {
 		t.Fatal("expected redaction disabled without redact policy")
 	}
 }
+
+func TestResponseCapturePolicy(t *testing.T) {
+	for _, mode := range []string{"errors", "off", "invalid"} {
+		cfg := &Config{AuditCapturePolicies: map[string]AuditCaptureConfig{"errors": {Response: mode, ResponseMaxBytes: 2048}}, Paths: map[string]PathConfig{"/test": {"get": {AuditCapture: &AuditCaptureConfig{Use: "errors"}}}}}
+		err := cfg.ResolveAuditCapturePolicies()
+		if mode == "invalid" {
+			if err == nil {
+				t.Fatal("invalid mode accepted")
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		capture := cfg.Paths["/test"]["get"].AuditCapture
+		if capture.Response != mode || capture.ResponseMaxBytes != 2048 || capture.CaptureRequestEnabled() {
+			t.Fatalf("%+v", capture)
+		}
+	}
+}
+
+func TestResponseCaptureRejectsInvalidUnusedConfiguration(t *testing.T) {
+	for _, capture := range []AuditCaptureConfig{{Response: "all"}, {ResponseMaxBytes: -1}, {ResponseMaxBytes: 4097}} {
+		for _, global := range []bool{false, true} {
+			cfg := &Config{}
+			if global {
+				cfg.Audit = &AuditClientConfig{Capture: &capture}
+			} else {
+				cfg.AuditCapturePolicies = map[string]AuditCaptureConfig{"unused": capture}
+			}
+			if err := cfg.ResolveAuditCapturePolicies(); err == nil {
+				t.Fatalf("invalid config accepted: global=%v capture=%+v", global, capture)
+			}
+		}
+	}
+}
+
+func TestResponseCaptureInheritanceAndExplicitOff(t *testing.T) {
+	cfg := &Config{
+		Audit: &AuditClientConfig{Capture: &AuditCaptureConfig{Response: "errors", ResponseMaxBytes: 1024}},
+		Paths: map[string]PathConfig{"/test": {
+			"get":    {AuditCapture: &AuditCaptureConfig{}},
+			"post":   {AuditCapture: &AuditCaptureConfig{Response: "off"}},
+			"delete": {},
+		}},
+	}
+	if err := cfg.ResolveAuditCapturePolicies(); err != nil {
+		t.Fatal(err)
+	}
+	get := cfg.Paths["/test"]["get"].AuditCapture
+	post := cfg.Paths["/test"]["post"].AuditCapture
+	if !get.CaptureResponseEnabled() || get.ResponseMaxBytes != 1024 || get.CaptureRequestEnabled() {
+		t.Fatalf("inherited=%+v", get)
+	}
+	if post.CaptureResponseEnabled() || post.ResponseMaxBytes != 1024 {
+		t.Fatalf("off=%+v", post)
+	}
+	if cfg.Paths["/test"]["delete"].AuditCapture != nil {
+		t.Fatal("enabled capture implicitly")
+	}
+}

@@ -295,13 +295,13 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 
 	if fr.Route.AuditCapture != nil {
 		capture := fr.Route.AuditCapture
-		if capture.CaptureRequestEnabled() {
+		if capture.CaptureRequestEnabled() || capture.CaptureResponseEnabled() {
 			if r.auditClient == nil {
-				return fmt.Errorf("route %s has x-csar-audit-capture with request: true but no audit client is configured",
+				return fmt.Errorf("route %s has x-csar-audit-capture with payload capture but no audit client is configured",
 					key)
 			}
 			if !rt.auditMode.IsActive() {
-				return fmt.Errorf("route %s has x-csar-audit-capture with request: true but x-csar-audit is off",
+				return fmt.Errorf("route %s has x-csar-audit-capture with payload capture but x-csar-audit is off",
 					key)
 			}
 		}

@@ -1018,3 +1018,65 @@ For deployments above ~20k RPS, deploy multiple CSAR pods behind a L4 load balan
 ## License
 
 Private — all rights reserved.
+
+## Audit error response diagnostics
+
+A route's existing `x-csar-audit` mode still decides whether it emits an event.
+Response diagnostics are separately opt-in; they neither enable request-body
+capture nor override `x-csar-audit: false`:
+
+```yaml
+audit_capture_policies:
+  error-response:
+    request: false
+    response: errors
+    response_max_bytes: 4096
+    include_query: false
+paths:
+  /example:
+    get:
+      x-csar-audit: errors
+      x-csar-audit-capture:
+        use: error-response
+      x-csar-backend:
+        target_url: https://example.com
+```
+
+`response` accepts `off` (the default) or `errors`. `response_max_bytes` accepts
+0–4096 bytes; 0 selects the 4096-byte default. Policy/route/global defaults are
+resolved before coordinator distribution, including hot reload. Invalid global
+and unused named response policies also fail config loading. A global capture
+default only applies to routes that have an audit-capture block.
+
+For a final HTTP status of at least 400, the matched-route audit wrapper observes
+the final response sent to the caller, including local authentication, security,
+throttle and open-circuit refusals. Retries produce one final event; a successful
+retry stores no error response. Unmatched URLs, CORS preflights and audit-off
+routes retain their prior exclusion. Client bytes and status are forwarded
+without buffering the whole response or changing the response body.
+
+`metadata.http_response` is a version-1 diagnostic envelope defined in
+`csar-core/audit`: status, origin/stage, elapsed milliseconds, observed byte count,
+capture state/reason and optional code, message and sanitized body. At most
+64 KiB is inspected. Only complete, uncompressed JSON error envelopes are kept,
+and only allowlisted diagnostic fields survive. Built-in sensitive-field and
+reflected-credential redaction always applies, even without a request redaction
+policy; route redaction rules add protection. The stored body is limited to
+4096 UTF-8 bytes, and the entire event metadata stays within the existing 16 KiB
+budget. Invalid/oversized JSON, unsupported encodings/content types and streaming
+or hijacked responses get an omission reason instead of a raw prefix. A truncated
+sanitized body is a string, not a malformed JSON object.
+
+The captured body is the final client response after response shaping, rather
+than the original upstream payload. Origin is `router` for local refusals and
+trusted proxy transport failures (`stage: upstream_transport`, meaning no
+upstream HTTP response was received); otherwise it remains `unknown`. Upstream
+response headers cannot assert this origin. Audit identity comes from validated
+gateway headers; early denials stay anonymous, and `actor_email` is accepted only
+from a configured validator's forwarded email field. Incoming email headers alone
+cannot assert an audit identity.
+
+Release the matching helper and coordinator/router readers before publishing
+configs with `response` fields. Existing audit ingest/storage transports preserve
+the additive metadata without a schema migration. Disabling response capture
+stops further collection while old events remain readable.

@@ -1540,6 +1540,9 @@ type AuditClientConfig struct {
 //	x-csar-audit-capture: "seller-mutation-audit"
 //	x-csar-audit-capture: { use: "seller-mutation-audit", max_bytes: 4096 }
 type AuditCaptureConfig struct {
+	// Response is off (default) or errors; it never enables request capture.
+	Response         string `yaml:"response,omitempty" json:"response,omitempty"`
+	ResponseMaxBytes int64  `yaml:"response_max_bytes,omitempty" json:"response_max_bytes,omitempty"`
 	// Use references a named audit_capture_policies entry.
 	Use string `yaml:"use,omitempty" json:"use,omitempty"`
 

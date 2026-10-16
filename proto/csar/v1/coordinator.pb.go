@@ -2046,19 +2046,21 @@ func (x *RedactConfigProto) GetEnabledSet() bool {
 }
 
 type AuditCaptureConfigProto struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Use             string                 `protobuf:"bytes,1,opt,name=use,proto3" json:"use,omitempty"`
-	Request         bool                   `protobuf:"varint,2,opt,name=request,proto3" json:"request,omitempty"`
-	RequestSet      bool                   `protobuf:"varint,3,opt,name=request_set,json=requestSet,proto3" json:"request_set,omitempty"`
-	MaxBytes        int64                  `protobuf:"varint,4,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
-	Redact          string                 `protobuf:"bytes,5,opt,name=redact,proto3" json:"redact,omitempty"`
-	Fields          []string               `protobuf:"bytes,6,rep,name=fields,proto3" json:"fields,omitempty"`
-	SensitiveFields []string               `protobuf:"bytes,7,rep,name=sensitive_fields,json=sensitiveFields,proto3" json:"sensitive_fields,omitempty"`
-	IncludeQuery    bool                   `protobuf:"varint,8,opt,name=include_query,json=includeQuery,proto3" json:"include_query,omitempty"`
-	IncludeQuerySet bool                   `protobuf:"varint,9,opt,name=include_query_set,json=includeQuerySet,proto3" json:"include_query_set,omitempty"`
-	Mask            string                 `protobuf:"bytes,10,opt,name=mask,proto3" json:"mask,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Response         string                 `protobuf:"bytes,11,opt,name=response,proto3" json:"response,omitempty"`
+	ResponseMaxBytes int64                  `protobuf:"varint,12,opt,name=response_max_bytes,json=responseMaxBytes,proto3" json:"response_max_bytes,omitempty"`
+	Use              string                 `protobuf:"bytes,1,opt,name=use,proto3" json:"use,omitempty"`
+	Request          bool                   `protobuf:"varint,2,opt,name=request,proto3" json:"request,omitempty"`
+	RequestSet       bool                   `protobuf:"varint,3,opt,name=request_set,json=requestSet,proto3" json:"request_set,omitempty"`
+	MaxBytes         int64                  `protobuf:"varint,4,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
+	Redact           string                 `protobuf:"bytes,5,opt,name=redact,proto3" json:"redact,omitempty"`
+	Fields           []string               `protobuf:"bytes,6,rep,name=fields,proto3" json:"fields,omitempty"`
+	SensitiveFields  []string               `protobuf:"bytes,7,rep,name=sensitive_fields,json=sensitiveFields,proto3" json:"sensitive_fields,omitempty"`
+	IncludeQuery     bool                   `protobuf:"varint,8,opt,name=include_query,json=includeQuery,proto3" json:"include_query,omitempty"`
+	IncludeQuerySet  bool                   `protobuf:"varint,9,opt,name=include_query_set,json=includeQuerySet,proto3" json:"include_query_set,omitempty"`
+	Mask             string                 `protobuf:"bytes,10,opt,name=mask,proto3" json:"mask,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *AuditCaptureConfigProto) Reset() {
@@ -2089,6 +2091,20 @@ func (x *AuditCaptureConfigProto) ProtoReflect() protoreflect.Message {
 // Deprecated: Use AuditCaptureConfigProto.ProtoReflect.Descriptor instead.
 func (*AuditCaptureConfigProto) Descriptor() ([]byte, []int) {
 	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *AuditCaptureConfigProto) GetResponse() string {
+	if x != nil {
+		return x.Response
+	}
+	return ""
+}
+
+func (x *AuditCaptureConfigProto) GetResponseMaxBytes() int64 {
+	if x != nil {
+		return x.ResponseMaxBytes
+	}
+	return 0
 }
 
 func (x *AuditCaptureConfigProto) GetUse() string {
@@ -3981,8 +3997,10 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x04mask\x18\x03 \x01(\tR\x04mask\x12\x18\n" +
 	"\aenabled\x18\x04 \x01(\bR\aenabled\x12\x1f\n" +
 	"\venabled_set\x18\x05 \x01(\bR\n" +
-	"enabledSet\"\xc3\x02\n" +
-	"\x17AuditCaptureConfigProto\x12\x10\n" +
+	"enabledSet\"\x8d\x03\n" +
+	"\x17AuditCaptureConfigProto\x12\x1a\n" +
+	"\bresponse\x18\v \x01(\tR\bresponse\x12,\n" +
+	"\x12response_max_bytes\x18\f \x01(\x03R\x10responseMaxBytes\x12\x10\n" +
 	"\x03use\x18\x01 \x01(\tR\x03use\x12\x18\n" +
 	"\arequest\x18\x02 \x01(\bR\arequest\x12\x1f\n" +
 	"\vrequest_set\x18\x03 \x01(\bR\n" +

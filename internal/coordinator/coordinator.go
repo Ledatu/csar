@@ -698,12 +698,14 @@ func auditCaptureToProto(ac *config.AuditCaptureConfig) *csarv1.AuditCaptureConf
 		return nil
 	}
 	pb := &csarv1.AuditCaptureConfigProto{
-		Use:             ac.Use,
-		MaxBytes:        ac.MaxBytes,
-		Redact:          ac.Redact,
-		Fields:          ac.Fields,
-		SensitiveFields: ac.SensitiveFields,
-		Mask:            ac.Mask,
+		Response:         ac.Response,
+		ResponseMaxBytes: ac.ResponseMaxBytes,
+		Use:              ac.Use,
+		MaxBytes:         ac.MaxBytes,
+		Redact:           ac.Redact,
+		Fields:           ac.Fields,
+		SensitiveFields:  ac.SensitiveFields,
+		Mask:             ac.Mask,
 	}
 	if ac.Request != nil {
 		pb.Request = *ac.Request
@@ -721,8 +723,8 @@ func auditCapturePoliciesMapToProto(policies map[string]config.AuditCaptureConfi
 		return nil
 	}
 	out := make(map[string]*csarv1.AuditCaptureConfigProto, len(policies))
-	for name, ac := range policies {
-		cfg := ac
+	for name := range policies {
+		cfg := policies[name]
 		out[name] = auditCaptureToProto(&cfg)
 	}
 	return out

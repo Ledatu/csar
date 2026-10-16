@@ -309,6 +309,8 @@ message RedactConfigProto {
 }
 
 message AuditCaptureConfigProto {
+	string response = 11;
+	int64 response_max_bytes = 12;
   string use = 1;
   bool request = 2;
   bool request_set = 3;
