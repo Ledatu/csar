@@ -131,7 +131,7 @@ func TestWrapUpstreamWithAuditCapture(t *testing.T) {
 	if err := json.Unmarshal(ev.Metadata, &meta); err != nil {
 		t.Fatal(err)
 	}
-	if meta["actor_email"] != "user@example.com" {
+	if meta["actor_email"] != nil {
 		t.Fatalf("actor_email = %v", meta["actor_email"])
 	}
 	query := meta["query"].(map[string]any)

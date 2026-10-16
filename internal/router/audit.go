@@ -2,16 +2,20 @@ package router
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	auditcore "github.com/ledatu/csar-core/audit"
 	"github.com/ledatu/csar-core/gatewayctx"
 	"github.com/ledatu/csar-core/jsonredact"
+	"github.com/ledatu/csar-core/logutil"
 	"github.com/ledatu/csar/internal/config"
+	"github.com/ledatu/csar/internal/proxy"
 )
 
 func defaultAuditForMutatingMethod(method string) bool {
@@ -38,15 +42,64 @@ const routerAuditServiceName = "csar-router"
 
 const actorEmailHeader = "X-User-Email"
 
-// auditResponseCapture records the HTTP status code for audit metadata.
-type auditResponseCapture struct {
-	http.ResponseWriter
-	statusCode int
+type auditRequestKey struct{}
+type auditRequestState struct {
+	identity         gatewayctx.Identity
+	email            string
+	verified         bool
+	stage            string
+	upstream         bool
+	upstreamStatus   int
+	transportFailure bool
+	secrets          []string
 }
 
-func (a *auditResponseCapture) WriteHeader(code int) {
-	a.statusCode = code
-	a.ResponseWriter.WriteHeader(code)
+func auditState(req *http.Request) *auditRequestState {
+	state, _ := req.Context().Value(auditRequestKey{}).(*auditRequestState)
+	return state
+}
+
+func auditStage(req *http.Request, stage string) {
+	if state := auditState(req); state != nil {
+		state.stage = stage
+	}
+}
+
+func auditIdentity(req *http.Request, rt *route) {
+	if state := auditState(req); state != nil {
+		state.identity = gatewayctx.FromRequest(req)
+		state.verified = true
+		if rt.sessionConfig != nil && rt.sessionValidator != nil {
+			for _, header := range rt.sessionConfig.ForwardHeaders {
+				if strings.EqualFold(header, actorEmailHeader) {
+					state.email = req.Header.Get(actorEmailHeader)
+				}
+			}
+		}
+		if rt.jwtConfig != nil && rt.jwtValidator != nil {
+			for _, header := range rt.jwtConfig.ForwardClaims {
+				if strings.EqualFold(header, actorEmailHeader) {
+					state.email = req.Header.Get(actorEmailHeader)
+				}
+			}
+		}
+	}
+}
+
+func auditSecrets(req *http.Request, state *auditRequestState) {
+	for name, values := range req.Header {
+		if !logutil.IsSensitiveKey(name) {
+			continue
+		}
+		for _, value := range values {
+			if len(value) >= 8 && !slices.Contains(state.secrets, value) {
+				state.secrets = append(state.secrets, value)
+			}
+			if _, token, ok := strings.Cut(value, " "); ok && len(token) >= 8 && !slices.Contains(state.secrets, token) {
+				state.secrets = append(state.secrets, token)
+			}
+		}
+	}
 }
 
 func (r *Router) wrapUpstreamWithAudit(rt *route, next http.Handler) http.Handler {
@@ -55,9 +108,26 @@ func (r *Router) wrapUpstreamWithAudit(rt *route, next http.Handler) http.Handle
 		return next
 	}
 
+	captureResponse := rt.auditCapture != nil && rt.auditCapture.CaptureResponseEnabled()
 	captureBody := rt.auditCapture != nil && rt.auditCapture.CaptureRequestEnabled() && methodMayHaveBody(rt.method)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Preflights have always returned before the audited upstream pipeline.
+		if rt.corsConfig != nil && req.Method == http.MethodOptions && req.Header.Get("Origin") != "" {
+			next.ServeHTTP(w, req)
+			return
+		}
+		start := time.Now()
+		state := auditState(req)
+		if state == nil {
+			state = &auditRequestState{verified: true, identity: gatewayctx.FromRequest(req)}
+			req = req.WithContext(context.WithValue(req.Context(), auditRequestKey{}, state))
+		}
+		req = req.WithContext(proxy.WithResponseObserver(req.Context(), func(status int) {
+			state.transportFailure = status == 0
+			state.upstreamStatus = status
+		}))
+		auditSecrets(req, state)
 		var (
 			beforeState  json.RawMessage
 			requestBytes int
@@ -77,14 +147,19 @@ func (r *Router) wrapUpstreamWithAudit(rt *route, next http.Handler) http.Handle
 			}
 		}
 
-		rec := &auditResponseCapture{ResponseWriter: w, statusCode: http.StatusOK}
+		rec := &auditResponseCapture{ResponseWriter: w, statusCode: http.StatusOK, capture: captureResponse && !isStreamingRequest(req)}
 		next.ServeHTTP(rec, req)
+		// ReverseProxy writes a successful upgrade directly to the hijacked
+		// connection, bypassing WriteHeader. The trusted proxy hook saw 101.
+		if rec.hijacked && !rec.written && state.upstreamStatus == http.StatusSwitchingProtocols {
+			rec.statusCode = http.StatusSwitchingProtocols
+		}
 
 		if !shouldEmitAudit(rt.auditMode, rec.statusCode) {
 			return
 		}
 
-		gw := gatewayctx.FromRequest(req)
+		gw := state.identity
 		clientIP := extractClientIP(req, rt.trustProxy, rt.trustedProxyCIDRs)
 
 		scopeType := "platform"
@@ -104,26 +179,48 @@ func (r *Router) wrapUpstreamWithAudit(rt *route, next http.Handler) http.Handle
 			"route":       rt.routeKey,
 			"audit_mode":  string(rt.auditMode),
 		}
-		if email := strings.TrimSpace(req.Header.Get(actorEmailHeader)); email != "" {
+		if email := strings.TrimSpace(state.email); email != "" {
 			metaMap["actor_email"] = email
 		}
-		if captureBody {
+		if captureBody && state.verified {
 			metaMap["request_bytes"] = requestBytes
 			metaMap["request_truncated"] = truncated
 			if contentType != "" {
 				metaMap["request_content_type"] = contentType
 			}
 		}
-		if rt.auditCapture != nil && rt.auditCapture.IncludeQueryEnabled() {
+		if state.verified && rt.auditCapture != nil && rt.auditCapture.IncludeQueryEnabled() {
 			if queryMeta := captureQueryParams(req, rt.auditCapture); len(queryMeta) > 0 {
 				metaMap["query"] = queryMeta
 			}
 		}
 
-		meta, err := json.Marshal(metaMap)
-		if err != nil {
-			meta = nil
+		var response *auditcore.HTTPResponse
+		if captureResponse && rec.statusCode >= 400 {
+			auditSecrets(req, state)
+			diag := auditcore.CaptureHTTPResponse(&auditcore.HTTPResponseInput{
+				Status: rec.statusCode, ContentType: rec.contentType, ContentEncoding: rec.contentEncoding,
+				Body: rec.body, ObservedBytes: rec.observedBytes, Complete: rec.capture && !rec.failed && rec.observedBytes <= auditcore.MaxHTTPInspectBytes,
+				MaxBodyBytes: int(rt.auditCapture.ResponseMaxBytes), Secrets: state.secrets,
+				Redact: jsonredact.Config{PathFields: rt.auditCapture.Fields, SensitiveKeys: rt.auditCapture.SensitiveFields},
+			})
+			diag.DurationMS = time.Since(start).Milliseconds()
+			diag.Stage = state.stage
+			if !state.upstream || state.transportFailure {
+				diag.Origin = "router"
+			}
+			if state.transportFailure {
+				diag.Stage = "upstream_transport"
+			}
+			if !rec.capture {
+				diag.OmissionReason = "streaming"
+			}
+			response = &diag
 		}
+		if !state.verified {
+			beforeState = nil
+		}
+		meta := auditcore.EncodeHTTPMetadata(metaMap, response)
 
 		ev := &auditcore.Event{
 			Service:     routerAuditServiceName,

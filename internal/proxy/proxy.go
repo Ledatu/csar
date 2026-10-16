@@ -27,12 +27,26 @@ import (
 type csarCtxKey struct{ name string }
 
 var (
-	ctxKeyWaitMS    = csarCtxKey{"X-CSAR-Wait-MS"}
-	ctxKeyStatus    = csarCtxKey{"X-CSAR-Status"}
-	ctxKeyRetryAftr = csarCtxKey{"Retry-After"}
-	ctxKeyProtoVer  = csarCtxKey{"X-CSAR-Protocol-Version"}
-	ctxKeyStripCORS = csarCtxKey{"strip-upstream-cors"}
+	ctxKeyWaitMS           = csarCtxKey{"X-CSAR-Wait-MS"}
+	ctxKeyStatus           = csarCtxKey{"X-CSAR-Status"}
+	ctxKeyRetryAftr        = csarCtxKey{"Retry-After"}
+	ctxKeyProtoVer         = csarCtxKey{"X-CSAR-Protocol-Version"}
+	ctxKeyStripCORS        = csarCtxKey{"strip-upstream-cors"}
+	ctxKeyResponseObserver = csarCtxKey{"response-observer"}
 )
+
+// WithResponseObserver records the latest proxy attempt HTTP status, or 0 for a
+// transport failure. The callback runs synchronously in ModifyResponse or ErrorHandler;
+// it must not write to the client. It is request-local and survives retries.
+func WithResponseObserver(ctx context.Context, observe func(status int)) context.Context {
+	return context.WithValue(ctx, ctxKeyResponseObserver, observe)
+}
+
+func observeResponse(ctx context.Context, status int) {
+	if observe, ok := ctx.Value(ctxKeyResponseObserver).(func(int)); ok {
+		observe(status)
+	}
+}
 
 // WithCSARHeaders stores X-CSAR-Wait-MS, X-CSAR-Status, Retry-After, and
 // X-CSAR-Protocol-Version values in the request context so they survive
@@ -267,6 +281,7 @@ func joinPaths(base, reqPath string) string {
 // (via WithCSARHeaders) before the proxy ran, and would otherwise be lost
 // because httputil.ReverseProxy replaces the ResponseWriter's header map.
 func (rp *ReverseProxy) modifyResponse(resp *http.Response) error {
+	observeResponse(resp.Request.Context(), resp.StatusCode)
 	ctx := resp.Request.Context()
 	if ShouldStripUpstreamCORS(ctx) {
 		StripUpstreamCORSHeaders(resp.Header)
@@ -288,6 +303,7 @@ func (rp *ReverseProxy) modifyResponse(resp *http.Response) error {
 
 // errorHandler handles errors from the upstream.
 func (rp *ReverseProxy) errorHandler(w http.ResponseWriter, r *http.Request, err error) {
+	observeResponse(r.Context(), 0)
 	requestID := r.Header.Get("X-Request-ID")
 	var netErr net.Error
 	if errors.Is(err, context.DeadlineExceeded) ||

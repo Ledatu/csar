@@ -8,6 +8,14 @@ const defaultAuditCaptureMaxBytes = 16 * 1024
 // merged inline configs. Must be called after Load / before Validate.
 func (c *Config) ResolveAuditCapturePolicies() error {
 	global := c.auditCaptureDefaults()
+	if err := validateAuditResponseCapture(global); err != nil {
+		return fmt.Errorf("audit.capture: %w", err)
+	}
+	for name := range c.AuditCapturePolicies {
+		if err := validateAuditResponseCapture(c.AuditCapturePolicies[name]); err != nil {
+			return fmt.Errorf("audit capture policy %q: %w", name, err)
+		}
+	}
 
 	for path, methods := range c.Paths {
 		for method := range methods {
@@ -67,6 +75,12 @@ func (c *Config) resolveAuditCaptureRoute(route *AuditCaptureConfig, global Audi
 	}
 
 	// Shallow merge: inline route fields override policy/global.
+	if route.Response != "" {
+		merged.Response = route.Response
+	}
+	if route.ResponseMaxBytes != 0 {
+		merged.ResponseMaxBytes = route.ResponseMaxBytes
+	}
 	if route.Request != nil {
 		merged.Request = route.Request
 	}
@@ -88,6 +102,15 @@ func (c *Config) resolveAuditCaptureRoute(route *AuditCaptureConfig, global Audi
 
 	if merged.MaxBytes <= 0 {
 		merged.MaxBytes = global.MaxBytes
+	}
+	if merged.Response == "" {
+		merged.Response = global.Response
+	}
+	if merged.ResponseMaxBytes == 0 {
+		merged.ResponseMaxBytes = global.ResponseMaxBytes
+	}
+	if err := validateAuditResponseCapture(merged); err != nil {
+		return merged, err
 	}
 	if merged.Mask == "" {
 		merged.Mask = global.Mask
@@ -139,6 +162,9 @@ func (c AuditCaptureConfig) CaptureRequestEnabled() bool {
 	return c.Request != nil && *c.Request
 }
 
+// CaptureResponseEnabled reports whether final HTTP errors are inspected.
+func (c AuditCaptureConfig) CaptureResponseEnabled() bool { return c.Response == "errors" }
+
 // IncludeQueryEnabled reports whether query params should be captured.
 func (c AuditCaptureConfig) IncludeQueryEnabled() bool {
 	return c.IncludeQuery == nil || *c.IncludeQuery
@@ -148,4 +174,14 @@ func (c AuditCaptureConfig) IncludeQueryEnabled() bool {
 // Policies without redact refs, fields, or sensitive_fields store raw values.
 func (c AuditCaptureConfig) RedactionEnabled() bool {
 	return len(c.Fields) > 0 || len(c.SensitiveFields) > 0
+}
+
+func validateAuditResponseCapture(c AuditCaptureConfig) error {
+	if c.Response != "" && c.Response != "off" && c.Response != "errors" {
+		return fmt.Errorf("audit response must be off or errors")
+	}
+	if c.ResponseMaxBytes < 0 || c.ResponseMaxBytes > 4096 {
+		return fmt.Errorf("audit response_max_bytes must be between 0 and 4096")
+	}
+	return nil
 }

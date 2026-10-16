@@ -56,6 +56,18 @@ and internal admin surfaces.
   validated.
 
 ## Audit Hotspots
+- Opt-in `x-csar-audit-capture.response: errors` adds a versioned, bounded,
+  sanitized final-client-response diagnostic to `metadata.http_response`.
+  `csar-core/audit` owns the envelope and sanitization; no audit storage/proto
+  migration is needed. Coordinator `AuditCaptureConfigProto` fields 11–12 carry
+  response mode/limit. Upgrade helper, coordinator and router before publishing
+  these configs; `off` remains the default.
+- Auditing wraps matched routes before auth/security/admission refusals, emits
+  only once after retries/response shaping, and preserves preflight/unmatched
+  exclusions. Identity/email must come from validated gateway/forwarded claims,
+  never caller-supplied early-denial headers. The private proxy response observer
+  distinguishes transport failures from empty upstream HTTP responses without
+  trusting upstream headers. Streaming/flush/hijack bodies are omitted.
 - JWKS handling is split between router-local logic and `csar-core/jwtx`.
 - `gatewayctx` trust depends on the surrounding transport and network policy.
 - KMS/profile enforcement lives in both config validation and the runtime

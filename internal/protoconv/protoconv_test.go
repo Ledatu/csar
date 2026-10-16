@@ -392,3 +392,10 @@ func TestFullSnapshotToConfig_CompositeAuthzResolves(t *testing.T) {
 		t.Errorf("policy names lost through snapshot: %q / %q", authz.PolicyName, authz.AnyOf[1].PolicyName)
 	}
 }
+
+func TestAuditResponseCaptureSnapshot(t *testing.T) {
+	cfg := protoToAuditCaptureConfig(&csarv1.AuditCaptureConfigProto{Response: "errors", ResponseMaxBytes: 2048})
+	if cfg.Response != "errors" || cfg.ResponseMaxBytes != 2048 || cfg.CaptureRequestEnabled() {
+		t.Fatalf("%+v", cfg)
+	}
+}

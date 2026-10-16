@@ -58,6 +58,15 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	state := &auditRequestState{stage: "authentication"}
+	req = req.WithContext(context.WithValue(req.Context(), auditRequestKey{}, state))
+	gatewayctx.StripTrusted(req.Header)
+	r.wrapUpstreamWithAudit(rt, http.HandlerFunc(func(aw http.ResponseWriter, ar *http.Request) {
+		r.serveMatchedRoute(aw, ar, rt, captures)
+	})).ServeHTTP(w, req)
+}
+
+func (r *Router) serveMatchedRoute(w http.ResponseWriter, req *http.Request, rt *route, captures []string) {
 	// Build path variable map from regex captures BEFORE path rewrite.
 	// captures[0] is the full match; captures[1..n] correspond to pathVarNames.
 	if len(rt.pathVarNames) > 0 && len(captures) > len(rt.pathVarNames) {
@@ -184,6 +193,8 @@ func (r *Router) serveWithIPCheck(w http.ResponseWriter, req *http.Request, rt *
 // here before any backend dispatch, which makes it the one place guaranteed to
 // run on every proxied request.
 func (r *Router) serveAfterJWT(w http.ResponseWriter, req *http.Request, rt *route) {
+	auditIdentity(req, rt)
+	auditStage(req, "authorization")
 	// The gateway credential is hop-by-hop: inbound auth has already consumed
 	// it, and it must never reach a backend — least of all an external upstream
 	// on a route that proxies headers verbatim. Unconditional by design: routes
@@ -207,6 +218,7 @@ func (r *Router) serveAfterJWT(w http.ResponseWriter, req *http.Request, rt *rou
 // serveAfterAuth runs the pipeline after inbound JWT validation.
 // Pipeline continues: static headers -> security inject -> throttle -> circuit breaker -> proxy.
 func (r *Router) serveAfterAuth(w http.ResponseWriter, req *http.Request, rt *route) {
+	auditStage(req, "security")
 	// Step 0b-0: Inject static headers from x-csar-headers.
 	// These are fixed per-route headers like User-Agent or x-client-secret
 	// that don't need KMS decryption.
@@ -311,6 +323,10 @@ func (r *Router) writeThrottleUnavailable(w http.ResponseWriter, req *http.Reque
 // request spent queued.
 // See: https://github.com/ledatu/csar-ts
 func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *route) {
+	auditStage(req, "admission")
+	if state := auditState(req); state != nil {
+		auditSecrets(req, state)
+	}
 	var totalWait time.Duration
 
 	// ── csar-ts observability: handle client-reported RPS hint ──────────
@@ -562,6 +578,10 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 }
 
 func (r *Router) serveUpstream(w http.ResponseWriter, req *http.Request, rt *route) {
+	if state := auditState(req); state != nil {
+		state.upstream = true
+		state.stage = "upstream"
+	}
 	if rt.upstreamTimeout <= 0 || isStreamingRequest(req) {
 		r.upstreamHandler(rt).ServeHTTP(w, req)
 		return
@@ -618,7 +638,7 @@ func (r *Router) upstreamHandler(rt *route) http.Handler {
 
 		handler.ServeHTTP(w, req)
 	})
-	return r.wrapUpstreamWithAudit(rt, inner)
+	return inner
 }
 
 // baseProxy returns the base proxy handler (tenant routing or direct proxy).

@@ -1727,6 +1727,8 @@
       "description": "Redacted request-body capture for router audit events.",
       "additionalProperties": false,
       "properties": {
+        "response": { "type": "string", "enum": ["off", "errors"], "description": "Capture sanitized final HTTP error envelopes; default off." },
+        "response_max_bytes": { "type": "integer", "minimum": 0, "maximum": 4096 },
         "use": {
           "type": "string",
           "description": "Reference to a named audit_capture_policies entry."

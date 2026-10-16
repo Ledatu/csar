@@ -150,6 +150,8 @@ github.com/ledatu/csar-core v0.1.43 h1:XwPfpODUFXouTp1RxjA+t68LeCYSpRjZ7fiX708Ec
 github.com/ledatu/csar-core v0.1.43/go.mod h1:reXtm4FMfXG425l3DZa6pem8nWhiuHireKvRIVuKzIM=
 github.com/ledatu/csar-core v0.1.45-0.20261010123016-b4fcc80cd52c h1:GCQpIRoyUIy9HfEE45R3sukjlie+I/HLP0U8Wzb7grc=
 github.com/ledatu/csar-core v0.1.45-0.20261010123016-b4fcc80cd52c/go.mod h1:YI7sPdV/ECwpjLf9bvZTUs8ASanNoMnsokbRvHtOkr4=
+github.com/ledatu/csar-core v0.1.46 h1:weP2IBTUMFLIz3bJ/iqnUNUW7HKPvnp4RWoCLGeTMKY=
+github.com/ledatu/csar-core v0.1.46/go.mod h1:YI7sPdV/ECwpjLf9bvZTUs8ASanNoMnsokbRvHtOkr4=
 github.com/ledatu/csar-proto v0.1.4 h1:k6Y5aiBQqeKBwrtt8q//6ZbQHYS21Wqf4jDRsI4F6ac=
 github.com/ledatu/csar-proto v0.1.4/go.mod h1:HlqVobOX4ChofAQrwRsiyq62VKTNAuRsNGmZQwHJl7I=
 github.com/ledatu/csar-proto v0.1.5 h1:w9/Kx8FlMYuGRdAINkYtdBkjCm+u2WYG5SkkzaP+rQI=
