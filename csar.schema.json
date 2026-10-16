@@ -1724,10 +1724,10 @@
     },
     "AuditCaptureConfig": {
       "type": "object",
-      "description": "Redacted request-body capture for router audit events.",
+      "description": "Request capture and sanitized error-response diagnostics for router audit events.",
       "additionalProperties": false,
       "properties": {
-        "response": { "type": "string", "enum": ["off", "errors"], "description": "Capture sanitized final HTTP error envelopes; default off." },
+        "response": { "type": "string", "enum": ["off", "errors"], "description": "Capture sanitized final HTTP error envelopes; defaults to errors on audited routes. Explicit off disables response diagnostics." },
         "response_max_bytes": { "type": "integer", "minimum": 0, "maximum": 4096 },
         "use": {
           "type": "string",

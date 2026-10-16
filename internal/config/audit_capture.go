@@ -162,7 +162,8 @@ func (c AuditCaptureConfig) CaptureRequestEnabled() bool {
 	return c.Request != nil && *c.Request
 }
 
-// CaptureResponseEnabled reports whether final HTTP errors are inspected.
+// CaptureResponseEnabled reports an explicit response capture request for config
+// validation. Audited routes also capture errors when Response is unspecified.
 func (c AuditCaptureConfig) CaptureResponseEnabled() bool { return c.Response == "errors" }
 
 // IncludeQueryEnabled reports whether query params should be captured.

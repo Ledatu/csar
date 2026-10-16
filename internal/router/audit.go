@@ -108,7 +108,13 @@ func (r *Router) wrapUpstreamWithAudit(rt *route, next http.Handler) http.Handle
 		return next
 	}
 
-	captureResponse := rt.auditCapture != nil && rt.auditCapture.CaptureResponseEnabled()
+	// Emission mode decides which events exist; error diagnostics are the
+	// default for every audited route, independently of request/query capture.
+	var responseCapture config.AuditCaptureConfig
+	if rt.auditCapture != nil {
+		responseCapture = *rt.auditCapture
+	}
+	captureResponse := rt.auditMode.IsActive() && responseCapture.Response != "off"
 	captureBody := rt.auditCapture != nil && rt.auditCapture.CaptureRequestEnabled() && methodMayHaveBody(rt.method)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -201,8 +207,8 @@ func (r *Router) wrapUpstreamWithAudit(rt *route, next http.Handler) http.Handle
 			diag := auditcore.CaptureHTTPResponse(&auditcore.HTTPResponseInput{
 				Status: rec.statusCode, ContentType: rec.contentType, ContentEncoding: rec.contentEncoding,
 				Body: rec.body, ObservedBytes: rec.observedBytes, Complete: rec.capture && !rec.failed && rec.observedBytes <= auditcore.MaxHTTPInspectBytes,
-				MaxBodyBytes: int(rt.auditCapture.ResponseMaxBytes), Secrets: state.secrets,
-				Redact: jsonredact.Config{PathFields: rt.auditCapture.Fields, SensitiveKeys: rt.auditCapture.SensitiveFields},
+				MaxBodyBytes: int(responseCapture.ResponseMaxBytes), Secrets: state.secrets,
+				Redact: jsonredact.Config{PathFields: responseCapture.Fields, SensitiveKeys: responseCapture.SensitiveFields},
 			})
 			diag.DurationMS = time.Since(start).Milliseconds()
 			diag.Stage = state.stage
