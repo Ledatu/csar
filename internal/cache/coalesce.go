@@ -3,7 +3,8 @@ package cache
 import (
 	"net/http"
 	"net/http/httptest"
-	"sync"
+
+	"github.com/ledatu/csar-core/readcache"
 )
 
 type capturedResponse struct {
@@ -22,37 +23,16 @@ func captureRecorder(rec *httptest.ResponseRecorder, cacheStatus string) capture
 	}
 }
 
-type coalesceCall struct {
-	done   chan struct{}
-	result capturedResponse
-}
+// Limits apply per ResponseCache instance, across its routes. Overload is
+// rejected, never converted into a second uncoalesced upstream request.
+const maxCoalesceKeys = 1024
+const maxCoalesceFollowers = 128
+const maxCoalesceKeyBytes = 4096
 
-type coalescer struct {
-	mu    sync.Mutex
-	calls map[string]*coalesceCall
-}
-
-func newCoalescer() *coalescer {
-	return &coalescer{calls: make(map[string]*coalesceCall)}
-}
-
-func (c *coalescer) begin(key string) (bool, *coalesceCall) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if call, ok := c.calls[key]; ok {
-		return false, call
-	}
-	call := &coalesceCall{done: make(chan struct{})}
-	c.calls[key] = call
-	return true, call
-}
-
-func (c *coalescer) finish(key string, call *coalesceCall, result capturedResponse) {
-	c.mu.Lock()
-	if c.calls[key] == call {
-		delete(c.calls, key)
-	}
-	call.result = result
-	close(call.done)
-	c.mu.Unlock()
+func newCoalescer() *readcache.Group[capturedResponse] {
+	group, err := readcache.NewGroup[capturedResponse](readcache.Limits{MaxKeys: maxCoalesceKeys, MaxFollowers: maxCoalesceFollowers, MaxKeyBytes: maxCoalesceKeyBytes})
+	if err != nil {
+		panic(err)
+	} // compile-time positive limits
+	return group
 }

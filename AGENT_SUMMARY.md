@@ -106,3 +106,14 @@ enabled PostgreSQL sync apply. Release this matching csar-helper before publishi
 that config; router/coordinator source behavior is unchanged in this update.
 CI covers the actual default branch master as well as main, and prepares the
 existing MCP schema embed input before scanning/building all Go packages.
+
+## Shared cache flight primitive (source only, October 23)
+- HTTP cache coalescing now uses `csar-core/readcache.Group` instead of a local
+  mutex/map implementation. HTTP keys, stores, TTL and auth ordering stay here.
+- Per ResponseCache instance: 1024 live keys, 128 followers/key, 4096 key bytes.
+  Excess work returns 503 and Retry-After without issuing an uncoalesced request.
+- Stale refresh admission occurs before goroutine creation; an existing refresh
+  needs no background follower. Deferred ticket completion unblocks followers
+  when a synchronous leader panics. No Redis lease/fencing is introduced.
+- Development uses sibling go.work; pin a release containing readcache before
+  publishing this consumer outside the workspace.
