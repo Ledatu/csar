@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/ledatu/csar-core/gatewayctx"
+	"github.com/ledatu/csar-core/readcache"
 )
 
 // DefaultTTL is the default cache TTL when no Cache-Control header is present.
@@ -124,7 +125,7 @@ type ResponseCache struct {
 	memory *MemoryStore
 	redis  *RedisStore
 
-	coalescer *coalescer
+	coalescer *readcache.Group[capturedResponse]
 	debouncer *invalidationDebouncer
 }
 
@@ -477,35 +478,52 @@ func (rc *ResponseCache) getStale(r *http.Request, cfg Config, cacheKey string, 
 }
 
 func (rc *ResponseCache) refreshAsync(r *http.Request, cfg Config, cacheKey string, namespaces []string, namespaceVersions map[string]int64, store Store, next http.Handler) {
+	// Admit before starting a goroutine. An existing refresh needs no follower.
+	leader, call, release, err := rc.coalescer.Begin(cacheKey)
+	if err != nil {
+		rc.record(cfg.RouteKey, "coalesce_rejected")
+		return
+	}
+	if !leader {
+		release()
+		return
+	}
 	req := r.Clone(context.Background())
 	go func() {
-		leader, call := rc.coalescer.begin(cacheKey)
-		if !leader {
-			<-call.done
-			return
-		}
+		defer release()
+		defer rc.coalescer.Finish(cacheKey, call, capturedResponse{}, readcache.ErrAborted)
 		rc.record(cfg.RouteKey, "coalesced_leader")
 		result := rc.fetchAndMaybeCache(req, cfg, cacheKey, namespaces, namespaceVersions, store, next)
-		rc.coalescer.finish(cacheKey, call, result)
+		rc.coalescer.Finish(cacheKey, call, result, nil)
 	}()
 }
 
 func (rc *ResponseCache) serveCoalesced(w http.ResponseWriter, r *http.Request, cfg Config, cacheKey string, namespaces []string, namespaceVersions map[string]int64, store Store, next http.Handler) {
-	leader, call := rc.coalescer.begin(cacheKey)
+	leader, call, release, err := rc.coalescer.Begin(cacheKey)
+	if err != nil {
+		rc.record(cfg.RouteKey, "coalesce_rejected")
+		w.Header().Set("X-CSAR-Cache", "BYPASS")
+		w.Header().Set("X-CSAR-Status", "cache_coalesce_capacity")
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "cache coalesce capacity exhausted", http.StatusServiceUnavailable)
+		return
+	}
+	defer release()
 	if leader {
+		defer rc.coalescer.Finish(cacheKey, call, capturedResponse{}, readcache.ErrAborted)
 		rc.record(cfg.RouteKey, "coalesced_leader")
 		result := rc.fetchAndMaybeCache(r, cfg, cacheKey, namespaces, namespaceVersions, store, next)
 		if result.cacheStatus == "BYPASS" && result.statusCode >= 500 && cfg.StaleIfError > 0 {
 			if stale, ok := rc.getStale(r, cfg, cacheKey, namespaceVersions, store); ok {
 				result = capturedFromEntry(stale, "STALE")
-				rc.coalescer.finish(cacheKey, call, result)
+				rc.coalescer.Finish(cacheKey, call, result, nil)
 				rc.record(cfg.RouteKey, "refresh_error")
 				rc.record(cfg.RouteKey, "stale")
 				rc.writeCaptured(w, result)
 				return
 			}
 		}
-		rc.coalescer.finish(cacheKey, call, result)
+		rc.coalescer.Finish(cacheKey, call, result, nil)
 		rc.writeCaptured(w, result)
 		return
 	}
@@ -514,8 +532,14 @@ func (rc *ResponseCache) serveCoalesced(w http.ResponseWriter, r *http.Request, 
 	timer := time.NewTimer(cfg.Coalesce.Wait)
 	defer timer.Stop()
 	select {
-	case <-call.done:
-		rc.writeCaptured(w, call.result)
+	case <-call.Done():
+		result, waitErr := call.Wait(r.Context())
+		if waitErr != nil {
+			w.Header().Set("X-CSAR-Cache", "BYPASS")
+			http.Error(w, "cache fill interrupted", http.StatusServiceUnavailable)
+			return
+		}
+		rc.writeCaptured(w, result)
 	case <-timer.C:
 		rc.record(cfg.RouteKey, "coalesce_timeout")
 		if cfg.StaleWhileRevalidate > 0 {
