@@ -1706,25 +1706,29 @@ func (x *GlobalThrottleProto) GetMaxWait() *durationpb.Duration {
 }
 
 type AuthValidateConfigProto struct {
-	state           protoimpl.MessageState   `protogen:"open.v1"`
-	Use             string                   `protobuf:"bytes,1,opt,name=use,proto3" json:"use,omitempty"`
-	JwksUrl         string                   `protobuf:"bytes,2,opt,name=jwks_url,json=jwksUrl,proto3" json:"jwks_url,omitempty"`
-	Issuer          string                   `protobuf:"bytes,3,opt,name=issuer,proto3" json:"issuer,omitempty"`
-	Audiences       []string                 `protobuf:"bytes,4,rep,name=audiences,proto3" json:"audiences,omitempty"`
-	HeaderName      string                   `protobuf:"bytes,5,opt,name=header_name,json=headerName,proto3" json:"header_name,omitempty"`
-	TokenPrefix     string                   `protobuf:"bytes,6,opt,name=token_prefix,json=tokenPrefix,proto3" json:"token_prefix,omitempty"`
-	CacheTtl        *durationpb.Duration     `protobuf:"bytes,7,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`
-	RequiredClaims  map[string]string        `protobuf:"bytes,8,rep,name=required_claims,json=requiredClaims,proto3" json:"required_claims,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	ForwardClaims   map[string]string        `protobuf:"bytes,9,rep,name=forward_claims,json=forwardClaims,proto3" json:"forward_claims,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	CookieName      string                   `protobuf:"bytes,10,opt,name=cookie_name,json=cookieName,proto3" json:"cookie_name,omitempty"`
-	Mode            string                   `protobuf:"bytes,11,opt,name=mode,proto3" json:"mode,omitempty"`
-	SessionEndpoint string                   `protobuf:"bytes,12,opt,name=session_endpoint,json=sessionEndpoint,proto3" json:"session_endpoint,omitempty"`
-	SessionTls      string                   `protobuf:"bytes,13,opt,name=session_tls,json=sessionTls,proto3" json:"session_tls,omitempty"`
-	ForwardHeaders  []string                 `protobuf:"bytes,14,rep,name=forward_headers,json=forwardHeaders,proto3" json:"forward_headers,omitempty"`
-	JwksTls         string                   `protobuf:"bytes,15,opt,name=jwks_tls,json=jwksTls,proto3" json:"jwks_tls,omitempty"`
-	IssueTokens     []*IssueTokenConfigProto `protobuf:"bytes,16,rep,name=issue_tokens,json=issueTokens,proto3" json:"issue_tokens,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state                 protoimpl.MessageState   `protogen:"open.v1"`
+	Use                   string                   `protobuf:"bytes,1,opt,name=use,proto3" json:"use,omitempty"`
+	JwksUrl               string                   `protobuf:"bytes,2,opt,name=jwks_url,json=jwksUrl,proto3" json:"jwks_url,omitempty"`
+	Issuer                string                   `protobuf:"bytes,3,opt,name=issuer,proto3" json:"issuer,omitempty"`
+	Audiences             []string                 `protobuf:"bytes,4,rep,name=audiences,proto3" json:"audiences,omitempty"`
+	HeaderName            string                   `protobuf:"bytes,5,opt,name=header_name,json=headerName,proto3" json:"header_name,omitempty"`
+	TokenPrefix           string                   `protobuf:"bytes,6,opt,name=token_prefix,json=tokenPrefix,proto3" json:"token_prefix,omitempty"`
+	CacheTtl              *durationpb.Duration     `protobuf:"bytes,7,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`
+	RequiredClaims        map[string]string        `protobuf:"bytes,8,rep,name=required_claims,json=requiredClaims,proto3" json:"required_claims,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	ForwardClaims         map[string]string        `protobuf:"bytes,9,rep,name=forward_claims,json=forwardClaims,proto3" json:"forward_claims,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	CookieName            string                   `protobuf:"bytes,10,opt,name=cookie_name,json=cookieName,proto3" json:"cookie_name,omitempty"`
+	Mode                  string                   `protobuf:"bytes,11,opt,name=mode,proto3" json:"mode,omitempty"`
+	SessionEndpoint       string                   `protobuf:"bytes,12,opt,name=session_endpoint,json=sessionEndpoint,proto3" json:"session_endpoint,omitempty"`
+	SessionTls            string                   `protobuf:"bytes,13,opt,name=session_tls,json=sessionTls,proto3" json:"session_tls,omitempty"`
+	ForwardHeaders        []string                 `protobuf:"bytes,14,rep,name=forward_headers,json=forwardHeaders,proto3" json:"forward_headers,omitempty"`
+	JwksTls               string                   `protobuf:"bytes,15,opt,name=jwks_tls,json=jwksTls,proto3" json:"jwks_tls,omitempty"`
+	IssueTokens           []*IssueTokenConfigProto `protobuf:"bytes,16,rep,name=issue_tokens,json=issueTokens,proto3" json:"issue_tokens,omitempty"`
+	IntrospectionEndpoint string                   `protobuf:"bytes,17,opt,name=introspection_endpoint,json=introspectionEndpoint,proto3" json:"introspection_endpoint,omitempty"`
+	IntrospectionTls      string                   `protobuf:"bytes,18,opt,name=introspection_tls,json=introspectionTls,proto3" json:"introspection_tls,omitempty"`
+	RequiredScope         string                   `protobuf:"bytes,19,opt,name=required_scope,json=requiredScope,proto3" json:"required_scope,omitempty"`
+	SellerPathParam       string                   `protobuf:"bytes,20,opt,name=seller_path_param,json=sellerPathParam,proto3" json:"seller_path_param,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *AuthValidateConfigProto) Reset() {
@@ -1867,6 +1871,34 @@ func (x *AuthValidateConfigProto) GetIssueTokens() []*IssueTokenConfigProto {
 		return x.IssueTokens
 	}
 	return nil
+}
+
+func (x *AuthValidateConfigProto) GetIntrospectionEndpoint() string {
+	if x != nil {
+		return x.IntrospectionEndpoint
+	}
+	return ""
+}
+
+func (x *AuthValidateConfigProto) GetIntrospectionTls() string {
+	if x != nil {
+		return x.IntrospectionTls
+	}
+	return ""
+}
+
+func (x *AuthValidateConfigProto) GetRequiredScope() string {
+	if x != nil {
+		return x.RequiredScope
+	}
+	return ""
+}
+
+func (x *AuthValidateConfigProto) GetSellerPathParam() string {
+	if x != nil {
+		return x.SellerPathParam
+	}
+	return ""
 }
 
 type RetryConfigProto struct {
@@ -3953,7 +3985,7 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x13GlobalThrottleProto\x12\x10\n" +
 	"\x03rps\x18\x01 \x01(\x01R\x03rps\x12\x14\n" +
 	"\x05burst\x18\x02 \x01(\x05R\x05burst\x124\n" +
-	"\bmax_wait\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\amaxWait\"\xc0\x06\n" +
+	"\bmax_wait\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\amaxWait\"\xf7\a\n" +
 	"\x17AuthValidateConfigProto\x12\x10\n" +
 	"\x03use\x18\x01 \x01(\tR\x03use\x12\x19\n" +
 	"\bjwks_url\x18\x02 \x01(\tR\ajwksUrl\x12\x16\n" +
@@ -3974,7 +4006,11 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"sessionTls\x12'\n" +
 	"\x0fforward_headers\x18\x0e \x03(\tR\x0eforwardHeaders\x12\x19\n" +
 	"\bjwks_tls\x18\x0f \x01(\tR\ajwksTls\x12A\n" +
-	"\fissue_tokens\x18\x10 \x03(\v2\x1e.csar.v1.IssueTokenConfigProtoR\vissueTokens\x1aA\n" +
+	"\fissue_tokens\x18\x10 \x03(\v2\x1e.csar.v1.IssueTokenConfigProtoR\vissueTokens\x125\n" +
+	"\x16introspection_endpoint\x18\x11 \x01(\tR\x15introspectionEndpoint\x12+\n" +
+	"\x11introspection_tls\x18\x12 \x01(\tR\x10introspectionTls\x12%\n" +
+	"\x0erequired_scope\x18\x13 \x01(\tR\rrequiredScope\x12*\n" +
+	"\x11seller_path_param\x18\x14 \x01(\tR\x0fsellerPathParam\x1aA\n" +
 	"\x13RequiredClaimsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a@\n" +

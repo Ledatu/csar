@@ -101,6 +101,14 @@ and internal admin surfaces.
   touch the router surface
 
 ## Authn session schema validation
+
+Personal-token auth validation transports `introspection_endpoint`,
+`introspection_tls`, `required_scope`, and `seller_path_param` through the
+coordinator snapshot protobuf. Deploy matching coordinators and routers before
+relying on these policies: older senders omit the fields and older readers
+discard them. Regression coverage serializes a resolved named policy through
+the actual protobuf snapshot and reconstructs the router configuration.
+
 The core dependency includes `legacy_users_sync.lock_database_dsn`, required for
 enabled PostgreSQL sync apply. Release this matching csar-helper before publishing
 that config; router/coordinator source behavior is unchanged in this update.
