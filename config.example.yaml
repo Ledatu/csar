@@ -130,6 +130,18 @@ listen_addr: ":8080"
 #     max_body_size: 1048576
 #     methods: ["GET", "HEAD"]
 #
+#   stocks-read:
+#     store: "redis"
+#     methods: ["POST"]             # only read-only POST routes
+#     key: "stocks:{subject}:{path.seller_id}"
+#     key_query: {sort: true}
+#     max_request_body_size: 65536  # exact body is always hashed; oversize bypasses
+#     ttl: "30s"
+#     content_types: ["application/json"]
+#     # Route usage: x-csar-cache: "stocks-read"
+#     # Inline scalar override:
+#     # x-csar-cache: {use: "stocks-read", max_request_body_size: 131072}
+#
 # cache_invalidation_policies:
 #   analytics-skus-tenant:
 #     on_status: ["2xx"]

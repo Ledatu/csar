@@ -1,6 +1,9 @@
 package config
 
 import (
+	"fmt"
+	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +18,97 @@ func TestCacheConfig_UnmarshalYAML_BareString(t *testing.T) {
 	}
 	if cc.Use != "analytics-cache" {
 		t.Fatalf("Use = %q, want analytics-cache", cc.Use)
+	}
+}
+
+func TestResolveCachePolicies_POSTRequestLimit(t *testing.T) {
+	for _, inline := range []int64{0, 16 * 1024} {
+		cfg := &Config{}
+		authored := fmt.Sprintf(`listen_addr: ":0"
+cache_policies:
+  stocks:
+    key: "stocks:{subject}"
+    max_request_body_size: 131072
+    methods: [POST]
+paths:
+  /stocks:
+    post:
+      x-csar-backend: {target_url: "http://upstream"}
+      x-csar-cache: {use: stocks, max_request_body_size: %d}
+`, inline)
+		if err := yaml.Unmarshal([]byte(authored), cfg); err != nil {
+			t.Fatal(err)
+		}
+		if err := cfg.ResolveCachePolicies(); err != nil {
+			t.Fatal(err)
+		}
+		if err := cfg.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		got := cfg.Paths["/stocks"]["post"].Cache
+		want := int64(128 * 1024)
+		if inline != 0 {
+			want = inline
+		}
+		if got.MaxRequestBodySize != want || len(got.Methods) != 1 || got.Methods[0] != "POST" {
+			t.Fatalf("resolved policy = %+v", got)
+		}
+		if cfg.CachePolicies["stocks"].MaxRequestBodySize != 128*1024 {
+			t.Fatal("inline override changed named policy")
+		}
+	}
+}
+
+func TestValidateCache_POSTRequiresKeyIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		key       string
+		wantError bool
+	}{
+		{key: "stocks", wantError: true},
+		{key: "stocks:{subject}"},
+		{key: "stocks:{tenant}"},
+	} {
+		cfg := &Config{
+			ListenAddr: ":0",
+			CachePolicies: map[string]CacheConfig{
+				"stocks": {Key: tc.key, Tags: []string{"stocks:{tenant}"}, Methods: []string{"post"}},
+			},
+			Paths: map[string]PathConfig{
+				"/stocks": {"post": {
+					Backend:      BackendConfig{TargetURL: "http://upstream"},
+					AuthValidate: &AuthValidateConfig{Mode: "session", SessionEndpoint: "http://authn", CookieName: "session"},
+					Cache:        &CacheConfig{Use: "stocks"},
+				}},
+			},
+		}
+		if err := cfg.ResolveCachePolicies(); err != nil {
+			t.Fatal(err)
+		}
+		err := cfg.Validate()
+		if tc.wantError {
+			if err == nil || !strings.Contains(err.Error(), "authenticated POST cache requires") {
+				t.Fatalf("key %q validation = %v", tc.key, err)
+			}
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestValidateCache_RequestBodyLimit(t *testing.T) {
+	for _, limit := range []int64{-1, math.MaxInt64} {
+		cfg := &Config{
+			ListenAddr: ":0",
+			Paths: map[string]PathConfig{
+				"/stocks": {"post": {
+					Backend: BackendConfig{TargetURL: "http://upstream"},
+					Cache:   &CacheConfig{MaxRequestBodySize: limit, Methods: []string{"POST"}},
+				}},
+			},
+		}
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "max_request_body_size") {
+			t.Fatalf("limit %d validation = %v", limit, err)
+		}
 	}
 }
 

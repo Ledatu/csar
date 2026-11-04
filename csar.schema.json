@@ -1202,9 +1202,16 @@
           "description": "Maximum response body size to cache (bytes). Larger responses are not cached.",
           "default": 1048576
         },
+        "max_request_body_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9223372036854775806,
+          "description": "Maximum POST request body buffered for cache keys in bytes. Zero uses 64 KiB. Larger bodies and requests with trailers bypass caching.",
+          "default": 65536
+        },
         "methods": {
           "type": "array",
-          "description": "HTTP methods to cache.",
+          "description": "HTTP methods to cache. Explicit POST opt-in hashes the exact request body, Content-Type and Content-Encoding. Use only for read-only POST routes.",
           "items": { "type": "string" },
           "default": ["GET", "HEAD"]
         },

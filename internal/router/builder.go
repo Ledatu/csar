@@ -839,6 +839,7 @@ func (r *Router) setupCache(rt *route, fr config.FlatRoute, key string, logger *
 		Coalesce:             buildCacheCoalesce(fr.Route.Cache.Coalesce),
 		MaxEntries:           fr.Route.Cache.MaxEntries,
 		MaxBodySize:          fr.Route.Cache.MaxBodySize,
+		MaxRequestBodySize:   fr.Route.Cache.MaxRequestBodySize,
 		Tags:                 fr.Route.Cache.Tags,
 		VaryHeaders:          fr.Route.Cache.VaryHeaders,
 		CacheStatuses:        fr.Route.Cache.CacheStatuses,

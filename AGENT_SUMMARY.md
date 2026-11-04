@@ -38,6 +38,15 @@ and internal admin surfaces.
 - Readiness and health sidecars are part of the operational contract.
 
 ## Config And Secrets
+- Explicitly cached POST reads include an exact-body SHA-256 digest, request
+  Content-Type and Content-Encoding in a separate versioned key format.
+  `max_request_body_size` defaults to 64 KiB, supports named-policy scalar
+  overrides and travels in coordinator CacheConfigProto field 26. Oversized
+  bodies/trailers bypass caching intact; body read errors return 400. Protected
+  POST caches require subject or tenant in the lookup key. Refreshes retain
+  context values and replay independent bodies with bounded deadlines.
+  Upgrade all router/coordinator readers before publishing POST cache policies;
+  disable POST caching during mixed-version rollout or rollback.
 - Throttle policies, inline traffic and global limits accept `requests` +
   `period` as an alternative to legacy RPS fields. Resolution consumes the pair
   before inheritance/distribution; compiled YAML and protobuf remain canonical

@@ -828,19 +828,20 @@ func cacheToProto(cc *config.CacheConfig) *csarv1.CacheConfigProto {
 		return nil
 	}
 	pb := &csarv1.CacheConfigProto{
-		Use:           cc.Use,
-		Store:         cc.Store,
-		Key:           cc.Key,
-		FailMode:      cc.FailMode,
-		TtlJitter:     cc.TTLJitter,
-		MaxEntries:    safeInt32(cc.MaxEntries),
-		MaxBodySize:   cc.MaxBodySize,
-		Methods:       cc.Methods,
-		ContentTypes:  cc.ContentTypes,
-		Namespaces:    cc.Namespaces,
-		Tags:          cc.Tags,
-		VaryHeaders:   cc.VaryHeaders,
-		CacheStatuses: cc.CacheStatuses,
+		Use:                cc.Use,
+		Store:              cc.Store,
+		Key:                cc.Key,
+		FailMode:           cc.FailMode,
+		TtlJitter:          cc.TTLJitter,
+		MaxEntries:         safeInt32(cc.MaxEntries),
+		MaxBodySize:        cc.MaxBodySize,
+		MaxRequestBodySize: cc.MaxRequestBodySize,
+		Methods:            cc.Methods,
+		ContentTypes:       cc.ContentTypes,
+		Namespaces:         cc.Namespaces,
+		Tags:               cc.Tags,
+		VaryHeaders:        cc.VaryHeaders,
+		CacheStatuses:      cc.CacheStatuses,
 	}
 	if cc.Enabled != nil {
 		pb.Enabled = *cc.Enabled

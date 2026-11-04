@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"net"
 	"net/textproto"
 	"regexp"
@@ -412,6 +413,14 @@ func (c *Config) Validate() error {
 				if route.Cache.MaxEntries < 0 {
 					return fmt.Errorf("path %s method %s: x-csar-cache.max_entries must be >= 0", path, method)
 				}
+				if route.Cache.MaxRequestBodySize < 0 || route.Cache.MaxRequestBodySize == math.MaxInt64 {
+					return fmt.Errorf("path %s method %s: x-csar-cache.max_request_body_size must be >= 0 and < %d", path, method, int64(math.MaxInt64))
+				}
+				if strings.EqualFold(method, "POST") && cacheIncludesPOST(route.Cache) &&
+					(route.AuthValidate != nil || route.Authz != nil) &&
+					!strings.Contains(route.Cache.Key, "{tenant}") && !strings.Contains(route.Cache.Key, "{subject}") {
+					return fmt.Errorf("path %s method %s: authenticated POST cache requires {tenant} or {subject} in key", path, method)
+				}
 				if route.Cache.MaxBodySize < 0 {
 					return fmt.Errorf("path %s method %s: x-csar-cache.max_body_size must be >= 0", path, method)
 				}
@@ -818,6 +827,16 @@ func cacheHasAuthBoundary(cc *CacheConfig) bool {
 	templates = append(templates, cc.Namespaces...)
 	for _, tmpl := range templates {
 		if strings.Contains(tmpl, "{tenant}") || strings.Contains(tmpl, "{subject}") {
+			return true
+		}
+	}
+	return false
+}
+
+// cacheIncludesPOST checks explicit method opt-in; the default is GET and HEAD.
+func cacheIncludesPOST(cc *CacheConfig) bool {
+	for _, method := range cc.Methods {
+		if strings.EqualFold(method, "POST") {
 			return true
 		}
 	}

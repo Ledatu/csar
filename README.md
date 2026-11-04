@@ -454,6 +454,47 @@ paths:
       max_response_size: 10485760               # 10MB — prevents DLP/retry buffer DoS
 ```
 
+Read-only POST routes can opt into response caching through a named policy.
+The body is always part of a POST cache key. CSAR hashes the exact bytes with
+SHA-256 and includes the escaped request path, Content-Type and Content-Encoding alongside configured
+identity, query, header and namespace dimensions. Whitespace, field order and
+array order remain significant. Configure the key with every caller and seller
+dimension that can change the response. Authenticated POST policies require
+`{subject}` or `{tenant}` in the key itself.
+
+```yaml
+cache_policies:
+  stocks-read:
+    store: redis
+    methods: [POST]
+    key: "stocks:{subject}:{path.seller_id}"
+    key_query: {sort: true}
+    max_request_body_size: 65536
+    ttl: 30s
+    content_types: [application/json]
+
+# On a read-only POST route with a seller_id path parameter
+# x-csar-cache: stocks-read
+# Or override the policy's request limit on this route
+# x-csar-cache:
+#   use: stocks-read
+#   max_request_body_size: 131072
+```
+
+`max_request_body_size` bounds request buffering and defaults to 64 KiB when
+omitted or zero. It is a scalar in named policies, so a nonzero inline value
+overrides the policy. Larger bodies and requests with trailers bypass caching
+with their bodies intact. A request-body read failure returns HTTP 400 before
+proxying. `max_body_size` continues to control response admission. Stale POST
+refreshes replay an independent body reader, retain request context values and
+run for at most 60 seconds, bounded further by the original request deadline.
+
+Upgrade every serving router and coordinator before enabling POST caching or
+publishing its request limit. Existing routers accept POST method lists but
+compute keys without the body, and older protobuf readers ignore the new field.
+Disable existing POST caching during a mixed-version rollout and before rolling
+back to older routers.
+
 ### Route Matching Precedence
 
 A request is served by exactly one route, chosen the same way on every router and after every reload:
