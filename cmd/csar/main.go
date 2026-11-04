@@ -323,7 +323,7 @@ func run() error {
 	// Create HTTP server
 	srv := &http.Server{
 		Addr:           cfg.ListenAddr,
-		Handler:        mux,
+		Handler:        preservePOSTTrailers(mux),
 		ReadTimeout:    30 * time.Second,
 		WriteTimeout:   60 * time.Second,
 		IdleTimeout:    120 * time.Second,
