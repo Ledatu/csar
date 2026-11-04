@@ -15,4 +15,4 @@ RUN adduser -D -u 10001 csar
 COPY --from=builder /csar /usr/local/bin/csar
 USER csar
 ENTRYPOINT ["csar"]
-CMD ["-config", "/etc/csar/config.yaml"]
+CMD ["-config-file", "/etc/csar/config.yaml"]
