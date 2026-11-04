@@ -56,6 +56,33 @@ func TestSchemaParity(t *testing.T) {
 	}
 }
 
+func TestCacheSchemaParity(t *testing.T) {
+	data, err := os.ReadFile("../../csar.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Defs map[string]struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		} `json:"$defs"`
+	}
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatal(err)
+	}
+	fields := extractJSONTags(reflect.TypeOf(CacheConfig{}))
+	properties := schema.Defs["CacheConfigObject"].Properties
+	for name := range fields {
+		if _, ok := properties[name]; !ok {
+			t.Errorf("CacheConfig property %s missing from schema", name)
+		}
+	}
+	for name := range properties {
+		if !fields[name] {
+			t.Errorf("schema property %s missing from CacheConfig", name)
+		}
+	}
+}
+
 // extractJSONTags returns a set of json field names for a struct type.
 // Skips fields with json:"-".
 func extractJSONTags(t reflect.Type) map[string]bool {

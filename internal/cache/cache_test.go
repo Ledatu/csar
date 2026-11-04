@@ -27,11 +27,11 @@ func TestBuildCacheKey_RendersRequestPlaceholders(t *testing.T) {
 	req.Header.Set("Accept", "application/json")
 	req = req.WithContext(authzmw.WithPathVars(req.Context(), map[string]string{"sku_id": "sku-123"}))
 
-	key1, err := BuildCacheKey("GET:/analytics/skus", "analytics:{tenant}:{subject}:{path.sku_id}:{query.marketplace}", []string{"Accept"}, nil, nil, req)
+	key1, err := BuildCacheKey("GET:/analytics/skus", "analytics:{tenant}:{subject}:{path.sku_id}:{query.marketplace}", []string{"Accept"}, nil, nil, req, "")
 	if err != nil {
 		t.Fatalf("BuildCacheKey: %v", err)
 	}
-	key2, err := BuildCacheKey("GET:/analytics/skus", "analytics:{tenant}:{subject}:{path.sku_id}:{query.marketplace}", []string{"Accept"}, nil, nil, req)
+	key2, err := BuildCacheKey("GET:/analytics/skus", "analytics:{tenant}:{subject}:{path.sku_id}:{query.marketplace}", []string{"Accept"}, nil, nil, req, "")
 	if err != nil {
 		t.Fatalf("BuildCacheKey second call: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestBuildCacheKey_RendersRequestPlaceholders(t *testing.T) {
 	}
 
 	req.Header.Set("Accept", "text/csv")
-	key3, err := BuildCacheKey("GET:/analytics/skus", "analytics:{tenant}:{subject}:{path.sku_id}:{query.marketplace}", []string{"Accept"}, nil, nil, req)
+	key3, err := BuildCacheKey("GET:/analytics/skus", "analytics:{tenant}:{subject}:{path.sku_id}:{query.marketplace}", []string{"Accept"}, nil, nil, req, "")
 	if err != nil {
 		t.Fatalf("BuildCacheKey after vary change: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestBuildCacheKey_RendersRequestPlaceholders(t *testing.T) {
 
 func TestBuildCacheKey_MissingPlaceholderFails(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/analytics/skus", nil)
-	_, err := BuildCacheKey("GET:/analytics/skus", "analytics:{query.marketplace}", nil, nil, nil, req)
+	_, err := BuildCacheKey("GET:/analytics/skus", "analytics:{query.marketplace}", nil, nil, nil, req, "")
 	if err == nil {
 		t.Fatal("BuildCacheKey should fail on missing placeholder")
 	}
@@ -67,11 +67,11 @@ func TestBuildCacheKey_NormalizesQuery(t *testing.T) {
 	req1 := httptest.NewRequest(http.MethodGet, "/analytics/skus?utm_source=x&limit=50&page=&date_to=2026-04-12&marketplace=wb&date_from=2026-04-10", nil)
 	req2 := httptest.NewRequest(http.MethodGet, "/analytics/skus?date_from=2026-04-10&marketplace=wb&cache_bust=1&date_to=2026-04-12&limit=50", nil)
 
-	key1, err := BuildCacheKey("GET:/analytics/skus", "", nil, cfg, nil, req1)
+	key1, err := BuildCacheKey("GET:/analytics/skus", "", nil, cfg, nil, req1, "")
 	if err != nil {
 		t.Fatalf("BuildCacheKey req1: %v", err)
 	}
-	key2, err := BuildCacheKey("GET:/analytics/skus", "", nil, cfg, nil, req2)
+	key2, err := BuildCacheKey("GET:/analytics/skus", "", nil, cfg, nil, req2, "")
 	if err != nil {
 		t.Fatalf("BuildCacheKey req2: %v", err)
 	}

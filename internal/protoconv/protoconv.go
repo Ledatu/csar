@@ -378,6 +378,7 @@ func protoToCacheConfig(c *csarv1.CacheConfigProto) *config.CacheConfig {
 		TTLJitter:            c.GetTtlJitter(),
 		MaxEntries:           int(c.GetMaxEntries()),
 		MaxBodySize:          c.GetMaxBodySize(),
+		MaxRequestBodySize:   c.GetMaxRequestBodySize(),
 		Methods:              append([]string(nil), c.GetMethods()...),
 		ContentTypes:         append([]string(nil), c.GetContentTypes()...),
 		Namespaces:           append([]string(nil), c.GetNamespaces()...),

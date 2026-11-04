@@ -1223,6 +1223,10 @@ type CacheConfig struct {
 	// Responses larger than this are not cached. Default: 1MB.
 	MaxBodySize int64 `yaml:"max_body_size,omitempty" json:"max_body_size,omitempty"`
 
+	// MaxRequestBodySize bounds POST bodies buffered for cache keys.
+	// Larger requests bypass caching. Default: 64 KiB.
+	MaxRequestBodySize int64 `yaml:"max_request_body_size,omitempty" json:"max_request_body_size,omitempty"`
+
 	// Methods is the set of HTTP methods to cache.
 	// Default: ["GET", "HEAD"].
 	Methods []string `yaml:"methods,omitempty" json:"methods,omitempty"`

@@ -2,6 +2,7 @@ package cache
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -16,13 +17,19 @@ import (
 var templatePlaceholder = regexp.MustCompile(`\{([^}]+)\}`)
 
 // BuildCacheKey renders the configured key template and returns a stable hash.
-func BuildCacheKey(routeKey, keyTemplate string, varyHeaders []string, keyQuery *KeyQueryConfig, namespaces map[string]int64, r *http.Request) (string, error) {
+func BuildCacheKey(routeKey, keyTemplate string, varyHeaders []string, keyQuery *KeyQueryConfig, namespaces map[string]int64, r *http.Request, bodyDigest string) (string, error) {
+	if r == nil {
+		return "", fmt.Errorf("request is nil")
+	}
 	base := keyTemplate
 	if base == "" {
 		base = "{method} {raw_path}"
 		if keyQuery != nil {
 			base = "{method} {path}"
 		}
+	}
+	if r.Method == http.MethodPost {
+		return buildPOSTCacheKey(routeKey, base, varyHeaders, keyQuery, namespaces, r, bodyDigest)
 	}
 	rendered, err := RenderTemplate(base, r)
 	if err != nil {
@@ -51,6 +58,56 @@ func BuildCacheKey(routeKey, keyTemplate string, varyHeaders []string, keyQuery 
 	}
 
 	return hashString(routeKey + "\n" + rendered), nil
+}
+
+func buildPOSTCacheKey(routeKey, template string, varyHeaders []string, keyQuery *KeyQueryConfig, namespaces map[string]int64, r *http.Request, bodyDigest string) (string, error) {
+	if bodyDigest == "" {
+		return "", fmt.Errorf("POST cache key requires a request body digest")
+	}
+	// Structured encoding preserves boundaries and full placeholder values.
+	// Include the template itself so configuration changes cannot alias old keys.
+	identity := struct {
+		Version    string
+		Route      string
+		Template   string
+		Path       string
+		Values     [][]byte
+		Headers    map[string][][]byte
+		Query      string
+		Namespaces map[string]int64
+		BodySHA256 string
+	}{
+		Version:    "post-v1",
+		Route:      routeKey,
+		Template:   template,
+		Path:       r.URL.EscapedPath(),
+		Headers:    make(map[string][][]byte),
+		Namespaces: namespaces,
+		BodySHA256: bodyDigest,
+	}
+	for _, match := range templatePlaceholder.FindAllStringSubmatch(template, -1) {
+		value, err := resolvePlaceholder(match[1], r)
+		if err != nil {
+			return "", err
+		}
+		identity.Values = append(identity.Values, []byte(value))
+	}
+	headers := append([]string{"Content-Type", "Content-Encoding"}, varyHeaders...)
+	for _, header := range headers {
+		name := http.CanonicalHeaderKey(header)
+		identity.Headers[name] = nil
+		for _, value := range r.Header.Values(header) {
+			identity.Headers[name] = append(identity.Headers[name], []byte(value))
+		}
+	}
+	if keyQuery != nil {
+		identity.Query = normalizeQuery(r.URL.Query(), *keyQuery)
+	}
+	encoded, err := json.Marshal(identity)
+	if err != nil {
+		return "", err
+	}
+	return hashString(string(encoded)), nil
 }
 
 // KeyQueryConfig configures normalized query params appended to a cache key.

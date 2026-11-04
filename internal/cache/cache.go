@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledatu/csar-core/apierror"
 	"github.com/ledatu/csar-core/gatewayctx"
 	"github.com/ledatu/csar-core/readcache"
 )
@@ -29,6 +30,12 @@ const DefaultMaxEntries = 1000
 
 // DefaultMaxBodySize is the default maximum body size to cache (1MB).
 const DefaultMaxBodySize int64 = 1 * 1024 * 1024
+
+// DefaultMaxRequestBodySize bounds POST bodies buffered to determine cache keys.
+const DefaultMaxRequestBodySize int64 = 64 * 1024
+
+// DefaultRefreshTimeout bounds background stale-while-revalidate requests.
+const DefaultRefreshTimeout = 60 * time.Second
 
 // DefaultOperationTimeout bounds external cache operations.
 const DefaultOperationTimeout = 75 * time.Millisecond
@@ -61,6 +68,7 @@ type Config struct {
 	VaryHeaders          []string
 	MaxEntries           int
 	MaxBodySize          int64
+	MaxRequestBodySize   int64
 	Methods              map[string]struct{}
 	CacheStatuses        []string
 }
@@ -178,6 +186,24 @@ func (rc *ResponseCache) Wrap(cfg Config, next http.Handler) http.Handler {
 			return
 		}
 
+		bodyDigest := ""
+		if r.Method == http.MethodPost {
+			var err error
+			var admitted bool
+			bodyDigest, admitted, err = preparePOSTBody(r, cfg.MaxRequestBodySize)
+			if err != nil {
+				rc.record(cfg.RouteKey, "bypass")
+				w.Header().Set("X-CSAR-Cache", "BYPASS")
+				apierror.New("request_body_read_error", http.StatusBadRequest, "could not read request body").Write(w)
+				return
+			}
+			if !admitted {
+				rc.record(cfg.RouteKey, "bypass")
+				rc.serveBypass(w, r, cfg, next)
+				return
+			}
+		}
+
 		namespaces, namespaceVersions, err := rc.namespaceVersions(r, cfg, store)
 		if err != nil {
 			rc.logger.Warn("response cache namespace versions could not be resolved, bypassing cache",
@@ -191,7 +217,7 @@ func (rc *ResponseCache) Wrap(cfg Config, next http.Handler) http.Handler {
 			return
 		}
 
-		cacheKey, err := BuildCacheKey(cfg.RouteKey, cfg.KeyTemplate, cfg.VaryHeaders, cfg.KeyQuery, namespaceVersions, r)
+		cacheKey, err := BuildCacheKey(cfg.RouteKey, cfg.KeyTemplate, cfg.VaryHeaders, cfg.KeyQuery, namespaceVersions, r, bodyDigest)
 		if err != nil {
 			rc.logger.Warn("response cache key could not be rendered",
 				"route", cfg.RouteKey,
@@ -488,10 +514,31 @@ func (rc *ResponseCache) refreshAsync(r *http.Request, cfg Config, cacheKey stri
 		release()
 		return
 	}
-	req := r.Clone(context.Background())
+	timeout := DefaultRefreshTimeout
+	if deadline, ok := r.Context().Deadline(); ok {
+		if timeLeft := time.Until(deadline); timeLeft < timeout {
+			timeout = timeLeft
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), timeout)
+	req := r.Clone(ctx)
+	if r.Method == http.MethodPost {
+		body, bodyErr := r.GetBody()
+		if bodyErr != nil {
+			cancel()
+			release()
+			rc.coalescer.Finish(cacheKey, call, capturedResponse{}, bodyErr)
+			return
+		}
+		req.Body = body
+	}
 	go func() {
 		defer release()
 		defer rc.coalescer.Finish(cacheKey, call, capturedResponse{}, readcache.ErrAborted)
+		defer cancel()
+		if req.Method == http.MethodPost && req.Body != nil {
+			defer req.Body.Close()
+		}
 		rc.record(cfg.RouteKey, "coalesced_leader")
 		result := rc.fetchAndMaybeCache(req, cfg, cacheKey, namespaces, namespaceVersions, store, next)
 		rc.coalescer.Finish(cacheKey, call, result, nil)
@@ -629,6 +676,9 @@ func (cfg Config) withDefaults() Config {
 	}
 	if cfg.MaxBodySize <= 0 {
 		cfg.MaxBodySize = DefaultMaxBodySize
+	}
+	if cfg.MaxRequestBodySize <= 0 {
+		cfg.MaxRequestBodySize = DefaultMaxRequestBodySize
 	}
 	if len(cfg.Methods) == 0 {
 		cfg.Methods = map[string]struct{}{

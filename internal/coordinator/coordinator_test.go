@@ -14,6 +14,7 @@ import (
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/ledatu/csar/internal/statestore"
 )
@@ -335,7 +336,8 @@ func TestCacheConfigFullSnapshotRoundTrip(t *testing.T) {
 		TTLJitter:            "10%",
 		MaxEntries:           2048,
 		MaxBodySize:          2 << 20,
-		Methods:              []string{"GET"},
+		MaxRequestBodySize:   128 << 10,
+		Methods:              []string{"POST"},
 		Namespaces:           []string{"ns:{tenant}"},
 		Tags:                 []string{"tag:{path.id}"},
 		VaryHeaders:          []string{"Accept-Language"},
@@ -407,10 +409,10 @@ func TestCacheConfigFullSnapshotRoundTrip(t *testing.T) {
 	if got.TTL.Duration != want.TTL.Duration || got.OperationTimeout.Duration != want.OperationTimeout.Duration {
 		t.Fatalf("durations: ttl=%v op=%v", got.TTL, got.OperationTimeout)
 	}
-	if got.MaxEntries != want.MaxEntries || got.MaxBodySize != want.MaxBodySize {
+	if got.MaxEntries != want.MaxEntries || got.MaxBodySize != want.MaxBodySize || got.MaxRequestBodySize != want.MaxRequestBodySize {
 		t.Fatalf("limits: %+v", got)
 	}
-	if len(got.Methods) != 1 || got.Methods[0] != "GET" {
+	if len(got.Methods) != 1 || got.Methods[0] != "POST" {
 		t.Fatalf("methods: %v", got.Methods)
 	}
 	if len(got.Namespaces) != 1 || len(got.Tags) != 1 || len(got.VaryHeaders) != 1 || len(got.CacheStatuses) != 2 {
@@ -445,6 +447,49 @@ func TestCacheConfigFullSnapshotRoundTrip(t *testing.T) {
 	}
 	if got.Enabled == nil || !*got.Enabled {
 		t.Fatalf("enabled: %v", got.Enabled)
+	}
+}
+
+func TestCachePOSTNamedPolicyWireRoundTrip(t *testing.T) {
+	policies := map[string]config.CacheConfig{
+		"stocks": {
+			Key: "stocks:{subject}:{path.seller}", Methods: []string{"POST"},
+			MaxRequestBodySize: 128 << 10, Store: "redis",
+		},
+	}
+	snapshot := &csarv1.FullConfigSnapshot{
+		CachePolicies: cachePoliciesMapToProto(policies),
+		Routes: []*csarv1.RouteConfig{
+			{
+				Path: "/stocks/{seller}", Method: "POST",
+				Backend: &csarv1.BackendConfigProto{TargetUrl: "http://upstream"},
+				Cache:   cacheToProto(&config.CacheConfig{Use: "stocks"}),
+			},
+			{
+				Path: "/small/{seller}", Method: "POST",
+				Backend: &csarv1.BackendConfigProto{TargetUrl: "http://upstream"},
+				Cache:   cacheToProto(&config.CacheConfig{Use: "stocks", MaxRequestBodySize: 4096}),
+			},
+		},
+	}
+	wire, err := proto.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var received csarv1.FullConfigSnapshot
+	if err := proto.Unmarshal(wire, &received); err != nil {
+		t.Fatal(err)
+	}
+	cfg := protoconv.FullSnapshotToConfig(&received)
+	if err := cfg.ResolveCachePolicies(); err != nil {
+		t.Fatal(err)
+	}
+	for path, limit := range map[string]int64{"/stocks/{seller}": 128 << 10, "/small/{seller}": 4096} {
+		cache := cfg.Paths[path]["post"].Cache
+		if cache.MaxRequestBodySize != limit || cache.Store != "redis" ||
+			cache.Key != policies["stocks"].Key || len(cache.Methods) != 1 || cache.Methods[0] != "POST" {
+			t.Fatalf("route %s policy = %+v", path, cache)
+		}
 	}
 }
 

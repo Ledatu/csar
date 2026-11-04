@@ -2808,8 +2808,10 @@ type CacheConfigProto struct {
 	Tags                 []string                     `protobuf:"bytes,23,rep,name=tags,proto3" json:"tags,omitempty"`
 	VaryHeaders          []string                     `protobuf:"bytes,24,rep,name=vary_headers,json=varyHeaders,proto3" json:"vary_headers,omitempty"`
 	CacheStatuses        []string                     `protobuf:"bytes,25,rep,name=cache_statuses,json=cacheStatuses,proto3" json:"cache_statuses,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Maximum POST request body buffered for cache identity. Zero uses 64 KiB.
+	MaxRequestBodySize int64 `protobuf:"varint,26,opt,name=max_request_body_size,json=maxRequestBodySize,proto3" json:"max_request_body_size,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *CacheConfigProto) Reset() {
@@ -3015,6 +3017,13 @@ func (x *CacheConfigProto) GetCacheStatuses() []string {
 		return x.CacheStatuses
 	}
 	return nil
+}
+
+func (x *CacheConfigProto) GetMaxRequestBodySize() int64 {
+	if x != nil {
+		return x.MaxRequestBodySize
+	}
+	return 0
 }
 
 // CacheInvalidationConfigProto mirrors config.CacheInvalidationConfig.
@@ -4092,7 +4101,7 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x18CacheCoalesceConfigProto\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12-\n" +
 	"\x04wait\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\x04wait\x12.\n" +
-	"\x13wait_timeout_status\x18\x03 \x01(\x05R\x11waitTimeoutStatus\"\xd4\b\n" +
+	"\x13wait_timeout_status\x18\x03 \x01(\x05R\x11waitTimeoutStatus\"\x87\t\n" +
 	"\x10CacheConfigProto\x12\x18\n" +
 	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x1f\n" +
 	"\venabled_set\x18\x02 \x01(\bR\n" +
@@ -4124,7 +4133,8 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\bcoalesce\x18\x16 \x01(\v2!.csar.v1.CacheCoalesceConfigProtoR\bcoalesce\x12\x12\n" +
 	"\x04tags\x18\x17 \x03(\tR\x04tags\x12!\n" +
 	"\fvary_headers\x18\x18 \x03(\tR\vvaryHeaders\x12%\n" +
-	"\x0ecache_statuses\x18\x19 \x03(\tR\rcacheStatuses\"\xda\x02\n" +
+	"\x0ecache_statuses\x18\x19 \x03(\tR\rcacheStatuses\x121\n" +
+	"\x15max_request_body_size\x18\x1a \x01(\x03R\x12maxRequestBodySize\"\xda\x02\n" +
 	"\x1cCacheInvalidationConfigProto\x12\x10\n" +
 	"\x03use\x18\x01 \x01(\tR\x03use\x12\x18\n" +
 	"\aenabled\x18\x02 \x01(\bR\aenabled\x12\x1f\n" +

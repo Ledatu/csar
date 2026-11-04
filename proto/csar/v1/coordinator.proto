@@ -424,6 +424,8 @@ message CacheConfigProto {
   repeated string tags = 23;
   repeated string vary_headers = 24;
   repeated string cache_statuses = 25;
+  // Maximum POST request body buffered for cache identity. Zero uses 64 KiB.
+  int64 max_request_body_size = 26;
 }
 
 // CacheInvalidationConfigProto mirrors config.CacheInvalidationConfig.

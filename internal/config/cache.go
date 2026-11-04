@@ -92,6 +92,9 @@ func mergeCachePolicy(policy, inline CacheConfig) CacheConfig {
 	if inline.MaxBodySize != 0 {
 		merged.MaxBodySize = inline.MaxBodySize
 	}
+	if inline.MaxRequestBodySize != 0 {
+		merged.MaxRequestBodySize = inline.MaxRequestBodySize
+	}
 	if inline.KeyQuery != nil {
 		merged.KeyQuery = inline.KeyQuery
 	}
