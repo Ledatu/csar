@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -397,6 +398,34 @@ func TestResponseCache_POSTStaleIfErrorDoesNotCrossBodies(t *testing.T) {
 		}
 		if body == "a" && (rec.Body.String() != "a" || rec.Header().Get("X-CSAR-Cache") != "STALE") {
 			t.Fatalf("body a did not receive its stale entry: %d %q", rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestResponseCache_POSTUnannouncedTrailersBypass(t *testing.T) {
+	handler := NewResponseCache(slog.Default()).Wrap(Config{
+		RouteKey: "POST:/stocks", Methods: map[string]struct{}{http.MethodPost: {}},
+	}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(w, "%s:%s", body, r.Trailer.Get("X-Selector"))
+	}))
+	for _, selector := range []string{"one", "two"} {
+		wire := "POST /stocks HTTP/1.1\r\nHost: local\r\nTransfer-Encoding: chunked\r\n\r\n1\r\na\r\n0\r\nX-Selector: " + selector + "\r\n\r\n"
+		req, err := http.ReadRequest(bufio.NewReader(strings.NewReader(wire)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(req.Trailer) != 0 {
+			t.Fatal("test request announced its trailer")
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		req.Body.Close()
+		if rec.Header().Get("X-CSAR-Cache") != "BYPASS" || rec.Body.String() != "a:"+selector {
+			t.Fatalf("cache=%s body=%q, want bypass and a:%s", rec.Header().Get("X-CSAR-Cache"), rec.Body.String(), selector)
 		}
 	}
 }
