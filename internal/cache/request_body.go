@@ -37,6 +37,10 @@ func preparePOSTBody(r *http.Request, limit int64) (digest string, admitted bool
 		return io.NopCloser(bytes.NewReader(body)), nil
 	}
 	r.Body, _ = r.GetBody()
+	// net/http may discover unannounced trailers only when the body reaches EOF.
+	if len(r.Trailer) > 0 {
+		return "", false, nil
+	}
 	sum := sha256.Sum256(body)
 	return fmt.Sprintf("%x", sum[:]), true, nil
 }
