@@ -10,8 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledatu/csar-core/apierror"
 	"github.com/ledatu/csar/internal/kms"
 	"github.com/ledatu/csar/pkg/middleware/authzmw"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // placeholderRe matches dynamic interpolation patterns in token_ref.
@@ -160,7 +163,7 @@ func (a *AuthInjector) Wrap(cfg AuthInjectorConfig, next http.Handler) http.Hand
 					return
 				}
 			}
-			http.Error(w, `{"error":"auth: token fetch failed"}`, http.StatusBadGateway)
+			apierror.New(credentialFailureCode(err), http.StatusBadGateway, "Credential resolution failed").Write(w)
 			return
 		}
 
@@ -458,4 +461,19 @@ func (f *StaticTokenFetcher) GetEncryptedToken(_ context.Context, tokenRef strin
 		return nil, "", "", fmt.Errorf("token ref %q not found", tokenRef)
 	}
 	return tok.encryptedToken, tok.kmsKeyID, tok.version, nil
+}
+
+func credentialFailureCode(err error) string {
+	switch status.Code(err) {
+	case codes.Unauthenticated:
+		return apierror.CodeCredentialInvalid
+	case codes.ResourceExhausted:
+		return apierror.CodeCredentialThrottled
+	case codes.Internal:
+		return apierror.CodeCredentialMalformed
+	case codes.FailedPrecondition, codes.PermissionDenied:
+		return apierror.CodeCredentialConfiguration
+	default:
+		return apierror.CodeCredentialUnavailable
+	}
 }

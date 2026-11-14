@@ -135,3 +135,11 @@ existing MCP schema embed input before scanning/building all Go packages.
   when a synchronous leader panics. No Redis lease/fencing is introduced.
 - Development uses sibling go.work; pin a release containing readcache before
   publishing this consumer outside the workspace.
+
+## Safe credential failures (November 14)
+
+AuthInjector maps coordinator status classes into the shared `apierror` allowlist
+for fail-closed HTTP 502 responses. Raw provider errors and token references are
+not exposed. A fake token endpoint → Minter → MintingStore → AuthService → router
+integration test covers invalid credentials, provider quota, malformed responses
+and timeout. Existing stale/fail-closed policy is unchanged.
