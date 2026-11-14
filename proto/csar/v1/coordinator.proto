@@ -283,6 +283,7 @@ message AuthValidateConfigProto {
   string introspection_tls = 18;
   string required_scope = 19;
   string seller_path_param = 20;
+  repeated AuthValidateConfigProto methods = 21;
 }
 
 // ---------------------------------------------------------------------------

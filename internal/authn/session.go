@@ -251,12 +251,15 @@ func buildSessionCacheEntry(cfg SessionConfig, resp *http.Response) (*sessionCac
 }
 
 func sessionCacheKey(cfg SessionConfig, cookieValue string) string {
+	// A response is valid only for the cookie name sent to the auth endpoint.
+	// Equal values under different names must never share a cached identity.
+	key := cfg.Endpoint + "\x00" + cfg.CookieName + "\x00" + cookieValue
 	if len(cfg.IssueTokens) == 0 {
-		return cfg.Endpoint + "\x00" + cookieValue
+		return key
 	}
 	profiles := strings.Join(uniqueIssueProfiles(cfg.IssueTokens), "\x00")
 	sum := sha256.Sum256([]byte(profiles))
-	return cfg.Endpoint + "\x00" + cookieValue + "\x00" + hex.EncodeToString(sum[:])
+	return key + "\x00" + hex.EncodeToString(sum[:])
 }
 
 func uniqueIssueProfiles(tokens []IssueTokenConfig) []string {

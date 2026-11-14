@@ -69,21 +69,34 @@ func auditIdentity(req *http.Request, rt *route) {
 	if state := auditState(req); state != nil {
 		state.identity = gatewayctx.FromRequest(req)
 		state.verified = true
-		if rt.sessionConfig != nil && rt.sessionValidator != nil {
-			for _, header := range rt.sessionConfig.ForwardHeaders {
-				if strings.EqualFold(header, actorEmailHeader) {
-					state.email = req.Header.Get(actorEmailHeader)
-				}
-			}
+		if rt.forwardsActorEmail() {
+			auditEmail(req)
 		}
-		if rt.jwtConfig != nil && rt.jwtValidator != nil {
-			for _, header := range rt.jwtConfig.ForwardClaims {
-				if strings.EqualFold(header, actorEmailHeader) {
-					state.email = req.Header.Get(actorEmailHeader)
-				}
+	}
+}
+
+func auditEmail(req *http.Request) {
+	if state := auditState(req); state != nil {
+		state.email = req.Header.Get(actorEmailHeader)
+	}
+}
+
+func (rt *route) forwardsActorEmail() bool {
+	if rt.sessionConfig != nil && rt.sessionValidator != nil {
+		for _, header := range rt.sessionConfig.ForwardHeaders {
+			if strings.EqualFold(header, actorEmailHeader) {
+				return true
 			}
 		}
 	}
+	if rt.jwtConfig != nil && rt.jwtValidator != nil {
+		for _, header := range rt.jwtConfig.ForwardClaims {
+			if strings.EqualFold(header, actorEmailHeader) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func auditSecrets(req *http.Request, state *auditRequestState) {

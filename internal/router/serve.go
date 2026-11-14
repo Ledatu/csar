@@ -161,29 +161,11 @@ func (r *Router) serveWithIPCheck(w http.ResponseWriter, req *http.Request, rt *
 	// authz decision — including on routes without inbound auth.
 	gatewayctx.StripTrusted(req.Header)
 
-	// Step 0a: Inbound auth validation (audit §3.3.1).
-	if rt.sessionConfig != nil && rt.sessionValidator != nil {
-		validated := rt.sessionValidator.Wrap(*rt.sessionConfig, http.HandlerFunc(func(vw http.ResponseWriter, vr *http.Request) {
-			r.serveAfterJWT(vw, vr, rt)
-		}))
-		validated.ServeHTTP(w, req)
+	// Authentication completes before any authorization or cache access.
+	if rt.authentication != nil {
+		rt.authentication.ServeHTTP(w, req)
 		return
 	}
-	if rt.tokenConfig != nil && rt.tokenValidator != nil {
-		validated := rt.tokenValidator.Wrap(*rt.tokenConfig, http.HandlerFunc(func(vw http.ResponseWriter, vr *http.Request) {
-			r.serveAfterJWT(vw, vr, rt)
-		}))
-		validated.ServeHTTP(w, req)
-		return
-	}
-	if rt.jwtConfig != nil && rt.jwtValidator != nil {
-		validated := rt.jwtValidator.Wrap(*rt.jwtConfig, http.HandlerFunc(func(vw http.ResponseWriter, vr *http.Request) {
-			r.serveAfterJWT(vw, vr, rt)
-		}))
-		validated.ServeHTTP(w, req)
-		return
-	}
-
 	r.serveAfterJWT(w, req, rt)
 }
 

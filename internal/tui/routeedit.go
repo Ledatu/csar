@@ -229,7 +229,11 @@ func (m RouteEditModel) View() string {
 		}
 	}
 	if m.item.Route.AuthValidate != nil {
-		infoLines = append(infoLines, fmt.Sprintf("  %s JWT: %s", IconKey, truncate(m.item.Route.AuthValidate.JWKSURL, 35)))
+		if m.item.Route.AuthValidate.Mode == "select" {
+			infoLines = append(infoLines, fmt.Sprintf("  %s Authentication: select (%d methods)", IconKey, len(m.item.Route.AuthValidate.Methods)))
+		} else {
+			infoLines = append(infoLines, fmt.Sprintf("  %s JWT: %s", IconKey, truncate(m.item.Route.AuthValidate.JWKSURL, 35)))
+		}
 	}
 	if m.item.Route.Resilience != nil {
 		infoLines = append(infoLines, fmt.Sprintf("  ⛑ Circuit breaker: %s", m.item.Route.Resilience.CircuitBreaker))

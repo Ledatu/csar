@@ -985,7 +985,8 @@
       "description": "Validates inbound JWTs, browser sessions, or opaque seller API keys before proxying.",
       "additionalProperties": false,
       "properties": {
-        "mode": { "type": "string", "enum": ["jwt", "session", "token"] },
+        "mode": { "type": "string", "enum": ["jwt", "session", "token", "select"], "description": "Single validator, or select exactly one presented credential using the terminal methods below. Failed authentication never falls back." },
+        "methods": { "type": "array", "minItems": 2, "maxItems": 3, "description": "For mode select: 2–3 terminal policy names or inline validators with distinct header/cookie sources. No nested selectors, parent validator options or session token issuance. Conflicting credentials fail closed. Requires compatible router/coordinator binaries.", "items": { "$ref": "#/$defs/AuthValidateConfig" } },
         "use": {
           "type": "string",
           "description": "Reference to an auth_validate_policies entry. Inline fields override the policy's values."
@@ -1018,7 +1019,7 @@
         "header_name": {
           "type": "string",
           "description": "HTTP header carrying the token.",
-          "default": "Authorization"
+          "default": "X-Csar-Authorization"
         },
         "token_prefix": {
           "type": "string",
@@ -1043,7 +1044,7 @@
         },
         "cookie_name": {
           "type": "string",
-          "description": "Read the JWT from a named cookie instead of a request header. When set, header_name and token_prefix are ignored."
+          "description": "Cookie name for sessions or cookie-based JWTs. JWT cookie mode ignores header_name and token_prefix."
         },
         "issue_tokens": {
           "type": "array",

@@ -1,6 +1,6 @@
 # CSAR — Coordinated Stateless API Router
 
-CSAR is a lightweight, security-first API gateway written in Go. It proxies HTTP requests to upstream services while handling **credential injection**, **rate limiting**, **circuit breaking**, **load balancing**, **CORS**, **response caching**, **JWT validation**, and **IP access control** — all driven by YAML config files using OpenAPI-style extensions.
+CSAR is a lightweight, security-first API gateway written in Go. It proxies HTTP requests to upstream services while handling **credential injection**, **rate limiting**, **circuit breaking**, **load balancing**, **CORS**, **response caching**, **user/service authentication**, and **IP access control** — all driven by YAML config files using OpenAPI-style extensions.
 
 A central **Coordinator** distributes configuration, encrypted tokens, and quota assignments to a fleet of stateless routers over gRPC, enabling horizontal scaling without shared state.
 
@@ -40,7 +40,7 @@ Each request passes through these stages in order:
 3. **Streaming Detection** — WebSocket/SSE bypass for DLP and retry buffering
 4. **Header Injection** — static headers and stripped client-supplied auth headers
 5. **Auth Injection** — fetches encrypted token, decrypts via KMS, injects into upstream request
-6. **JWT Validation** — inbound JWKS-based bearer token validation (header or cookie)
+6. **Authentication** — JWT, session or personal-key validation; shared routes select exactly one credential
 7. **Throttling** — token-bucket rate limiting (local, Redis, or coordinator-assigned quotas)
 8. **Circuit Breaker** — protects upstreams from cascading failures
 9. **Retry** — automatic retry with exponential backoff and jitter
@@ -64,7 +64,7 @@ Each request passes through these stages in order:
 | **Payload Redaction (DLP)** | Masks sensitive JSON fields (`ssn`, `card_number`, nested paths, wildcards) in upstream responses before returning to clients. Configurable `max_response_size` prevents DoS. |
 | **Multi-Tenant Routing** | Routes to different backends based on tenant identifier in headers or host. |
 | **Streaming Support** | Detects `Upgrade: websocket` and `text/event-stream` (SSE) to bypass buffering middlewares for persistent connections. |
-| **JWT/JWKS Validation** | Validates inbound bearer tokens against JWKS endpoints. Supports issuer/audience checks, required claims, claim forwarding to upstream headers, and cookie-based JWT auth. |
+| **Authentication** | JWT/JWKS, browser sessions and personal API keys. Shared routes select exactly one credential and reject ambiguity without fallback. JWTs support issuer/audience checks, required claims and claim forwarding. |
 | **IP Access Control** | Global and per-route allowlists with individual IPs, CIDR ranges (IPv4/IPv6), and optional `X-Forwarded-For`/`X-Real-IP` trust. |
 | **SSRF Protection** | Custom `DialContext` validates resolved IPs against RFC 1918/3927/4291/metadata ranges. Prevents DNS rebinding (TOCTOU) by connecting directly to validated IPs. |
 | **TLS Everywhere** | Inbound HTTPS + mTLS, outbound upstream TLS + mTLS, router↔coordinator TLS + mTLS. |
@@ -331,7 +331,7 @@ Define reusable configurations at the top level, then reference them by name in 
 | `cors_policies` | `x-csar-cors` | CORS policies |
 | `retry_policies` | `x-csar-retry` | Retry policies |
 | `redact_policies` | `x-csar-redact` | DLP redaction policies |
-| `auth_validate_policies` | `x-csar-authn-validate` | JWT validation policies |
+| `auth_validate_policies` | `x-csar-authn-validate` | JWT, session, personal-key or credential-selected authentication policies |
 
 **Reference syntax** (all policy types support the same patterns):
 
@@ -361,6 +361,54 @@ x-csar-security:
     inject_header: "X-Client-Secret"
     inject_format: "{token}"
 ```
+
+### Shared user and service authentication
+
+A route can use `mode: select` to accept a browser session, personal API key or
+service STS token through the same endpoint. Each method reuses its existing
+validator; authorization remains a separate `x-csar-authz` permission check.
+
+```yaml
+auth_validate_policies:
+  browser:
+    mode: session
+    session_endpoint: https://auth.example.com/auth/validate
+    cookie_name: csar_session
+    forward_headers: [X-Gateway-Subject]
+  personal-key:
+    mode: token
+    introspection_endpoint: https://auth.example.com/auth/token/introspect
+    introspection_tls: authn-mtls # configured backend_tls_policies entry
+    required_scope: adverts:read
+    seller_path_param: seller_id
+  service:
+    mode: jwt
+    jwks_url: https://auth.example.com/.well-known/jwks.json
+    issuer: https://auth.example.com
+    audiences: [owner-read]
+    forward_claims: {sub: X-Gateway-Subject}
+  owner-read:
+    mode: select
+    methods: [browser, personal-key, service]
+```
+
+Reference `owner-read` from `x-csar-authn-validate`. Configure **2–3 terminal
+methods with distinct credential locations**: a named cookie, `Authorization`
+for personal keys, and `X-Csar-Authorization` by default for JWTs. Policy names
+or inline objects are accepted. Selectors cannot nest, carry validator options
+on their parent, or issue session route tokens.
+
+Exactly one credential must be presented. Duplicate headers/cookies, conflicting
+credential types, unsupported authorization headers and missing credentials are
+rejected. An invalid, expired or unavailable credential never triggers fallback
+to another identity. After success, credential headers and cookies are removed
+before authorization and upstream dispatch. Existing single-mode policies keep
+their behavior. Service authentication alone does not grant seller access.
+
+Upgrade router and coordinator binaries before enabling selector policies:
+coordinator snapshots carry the method list, and older readers reject the new
+mode. JWT audience lists accept any configured audience after signature, issuer
+and expiry validation; an accepted audience is not an authorization grant.
 
 ### Route Extensions
 

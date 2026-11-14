@@ -13,6 +13,7 @@ and internal admin surfaces.
   key tooling.
 
 ## Trust/Auth Model
+- Shared routes may select session, personal-key or STS authentication by credential location; selection is compiled once, preserves verified audit identity, and rejects ambiguity without fallback. Usage belongs in README.md and csar.schema.json.
 - Inbound JWTs are validated at the router against JWKS.
 - Opaque seller personal keys use mTLS introspection against `csar-authn`.
   The router bounds token caching to 15 seconds, checks `adverts:read` and

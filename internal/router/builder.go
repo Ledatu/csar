@@ -208,21 +208,8 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 
 	// Set up auth validation if auth-validate config is present (audit §3.3.1).
 	if fr.Route.AuthValidate != nil {
-		switch fr.Route.AuthValidate.Mode {
-		case "session":
-			if err := r.setupSession(rt, fr, cfg, key, logger); err != nil {
-				return err
-			}
-		case "token":
-			if err := r.setupToken(rt, fr, cfg, key, logger); err != nil {
-				return err
-			}
-		case "", "jwt":
-			if err := r.setupJWT(rt, fr, cfg, key, logger); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("route %s: unknown auth_validate mode %q", key, fr.Route.AuthValidate.Mode)
+		if err := r.setupAuthentication(rt, fr, cfg, key, logger); err != nil {
+			return err
 		}
 	}
 
