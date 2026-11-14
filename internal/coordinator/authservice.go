@@ -330,10 +330,9 @@ func (s *AuthServiceImpl) fetchThrough(ctx context.Context, backend TokenStore, 
 
 // statusForFetchError maps a backend failure onto a gRPC code.
 //
-// Routers collapse every one of these into a 502, so the distinction exists
-// purely for coordinator-side observability and alerting — it is what makes
-// "this seller's credentials were revoked" separable from "the token endpoint
-// is having a bad afternoon" in metrics.
+// Routers retain HTTP 502 and expose only an allowlisted apierror machine code.
+// The gRPC class also separates revoked credentials, quota, configuration and
+// transient endpoint failures for observability; raw messages stay internal.
 func statusForFetchError(tokenRef string, err error) error {
 	switch {
 	case errors.Is(err, tokenmint.ErrUnknownProfile), errors.Is(err, tokenmint.ErrUnknownKind):
