@@ -13,7 +13,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0 // indirect
-	github.com/ledatu/csar-core v0.1.48-0.20261029115606-c1e7bad3adec
+	github.com/ledatu/csar-core v0.1.48-0.20261114125352-37309f76a253
 	github.com/ledatu/csar-proto v0.1.5
 	github.com/lib/pq v1.12.3
 	github.com/modelcontextprotocol/go-sdk v1.6.0
@@ -34,7 +34,10 @@ require (
 	modernc.org/sqlite v1.50.0
 )
 
-require golang.org/x/crypto v0.51.0
+require (
+	github.com/google/jsonschema-go v0.4.3
+	golang.org/x/crypto v0.51.0
+)
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
@@ -73,7 +76,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
-	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
