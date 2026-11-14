@@ -37,7 +37,7 @@ type Config struct {
 	// Audiences validates the "aud" claim contains at least one entry.
 	Audiences []string
 
-	// HeaderName is the HTTP header carrying the token. Default: "Authorization".
+	// HeaderName is the HTTP header carrying the token. Default: "X-Csar-Authorization".
 	HeaderName string
 
 	// TokenPrefix is stripped before parsing. Default: "Bearer ".

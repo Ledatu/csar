@@ -10,29 +10,48 @@ import (
 )
 
 func (r *Router) setupAuthentication(rt *route, fr config.FlatRoute, cfg *config.Config, key string, logger *slog.Logger) error {
-	switch fr.Route.AuthValidate.Mode {
-	case "select":
-		if len(fr.Route.AuthValidate.Methods) < 2 || len(fr.Route.AuthValidate.Methods) > 3 {
-			return fmt.Errorf("route %s: authentication selection requires 2..3 methods", key)
+	next := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { r.serveAfterJWT(w, req, rt) })
+	if fr.Route.AuthValidate.Mode != "select" {
+		if err := r.setupTerminalAuthentication(rt, fr, cfg, key, logger); err != nil {
+			return err
 		}
-		for i := range fr.Route.AuthValidate.Methods {
-			method := fr.Route.AuthValidate.Methods[i]
-			if method.Mode == "select" || len(method.Methods) > 0 {
-				return fmt.Errorf("route %s: nested authentication selection", key)
-			}
-			child := fr
-			child.Route.AuthValidate = &method
-			branch := &route{}
-			if err := r.setupAuthentication(branch, child, cfg, key, logger); err != nil {
-				return err
-			}
-			source, err := method.CredentialSource()
-			if err != nil {
-				return err
-			}
-			rt.authMethods = append(rt.authMethods, authn.Method{Source: source, Wrap: branch.wrapAuthentication})
-		}
+		rt.authentication = rt.wrapAuthentication(next)
 		return nil
+	}
+	if err := fr.Route.AuthValidate.ValidateSelection(); err != nil {
+		return fmt.Errorf("route %s: %w", key, err)
+	}
+	methods := make([]authn.Method, 0, len(fr.Route.AuthValidate.Methods))
+	for i := range fr.Route.AuthValidate.Methods {
+		child := fr
+		child.Route.AuthValidate = &fr.Route.AuthValidate.Methods[i]
+		branch := &route{}
+		if err := r.setupTerminalAuthentication(branch, child, cfg, key, logger); err != nil {
+			return err
+		}
+		source, err := child.Route.AuthValidate.CredentialSource()
+		if err != nil {
+			return err
+		}
+		forwardsEmail := branch.forwardsActorEmail()
+		wrap := branch.wrapAuthentication
+		methods = append(methods, authn.Method{Source: source, Wrap: func(next http.Handler) http.Handler {
+			return wrap(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if forwardsEmail {
+					auditEmail(req)
+				}
+				next.ServeHTTP(w, req)
+			}))
+		}})
+	}
+	// Select compiles the wrappers once; requests retain only the chosen handlers,
+	// not temporary route objects or per-request selector maps.
+	rt.authentication = authn.Select(methods, next)
+	return nil
+}
+
+func (r *Router) setupTerminalAuthentication(rt *route, fr config.FlatRoute, cfg *config.Config, key string, logger *slog.Logger) error {
+	switch fr.Route.AuthValidate.Mode {
 	case "session":
 		return r.setupSession(rt, fr, cfg, key, logger)
 	case "token":
@@ -46,8 +65,6 @@ func (r *Router) setupAuthentication(rt *route, fr config.FlatRoute, cfg *config
 
 func (rt *route) wrapAuthentication(next http.Handler) http.Handler {
 	switch {
-	case len(rt.authMethods) > 0:
-		return authn.Select(rt.authMethods, next)
 	case rt.sessionConfig != nil && rt.sessionValidator != nil:
 		return rt.sessionValidator.Wrap(*rt.sessionConfig, next)
 	case rt.tokenConfig != nil && rt.tokenValidator != nil:

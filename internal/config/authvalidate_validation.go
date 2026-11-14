@@ -3,38 +3,22 @@ package config
 import (
 	"fmt"
 	"net/textproto"
+	"reflect"
 	"strings"
 	"time"
+
+	"github.com/ledatu/csar-core/gatewayctx"
 )
 
 func (c *Config) validateAuthValidate(a *AuthValidateConfig, path, method string) error {
 	if a.Mode == "select" {
-		parent := *a
-		parent.Mode, parent.Methods = "", nil
-		// A selector only carries methods; options belong on the chosen validator.
-		if parent.Use != "" || parent.JWKSURL != "" || parent.JWKSTLS != "" || parent.SessionEndpoint != "" || parent.SessionTLS != "" || parent.IntrospectionEndpoint != "" || parent.IntrospectionTLS != "" || parent.RequiredScope != "" || parent.SellerPathParam != "" || parent.Issuer != "" || len(parent.Audiences) > 0 || parent.HeaderName != "" || parent.TokenPrefix != "" || parent.CookieName != "" || parent.CacheTTL.Duration != 0 || len(parent.ForwardHeaders) > 0 || len(parent.RequiredClaims) > 0 || len(parent.ForwardClaims) > 0 || len(parent.IssueTokens) > 0 {
-			return fmt.Errorf("authentication select may only contain methods")
+		if err := a.ValidateSelection(); err != nil {
+			return fmt.Errorf("path %s method %s: %w", path, method, err)
 		}
-		if len(a.Methods) < 2 || len(a.Methods) > 3 {
-			return fmt.Errorf("authentication select requires 2..3 methods")
-		}
-		sources := map[string]bool{}
 		for i := range a.Methods {
-			child := &a.Methods[i]
-			if child.Mode == "select" || len(child.Methods) > 0 || len(child.IssueTokens) > 0 {
-				return fmt.Errorf("nested authentication selection is forbidden")
-			}
-			if err := c.validateAuthValidate(child, path, method); err != nil {
+			if err := c.validateAuthValidate(&a.Methods[i], path, method); err != nil {
 				return err
 			}
-			source, err := child.CredentialSource()
-			if err != nil {
-				return err
-			}
-			if sources[source] {
-				return fmt.Errorf("authentication methods share credential source %s", source)
-			}
-			sources[source] = true
 		}
 		return nil
 	}
@@ -88,7 +72,7 @@ func (c *Config) validateAuthValidate(a *AuthValidateConfig, path, method string
 			}
 		}
 	default:
-		return fmt.Errorf("path %s method %s: x-csar-authn-validate.mode %q is not recognized (expected \"jwt\", \"session\", or \"token\")", path, method, a.Mode)
+		return fmt.Errorf("path %s method %s: x-csar-authn-validate.mode %q is not recognized (expected \"jwt\", \"session\", \"token\", or \"select\")", path, method, a.Mode)
 	}
 	for i := range a.IssueTokens {
 		token := &a.IssueTokens[i]
@@ -117,10 +101,49 @@ func (c *Config) validateAuthValidate(a *AuthValidateConfig, path, method string
 	return nil
 }
 
+// ValidateSelection is shared by config loading and route construction so a
+// programmatically constructed route cannot bypass the selector invariants.
+func (a *AuthValidateConfig) ValidateSelection() error {
+	if a.Mode != "select" {
+		return fmt.Errorf("authentication selection requires mode select")
+	}
+	// Reject any validator option, including fields added to the config later.
+	options := *a
+	options.Mode, options.Methods = "", nil
+	if !reflect.ValueOf(options).IsZero() {
+		return fmt.Errorf("authentication select may only contain methods")
+	}
+	if len(a.Methods) < 2 || len(a.Methods) > 3 {
+		return fmt.Errorf("authentication select requires 2..3 methods")
+	}
+	sources := make(map[string]bool, len(a.Methods))
+	for i := range a.Methods {
+		child := &a.Methods[i]
+		if child.Mode == "select" || len(child.Methods) > 0 {
+			return fmt.Errorf("nested authentication selection is forbidden")
+		}
+		if len(child.IssueTokens) > 0 {
+			return fmt.Errorf("authentication selection does not support session token issuance")
+		}
+		source, err := child.CredentialSource()
+		if err != nil {
+			return err
+		}
+		if sources[source] {
+			return fmt.Errorf("authentication methods share credential source %s", source)
+		}
+		sources[source] = true
+	}
+	return nil
+}
+
 // CredentialSource identifies a transport location, never the credential value.
 func (a AuthValidateConfig) CredentialSource() (string, error) {
 	switch a.Mode {
 	case "session":
+		if a.CookieName == "" {
+			return "", fmt.Errorf("session credential source requires a cookie_name")
+		}
 		return "cookie:" + a.CookieName, nil
 	case "token":
 		return "header:Authorization", nil
@@ -130,10 +153,10 @@ func (a AuthValidateConfig) CredentialSource() (string, error) {
 		}
 		header := a.HeaderName
 		if header == "" {
-			header = "X-Csar-Authorization"
+			header = gatewayctx.HeaderCsarAuthorization
 		}
 		header = textproto.CanonicalMIMEHeaderKey(header)
-		if header != "X-Csar-Authorization" && header != "Authorization" {
+		if header != gatewayctx.HeaderCsarAuthorization && header != "Authorization" {
 			return "", fmt.Errorf("authentication selection only supports Authorization and X-Csar-Authorization JWT headers")
 		}
 		return "header:" + header, nil

@@ -1,10 +1,5 @@
 # csar Agent Summary
 
-## Shared owner authentication (November 14, source only)
-
-Shared read routes support mode: select with 2..3 terminal methods. One configured cookie/header chooses the validator; ambiguity and failure never trigger fallback. Coordinator snapshots preserve methods. JWT audience alternatives now accept any configured audience, including a compatibility audience. Existing single-mode policies are unchanged.
-
-
 ## Role In Prod
 `csar` is the trusted API router and coordinator pair for the stack. The router
 owns authn validation, authz enforcement, throttling, circuit breaking, token
@@ -18,6 +13,7 @@ and internal admin surfaces.
   key tooling.
 
 ## Trust/Auth Model
+- Shared routes may select session, personal-key or STS authentication by credential location; selection is compiled once, preserves verified audit identity, and rejects ambiguity without fallback. Usage belongs in README.md and csar.schema.json.
 - Inbound JWTs are validated at the router against JWKS.
 - Opaque seller personal keys use mTLS introspection against `csar-authn`.
   The router bounds token caching to 15 seconds, checks `adverts:read` and

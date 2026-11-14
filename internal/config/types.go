@@ -942,6 +942,7 @@ type AuthValidateConfig struct {
 
 	// Mode selects the validation strategy: "" or "jwt" (default) performs local
 	// JWT/JWKS validation; "session" or "token" make authn subrequests.
+	// "select" chooses exactly one terminal method by credential presence.
 	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 
 	// Methods are terminal authentication policies selected by credential presence.
@@ -985,7 +986,7 @@ type AuthValidateConfig struct {
 	// Audiences, if set, validates the "aud" claim contains at least one entry (jwt mode).
 	Audiences []string `yaml:"audiences,omitempty" json:"audiences,omitempty"`
 
-	// HeaderName is the HTTP header carrying the token. Default: "Authorization".
+	// HeaderName is the HTTP header carrying the token. Default: "X-Csar-Authorization".
 	HeaderName string `yaml:"header_name,omitempty" json:"header_name,omitempty"`
 
 	// TokenPrefix is stripped from the header value before parsing.

@@ -162,9 +162,11 @@ func (r *Router) serveWithIPCheck(w http.ResponseWriter, req *http.Request, rt *
 	gatewayctx.StripTrusted(req.Header)
 
 	// Authentication completes before any authorization or cache access.
-	rt.wrapAuthentication(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		r.serveAfterJWT(w, req, rt)
-	})).ServeHTTP(w, req)
+	if rt.authentication != nil {
+		rt.authentication.ServeHTTP(w, req)
+		return
+	}
+	r.serveAfterJWT(w, req, rt)
 }
 
 // serveAfterJWT runs authz evaluation if configured, then continues to serveAfterAuth.
