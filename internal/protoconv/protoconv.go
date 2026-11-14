@@ -471,6 +471,7 @@ func protoToCacheInvalidationPoliciesMap(m map[string]*csarv1.CacheInvalidationC
 
 func protoToAuthValidateConfig(a *csarv1.AuthValidateConfigProto) *config.AuthValidateConfig {
 	return &config.AuthValidateConfig{
+		Methods:               protoToAuthMethods(a.GetMethods()),
 		Use:                   a.GetUse(),
 		Mode:                  a.GetMode(),
 		JWKSURL:               a.GetJwksUrl(),
@@ -757,6 +758,17 @@ func protoToAuditCapturePolicies(policies map[string]*csarv1.AuditCaptureConfigP
 	out := make(map[string]config.AuditCaptureConfig, len(policies))
 	for name, ac := range policies {
 		out[name] = *protoToAuditCaptureConfig(ac)
+	}
+	return out
+}
+
+func protoToAuthMethods(methods []*csarv1.AuthValidateConfigProto) []config.AuthValidateConfig {
+	if methods == nil {
+		return nil
+	}
+	out := make([]config.AuthValidateConfig, 0, len(methods))
+	for _, method := range methods {
+		out = append(out, *protoToAuthValidateConfig(method))
 	}
 	return out
 }

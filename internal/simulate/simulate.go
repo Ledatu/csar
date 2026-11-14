@@ -193,13 +193,21 @@ func resolveMiddlewares(cfg *config.Config, route config.RouteConfig, path strin
 		})
 	}
 
-	// JWT Validation
+	// Authentication is selected before authorization and proxying.
 	if route.AuthValidate != nil {
-		mws = append(mws, MiddlewareInfo{
-			Name:    "JWT Validation",
-			Details: fmt.Sprintf("jwks: %s", route.AuthValidate.JWKSURL),
-			Impact:  "blocks",
-		})
+		info := MiddlewareInfo{Name: "JWT Validation", Details: fmt.Sprintf("jwks: %s", route.AuthValidate.JWKSURL), Impact: "blocks"}
+		if route.AuthValidate.Mode == "select" {
+			sources := make([]string, 0, len(route.AuthValidate.Methods))
+			for i := range route.AuthValidate.Methods {
+				source, err := route.AuthValidate.Methods[i].CredentialSource()
+				if err == nil {
+					sources = append(sources, source)
+				}
+			}
+			info.Name = "Authentication Selection"
+			info.Details = "exactly one of: " + strings.Join(sources, ", ") + "; no fallback"
+		}
+		mws = append(mws, info)
 	}
 
 	// Security (credential injection)

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"net"
-	"net/textproto"
 	"regexp"
 	"strconv"
 	"strings"
@@ -266,80 +265,9 @@ func (c *Config) Validate() error {
 				}
 			}
 
-			// Validate auth-validate config (JWT or session mode).
 			if route.AuthValidate != nil {
-				switch route.AuthValidate.Mode {
-				case "session":
-					if route.AuthValidate.SessionEndpoint == "" {
-						return fmt.Errorf("path %s method %s: x-csar-authn-validate.session_endpoint is required for session mode", path, method)
-					}
-					if !strings.HasPrefix(route.AuthValidate.SessionEndpoint, "https://") && !strings.HasPrefix(route.AuthValidate.SessionEndpoint, "http://") {
-						return fmt.Errorf("path %s method %s: x-csar-authn-validate.session_endpoint must start with http:// or https://", path, method)
-					}
-					if route.AuthValidate.CookieName == "" {
-						return fmt.Errorf("path %s method %s: x-csar-authn-validate.cookie_name is required for session mode", path, method)
-					}
-				case "token":
-					if len(route.AuthValidate.IssueTokens) > 0 || route.AuthValidate.CookieName != "" || route.AuthValidate.HeaderName != "" || route.AuthValidate.TokenPrefix != "" {
-						return fmt.Errorf("path %s method %s: token mode cannot use session or JWT header options", path, method)
-					}
-					if !strings.HasPrefix(route.AuthValidate.IntrospectionEndpoint, "https://") {
-						return fmt.Errorf("path %s method %s: token introspection_endpoint must use https", path, method)
-					}
-					if route.AuthValidate.IntrospectionTLS == "" {
-						return fmt.Errorf("path %s method %s: token introspection_tls is required", path, method)
-					}
-					if _, ok := c.BackendTLSPolicies[route.AuthValidate.IntrospectionTLS]; !ok {
-						return fmt.Errorf("path %s method %s: token introspection_tls policy not found", path, method)
-					}
-					if route.AuthValidate.RequiredScope == "" {
-						return fmt.Errorf("path %s method %s: token required_scope is required", path, method)
-					}
-					if route.AuthValidate.CacheTTL.Duration > 30*time.Second {
-						return fmt.Errorf("path %s method %s: token cache_ttl exceeds 30s", path, method)
-					}
-				case "", "jwt":
-					if len(route.AuthValidate.IssueTokens) > 0 {
-						return fmt.Errorf("path %s method %s: x-csar-authn-validate.issue_tokens requires mode \"session\"", path, method)
-					}
-					if route.AuthValidate.JWKSURL == "" {
-						return fmt.Errorf("path %s method %s: x-csar-authn-validate.jwks_url is required", path, method)
-					}
-					if !strings.HasPrefix(route.AuthValidate.JWKSURL, "https://") && !strings.HasPrefix(route.AuthValidate.JWKSURL, "http://") {
-						return fmt.Errorf("path %s method %s: x-csar-authn-validate.jwks_url must start with http:// or https://", path, method)
-					}
-					if route.AuthValidate.JWKSTLS != "" {
-						if _, ok := c.BackendTLSPolicies[route.AuthValidate.JWKSTLS]; !ok {
-							return fmt.Errorf("path %s method %s: x-csar-authn-validate.jwks_tls policy %q not found in backend_tls_policies",
-								path, method, route.AuthValidate.JWKSTLS)
-						}
-					}
-				default:
-					return fmt.Errorf("path %s method %s: x-csar-authn-validate.mode %q is not recognized (expected \"jwt\", \"session\", or \"token\")", path, method, route.AuthValidate.Mode)
-				}
-				for i := range route.AuthValidate.IssueTokens {
-					token := &route.AuthValidate.IssueTokens[i]
-					idx := fmt.Sprintf("[%d]", i)
-					if token.Profile == "" {
-						return fmt.Errorf("path %s method %s: x-csar-authn-validate.issue_tokens%s.profile is required", path, method, idx)
-					}
-					if token.InjectHeader == "" {
-						return fmt.Errorf("path %s method %s: x-csar-authn-validate.issue_tokens%s.inject_header is required", path, method, idx)
-					}
-					token.InjectHeader = textproto.CanonicalMIMEHeaderKey(token.InjectHeader)
-					if token.InjectFormat == "" {
-						token.InjectFormat = "Bearer {token}"
-					}
-					if !strings.Contains(token.InjectFormat, "{token}") {
-						return fmt.Errorf("path %s method %s: x-csar-authn-validate.issue_tokens%s.inject_format must contain {token}", path, method, idx)
-					}
-					switch token.OnMissingClaim {
-					case "", "fail_closed":
-						token.OnMissingClaim = "fail_closed"
-					case "omit":
-					default:
-						return fmt.Errorf("path %s method %s: x-csar-authn-validate.issue_tokens%s.on_missing_claim must be \"fail_closed\" or \"omit\"", path, method, idx)
-					}
+				if err := c.validateAuthValidate(route.AuthValidate, path, method); err != nil {
+					return err
 				}
 			}
 

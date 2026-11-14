@@ -939,6 +939,7 @@ func cacheInvalidationPoliciesMapToProto(policies map[string]config.CacheInvalid
 
 func authValidateToProto(a *config.AuthValidateConfig) *csarv1.AuthValidateConfigProto {
 	return &csarv1.AuthValidateConfigProto{
+		Methods:               authMethodsToProto(a.Methods),
 		Use:                   a.Use,
 		Mode:                  a.Mode,
 		JwksUrl:               a.JWKSURL,
@@ -1189,6 +1190,17 @@ func backendPoolsToProto(policies map[string]config.BackendPoolConfig) map[strin
 			IdleConnTimeout:       durationpb.New(p.IdleConnTimeout.Duration),
 			ExpectContinueTimeout: durationpb.New(p.ExpectContinueTimeout.Duration),
 		}
+	}
+	return out
+}
+
+func authMethodsToProto(methods []config.AuthValidateConfig) []*csarv1.AuthValidateConfigProto {
+	if methods == nil {
+		return nil
+	}
+	out := make([]*csarv1.AuthValidateConfigProto, 0, len(methods))
+	for i := range methods {
+		out = append(out, authValidateToProto(&methods[i]))
 	}
 	return out
 }

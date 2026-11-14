@@ -130,3 +130,12 @@ func TestSimulate_LiteralDotIsNotAWildcard(t *testing.T) {
 		t.Fatal("expected /files/report.json to match")
 	}
 }
+
+func TestAuthenticationSelectionShowsCredentialSources(t *testing.T) {
+	methods := resolveMiddlewares(&config.Config{}, config.RouteConfig{AuthValidate: &config.AuthValidateConfig{Mode: "select", Methods: []config.AuthValidateConfig{
+		{Mode: "session", CookieName: "csar_session"}, {Mode: "jwt"},
+	}}}, "/catalog")
+	if len(methods) != 1 || methods[0].Name != "Authentication Selection" || methods[0].Details != "exactly one of: cookie:csar_session, header:X-Csar-Authorization; no fallback" {
+		t.Fatalf("misleading authentication pipeline: %+v", methods)
+	}
+}

@@ -150,7 +150,7 @@ func (v *JWTValidator) Wrap(cfg Config, next http.Handler) http.Handler {
 
 		// Build audience config: use first audience as RequiredAudience (backward compat).
 		var requiredAud string
-		if len(cfg.Audiences) > 0 {
+		if len(cfg.Audiences) == 1 {
 			requiredAud = cfg.Audiences[0]
 		}
 

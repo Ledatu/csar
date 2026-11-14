@@ -944,6 +944,10 @@ type AuthValidateConfig struct {
 	// JWT/JWKS validation; "session" or "token" make authn subrequests.
 	Mode string `yaml:"mode,omitempty" json:"mode,omitempty"`
 
+	// Methods are terminal authentication policies selected by credential presence.
+	// Selection never retries a failed credential using another method.
+	Methods []AuthValidateConfig `yaml:"methods,omitempty" json:"methods,omitempty"`
+
 	// JWKSURL is the endpoint serving the JSON Web Key Set (jwt mode).
 	// Example: "https://auth.example.com/.well-known/jwks.json"
 	JWKSURL string `yaml:"jwks_url,omitempty" json:"jwks_url,omitempty"`

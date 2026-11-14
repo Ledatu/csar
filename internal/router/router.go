@@ -61,6 +61,7 @@ type route struct {
 	jwtValidator        *authn.JWTValidator        // per-route ref to the validator for this route's TLS profile
 	sessionConfig       *authn.SessionConfig       // nil if no session-based validation
 	sessionValidator    *authn.SessionValidator    // per-route ref to the validator for this route's TLS profile
+	authMethods         []authn.Method
 	tokenConfig         *authn.TokenConfig
 	tokenValidator      *authn.TokenValidator
 	dlpConfig           *dlp.Config                // nil if no response redaction

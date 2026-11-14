@@ -2,89 +2,113 @@ package config
 
 import "fmt"
 
-// ResolveAuthValidatePolicies replaces auth-validate policy references with
-// the full AuthValidateConfig from auth_validate_policies. Inline fields
-// override policy values (shallow merge). Must be called after Load / before Validate.
+// ResolveAuthValidatePolicies expands references, including selection methods.
 func (c *Config) ResolveAuthValidatePolicies() error {
 	for path, methods := range c.Paths {
 		for method := range methods {
 			route := methods[method]
-			if route.AuthValidate == nil || route.AuthValidate.Use == "" {
+			if route.AuthValidate == nil {
 				continue
 			}
-			policyName := route.AuthValidate.Use
-			if len(c.AuthValidatePolicies) == 0 {
-				return fmt.Errorf("path %s method %s: auth-validate policy %q referenced but no auth_validate_policies defined",
-					path, method, policyName)
+			resolved, err := c.resolveAuthValidate(*route.AuthValidate, false)
+			if err != nil {
+				return fmt.Errorf("path %s method %s: %w", path, method, err)
 			}
-			policy, ok := c.AuthValidatePolicies[policyName]
-			if !ok {
-				return fmt.Errorf("path %s method %s: auth-validate policy %q not found in auth_validate_policies",
-					path, method, policyName)
+			if route.AuthValidate.Use != "" {
+				annotatePolicy(&route, "x-csar-authn-validate", route.AuthValidate.Use)
 			}
-			merged := policy
-			if route.AuthValidate.Mode != "" {
-				merged.Mode = route.AuthValidate.Mode
-			}
-			if route.AuthValidate.JWKSURL != "" {
-				merged.JWKSURL = route.AuthValidate.JWKSURL
-			}
-			if route.AuthValidate.JWKSTLS != "" {
-				merged.JWKSTLS = route.AuthValidate.JWKSTLS
-			}
-			if route.AuthValidate.SessionEndpoint != "" {
-				merged.SessionEndpoint = route.AuthValidate.SessionEndpoint
-			}
-			if route.AuthValidate.SessionTLS != "" {
-				merged.SessionTLS = route.AuthValidate.SessionTLS
-			}
-			if route.AuthValidate.IntrospectionEndpoint != "" {
-				merged.IntrospectionEndpoint = route.AuthValidate.IntrospectionEndpoint
-			}
-			if route.AuthValidate.IntrospectionTLS != "" {
-				merged.IntrospectionTLS = route.AuthValidate.IntrospectionTLS
-			}
-			if route.AuthValidate.RequiredScope != "" {
-				merged.RequiredScope = route.AuthValidate.RequiredScope
-			}
-			if route.AuthValidate.SellerPathParam != "" {
-				merged.SellerPathParam = route.AuthValidate.SellerPathParam
-			}
-			if len(route.AuthValidate.ForwardHeaders) > 0 {
-				merged.ForwardHeaders = route.AuthValidate.ForwardHeaders
-			}
-			if route.AuthValidate.Issuer != "" {
-				merged.Issuer = route.AuthValidate.Issuer
-			}
-			if len(route.AuthValidate.Audiences) > 0 {
-				merged.Audiences = route.AuthValidate.Audiences
-			}
-			if route.AuthValidate.HeaderName != "" {
-				merged.HeaderName = route.AuthValidate.HeaderName
-			}
-			if route.AuthValidate.TokenPrefix != "" {
-				merged.TokenPrefix = route.AuthValidate.TokenPrefix
-			}
-			if route.AuthValidate.CacheTTL.Duration != 0 {
-				merged.CacheTTL = route.AuthValidate.CacheTTL
-			}
-			if len(route.AuthValidate.RequiredClaims) > 0 {
-				merged.RequiredClaims = route.AuthValidate.RequiredClaims
-			}
-			if len(route.AuthValidate.ForwardClaims) > 0 {
-				merged.ForwardClaims = route.AuthValidate.ForwardClaims
-			}
-			if route.AuthValidate.CookieName != "" {
-				merged.CookieName = route.AuthValidate.CookieName
-			}
-			if len(route.AuthValidate.IssueTokens) > 0 {
-				merged.IssueTokens = route.AuthValidate.IssueTokens
-			}
-			merged.Use = ""
-			route.AuthValidate = &merged
-			annotatePolicy(&route, "x-csar-authn-validate", policyName)
+			route.AuthValidate = &resolved
 			methods[method] = route
 		}
 	}
 	return nil
+}
+
+func (c *Config) resolveAuthValidate(input AuthValidateConfig, terminal bool) (AuthValidateConfig, error) {
+	policy := input
+	if input.Use != "" {
+		var ok bool
+		policy, ok = c.AuthValidatePolicies[input.Use]
+		if !ok {
+			return input, fmt.Errorf("auth-validate policy %q not found", input.Use)
+		}
+		if policy.Use != "" {
+			return input, fmt.Errorf("auth-validate policy references cannot chain")
+		}
+	}
+	merged := policy
+	if input.Mode != "" {
+		merged.Mode = input.Mode
+	}
+	if input.JWKSURL != "" {
+		merged.JWKSURL = input.JWKSURL
+	}
+	if input.JWKSTLS != "" {
+		merged.JWKSTLS = input.JWKSTLS
+	}
+	if input.SessionEndpoint != "" {
+		merged.SessionEndpoint = input.SessionEndpoint
+	}
+	if input.SessionTLS != "" {
+		merged.SessionTLS = input.SessionTLS
+	}
+	if input.IntrospectionEndpoint != "" {
+		merged.IntrospectionEndpoint = input.IntrospectionEndpoint
+	}
+	if input.IntrospectionTLS != "" {
+		merged.IntrospectionTLS = input.IntrospectionTLS
+	}
+	if input.RequiredScope != "" {
+		merged.RequiredScope = input.RequiredScope
+	}
+	if input.SellerPathParam != "" {
+		merged.SellerPathParam = input.SellerPathParam
+	}
+	if len(input.ForwardHeaders) > 0 {
+		merged.ForwardHeaders = input.ForwardHeaders
+	}
+	if input.Issuer != "" {
+		merged.Issuer = input.Issuer
+	}
+	if len(input.Audiences) > 0 {
+		merged.Audiences = input.Audiences
+	}
+	if input.HeaderName != "" {
+		merged.HeaderName = input.HeaderName
+	}
+	if input.TokenPrefix != "" {
+		merged.TokenPrefix = input.TokenPrefix
+	}
+	if input.CacheTTL.Duration != 0 {
+		merged.CacheTTL = input.CacheTTL
+	}
+	if len(input.RequiredClaims) > 0 {
+		merged.RequiredClaims = input.RequiredClaims
+	}
+	if len(input.ForwardClaims) > 0 {
+		merged.ForwardClaims = input.ForwardClaims
+	}
+	if input.CookieName != "" {
+		merged.CookieName = input.CookieName
+	}
+	if len(input.IssueTokens) > 0 {
+		merged.IssueTokens = input.IssueTokens
+	}
+
+	if len(input.Methods) > 0 {
+		merged.Methods = input.Methods
+	}
+	merged.Use = ""
+	if terminal && (merged.Mode == "select" || len(merged.Methods) > 0) {
+		return input, fmt.Errorf("nested authentication selection is forbidden")
+	}
+	merged.Methods = append([]AuthValidateConfig(nil), merged.Methods...)
+	for i := range merged.Methods {
+		resolved, err := c.resolveAuthValidate(merged.Methods[i], true)
+		if err != nil {
+			return input, err
+		}
+		merged.Methods[i] = resolved
+	}
+	return merged, nil
 }

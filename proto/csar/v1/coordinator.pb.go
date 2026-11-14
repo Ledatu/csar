@@ -1706,27 +1706,28 @@ func (x *GlobalThrottleProto) GetMaxWait() *durationpb.Duration {
 }
 
 type AuthValidateConfigProto struct {
-	state                 protoimpl.MessageState   `protogen:"open.v1"`
-	Use                   string                   `protobuf:"bytes,1,opt,name=use,proto3" json:"use,omitempty"`
-	JwksUrl               string                   `protobuf:"bytes,2,opt,name=jwks_url,json=jwksUrl,proto3" json:"jwks_url,omitempty"`
-	Issuer                string                   `protobuf:"bytes,3,opt,name=issuer,proto3" json:"issuer,omitempty"`
-	Audiences             []string                 `protobuf:"bytes,4,rep,name=audiences,proto3" json:"audiences,omitempty"`
-	HeaderName            string                   `protobuf:"bytes,5,opt,name=header_name,json=headerName,proto3" json:"header_name,omitempty"`
-	TokenPrefix           string                   `protobuf:"bytes,6,opt,name=token_prefix,json=tokenPrefix,proto3" json:"token_prefix,omitempty"`
-	CacheTtl              *durationpb.Duration     `protobuf:"bytes,7,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`
-	RequiredClaims        map[string]string        `protobuf:"bytes,8,rep,name=required_claims,json=requiredClaims,proto3" json:"required_claims,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	ForwardClaims         map[string]string        `protobuf:"bytes,9,rep,name=forward_claims,json=forwardClaims,proto3" json:"forward_claims,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	CookieName            string                   `protobuf:"bytes,10,opt,name=cookie_name,json=cookieName,proto3" json:"cookie_name,omitempty"`
-	Mode                  string                   `protobuf:"bytes,11,opt,name=mode,proto3" json:"mode,omitempty"`
-	SessionEndpoint       string                   `protobuf:"bytes,12,opt,name=session_endpoint,json=sessionEndpoint,proto3" json:"session_endpoint,omitempty"`
-	SessionTls            string                   `protobuf:"bytes,13,opt,name=session_tls,json=sessionTls,proto3" json:"session_tls,omitempty"`
-	ForwardHeaders        []string                 `protobuf:"bytes,14,rep,name=forward_headers,json=forwardHeaders,proto3" json:"forward_headers,omitempty"`
-	JwksTls               string                   `protobuf:"bytes,15,opt,name=jwks_tls,json=jwksTls,proto3" json:"jwks_tls,omitempty"`
-	IssueTokens           []*IssueTokenConfigProto `protobuf:"bytes,16,rep,name=issue_tokens,json=issueTokens,proto3" json:"issue_tokens,omitempty"`
-	IntrospectionEndpoint string                   `protobuf:"bytes,17,opt,name=introspection_endpoint,json=introspectionEndpoint,proto3" json:"introspection_endpoint,omitempty"`
-	IntrospectionTls      string                   `protobuf:"bytes,18,opt,name=introspection_tls,json=introspectionTls,proto3" json:"introspection_tls,omitempty"`
-	RequiredScope         string                   `protobuf:"bytes,19,opt,name=required_scope,json=requiredScope,proto3" json:"required_scope,omitempty"`
-	SellerPathParam       string                   `protobuf:"bytes,20,opt,name=seller_path_param,json=sellerPathParam,proto3" json:"seller_path_param,omitempty"`
+	state                 protoimpl.MessageState     `protogen:"open.v1"`
+	Use                   string                     `protobuf:"bytes,1,opt,name=use,proto3" json:"use,omitempty"`
+	JwksUrl               string                     `protobuf:"bytes,2,opt,name=jwks_url,json=jwksUrl,proto3" json:"jwks_url,omitempty"`
+	Issuer                string                     `protobuf:"bytes,3,opt,name=issuer,proto3" json:"issuer,omitempty"`
+	Audiences             []string                   `protobuf:"bytes,4,rep,name=audiences,proto3" json:"audiences,omitempty"`
+	HeaderName            string                     `protobuf:"bytes,5,opt,name=header_name,json=headerName,proto3" json:"header_name,omitempty"`
+	TokenPrefix           string                     `protobuf:"bytes,6,opt,name=token_prefix,json=tokenPrefix,proto3" json:"token_prefix,omitempty"`
+	CacheTtl              *durationpb.Duration       `protobuf:"bytes,7,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`
+	RequiredClaims        map[string]string          `protobuf:"bytes,8,rep,name=required_claims,json=requiredClaims,proto3" json:"required_claims,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	ForwardClaims         map[string]string          `protobuf:"bytes,9,rep,name=forward_claims,json=forwardClaims,proto3" json:"forward_claims,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	CookieName            string                     `protobuf:"bytes,10,opt,name=cookie_name,json=cookieName,proto3" json:"cookie_name,omitempty"`
+	Mode                  string                     `protobuf:"bytes,11,opt,name=mode,proto3" json:"mode,omitempty"`
+	SessionEndpoint       string                     `protobuf:"bytes,12,opt,name=session_endpoint,json=sessionEndpoint,proto3" json:"session_endpoint,omitempty"`
+	SessionTls            string                     `protobuf:"bytes,13,opt,name=session_tls,json=sessionTls,proto3" json:"session_tls,omitempty"`
+	ForwardHeaders        []string                   `protobuf:"bytes,14,rep,name=forward_headers,json=forwardHeaders,proto3" json:"forward_headers,omitempty"`
+	JwksTls               string                     `protobuf:"bytes,15,opt,name=jwks_tls,json=jwksTls,proto3" json:"jwks_tls,omitempty"`
+	IssueTokens           []*IssueTokenConfigProto   `protobuf:"bytes,16,rep,name=issue_tokens,json=issueTokens,proto3" json:"issue_tokens,omitempty"`
+	IntrospectionEndpoint string                     `protobuf:"bytes,17,opt,name=introspection_endpoint,json=introspectionEndpoint,proto3" json:"introspection_endpoint,omitempty"`
+	IntrospectionTls      string                     `protobuf:"bytes,18,opt,name=introspection_tls,json=introspectionTls,proto3" json:"introspection_tls,omitempty"`
+	RequiredScope         string                     `protobuf:"bytes,19,opt,name=required_scope,json=requiredScope,proto3" json:"required_scope,omitempty"`
+	SellerPathParam       string                     `protobuf:"bytes,20,opt,name=seller_path_param,json=sellerPathParam,proto3" json:"seller_path_param,omitempty"`
+	Methods               []*AuthValidateConfigProto `protobuf:"bytes,21,rep,name=methods,proto3" json:"methods,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -1899,6 +1900,13 @@ func (x *AuthValidateConfigProto) GetSellerPathParam() string {
 		return x.SellerPathParam
 	}
 	return ""
+}
+
+func (x *AuthValidateConfigProto) GetMethods() []*AuthValidateConfigProto {
+	if x != nil {
+		return x.Methods
+	}
+	return nil
 }
 
 type RetryConfigProto struct {
@@ -3994,7 +4002,7 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x13GlobalThrottleProto\x12\x10\n" +
 	"\x03rps\x18\x01 \x01(\x01R\x03rps\x12\x14\n" +
 	"\x05burst\x18\x02 \x01(\x05R\x05burst\x124\n" +
-	"\bmax_wait\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\amaxWait\"\xf7\a\n" +
+	"\bmax_wait\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\amaxWait\"\xb3\b\n" +
 	"\x17AuthValidateConfigProto\x12\x10\n" +
 	"\x03use\x18\x01 \x01(\tR\x03use\x12\x19\n" +
 	"\bjwks_url\x18\x02 \x01(\tR\ajwksUrl\x12\x16\n" +
@@ -4019,7 +4027,8 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x16introspection_endpoint\x18\x11 \x01(\tR\x15introspectionEndpoint\x12+\n" +
 	"\x11introspection_tls\x18\x12 \x01(\tR\x10introspectionTls\x12%\n" +
 	"\x0erequired_scope\x18\x13 \x01(\tR\rrequiredScope\x12*\n" +
-	"\x11seller_path_param\x18\x14 \x01(\tR\x0fsellerPathParam\x1aA\n" +
+	"\x11seller_path_param\x18\x14 \x01(\tR\x0fsellerPathParam\x12:\n" +
+	"\amethods\x18\x15 \x03(\v2 .csar.v1.AuthValidateConfigProtoR\amethods\x1aA\n" +
 	"\x13RequiredClaimsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a@\n" +
@@ -4353,55 +4362,56 @@ var file_proto_csar_v1_coordinator_proto_depIdxs = []int32{
 	58,  // 59: csar.v1.AuthValidateConfigProto.required_claims:type_name -> csar.v1.AuthValidateConfigProto.RequiredClaimsEntry
 	59,  // 60: csar.v1.AuthValidateConfigProto.forward_claims:type_name -> csar.v1.AuthValidateConfigProto.ForwardClaimsEntry
 	11,  // 61: csar.v1.AuthValidateConfigProto.issue_tokens:type_name -> csar.v1.IssueTokenConfigProto
-	64,  // 62: csar.v1.RetryConfigProto.backoff:type_name -> google.protobuf.Duration
-	64,  // 63: csar.v1.RetryConfigProto.max_backoff:type_name -> google.protobuf.Duration
-	64,  // 64: csar.v1.RetryConfigProto.max_internal_wait:type_name -> google.protobuf.Duration
-	60,  // 65: csar.v1.TenantConfigProto.backends:type_name -> csar.v1.TenantConfigProto.BackendsEntry
-	64,  // 66: csar.v1.CacheTTLRuleProto.ttl:type_name -> google.protobuf.Duration
-	64,  // 67: csar.v1.CacheResponseTTLRuleProto.ttl:type_name -> google.protobuf.Duration
-	27,  // 68: csar.v1.CacheBypassConfigProto.headers:type_name -> csar.v1.CacheBypassHeaderProto
-	64,  // 69: csar.v1.CacheCoalesceConfigProto.wait:type_name -> google.protobuf.Duration
-	64,  // 70: csar.v1.CacheConfigProto.ttl:type_name -> google.protobuf.Duration
-	64,  // 71: csar.v1.CacheConfigProto.operation_timeout:type_name -> google.protobuf.Duration
-	23,  // 72: csar.v1.CacheConfigProto.ttl_rules:type_name -> csar.v1.CacheTTLRuleProto
-	24,  // 73: csar.v1.CacheConfigProto.key_query:type_name -> csar.v1.CacheKeyQueryConfigProto
-	64,  // 74: csar.v1.CacheConfigProto.stale_if_error:type_name -> google.protobuf.Duration
-	64,  // 75: csar.v1.CacheConfigProto.stale_while_revalidate:type_name -> google.protobuf.Duration
-	25,  // 76: csar.v1.CacheConfigProto.response_ttl_rules:type_name -> csar.v1.CacheResponseTTLRuleProto
-	26,  // 77: csar.v1.CacheConfigProto.response_tags:type_name -> csar.v1.CacheResponseTagProto
-	28,  // 78: csar.v1.CacheConfigProto.bypass:type_name -> csar.v1.CacheBypassConfigProto
-	29,  // 79: csar.v1.CacheConfigProto.coalesce:type_name -> csar.v1.CacheCoalesceConfigProto
-	64,  // 80: csar.v1.CacheInvalidationConfigProto.operation_timeout:type_name -> google.protobuf.Duration
-	64,  // 81: csar.v1.CacheInvalidationConfigProto.debounce:type_name -> google.protobuf.Duration
-	64,  // 82: csar.v1.CircuitBreakerProfileProto.interval:type_name -> google.protobuf.Duration
-	64,  // 83: csar.v1.CircuitBreakerProfileProto.timeout:type_name -> google.protobuf.Duration
-	37,  // 84: csar.v1.AuthzRouteConfigProto.any_of:type_name -> csar.v1.AuthzRouteConfigProto
-	61,  // 85: csar.v1.QuotaAssignment.quotas:type_name -> csar.v1.QuotaAssignment.QuotasEntry
-	62,  // 86: csar.v1.HealthReport.queue_depths:type_name -> csar.v1.HealthReport.QueueDepthsEntry
-	63,  // 87: csar.v1.HealthReport.metadata:type_name -> csar.v1.HealthReport.MetadataEntry
-	34,  // 88: csar.v1.FullConfigSnapshot.CircuitBreakersEntry.value:type_name -> csar.v1.CircuitBreakerProfileProto
-	10,  // 89: csar.v1.FullConfigSnapshot.SecurityProfilesEntry.value:type_name -> csar.v1.SecurityConfigProto
-	15,  // 90: csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry.value:type_name -> csar.v1.ThrottlingPolicyProto
-	21,  // 91: csar.v1.FullConfigSnapshot.CorsPoliciesEntry.value:type_name -> csar.v1.CORSConfigProto
-	18,  // 92: csar.v1.FullConfigSnapshot.RetryPoliciesEntry.value:type_name -> csar.v1.RetryConfigProto
-	19,  // 93: csar.v1.FullConfigSnapshot.RedactPoliciesEntry.value:type_name -> csar.v1.RedactConfigProto
-	17,  // 94: csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry.value:type_name -> csar.v1.AuthValidateConfigProto
-	37,  // 95: csar.v1.FullConfigSnapshot.AuthzPoliciesEntry.value:type_name -> csar.v1.AuthzRouteConfigProto
-	8,   // 96: csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry.value:type_name -> csar.v1.BackendTLSConfigProto
-	9,   // 97: csar.v1.FullConfigSnapshot.BackendPoolsEntry.value:type_name -> csar.v1.BackendPoolConfigProto
-	30,  // 98: csar.v1.FullConfigSnapshot.CachePoliciesEntry.value:type_name -> csar.v1.CacheConfigProto
-	31,  // 99: csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry.value:type_name -> csar.v1.CacheInvalidationConfigProto
-	20,  // 100: csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntry.value:type_name -> csar.v1.AuditCaptureConfigProto
-	39,  // 101: csar.v1.QuotaAssignment.QuotasEntry.value:type_name -> csar.v1.RouteQuota
-	0,   // 102: csar.v1.CoordinatorService.Subscribe:input_type -> csar.v1.SubscribeRequest
-	40,  // 103: csar.v1.CoordinatorService.ReportHealth:input_type -> csar.v1.HealthReport
-	1,   // 104: csar.v1.CoordinatorService.Subscribe:output_type -> csar.v1.ConfigUpdate
-	41,  // 105: csar.v1.CoordinatorService.ReportHealth:output_type -> csar.v1.HealthAck
-	104, // [104:106] is the sub-list for method output_type
-	102, // [102:104] is the sub-list for method input_type
-	102, // [102:102] is the sub-list for extension type_name
-	102, // [102:102] is the sub-list for extension extendee
-	0,   // [0:102] is the sub-list for field type_name
+	17,  // 62: csar.v1.AuthValidateConfigProto.methods:type_name -> csar.v1.AuthValidateConfigProto
+	64,  // 63: csar.v1.RetryConfigProto.backoff:type_name -> google.protobuf.Duration
+	64,  // 64: csar.v1.RetryConfigProto.max_backoff:type_name -> google.protobuf.Duration
+	64,  // 65: csar.v1.RetryConfigProto.max_internal_wait:type_name -> google.protobuf.Duration
+	60,  // 66: csar.v1.TenantConfigProto.backends:type_name -> csar.v1.TenantConfigProto.BackendsEntry
+	64,  // 67: csar.v1.CacheTTLRuleProto.ttl:type_name -> google.protobuf.Duration
+	64,  // 68: csar.v1.CacheResponseTTLRuleProto.ttl:type_name -> google.protobuf.Duration
+	27,  // 69: csar.v1.CacheBypassConfigProto.headers:type_name -> csar.v1.CacheBypassHeaderProto
+	64,  // 70: csar.v1.CacheCoalesceConfigProto.wait:type_name -> google.protobuf.Duration
+	64,  // 71: csar.v1.CacheConfigProto.ttl:type_name -> google.protobuf.Duration
+	64,  // 72: csar.v1.CacheConfigProto.operation_timeout:type_name -> google.protobuf.Duration
+	23,  // 73: csar.v1.CacheConfigProto.ttl_rules:type_name -> csar.v1.CacheTTLRuleProto
+	24,  // 74: csar.v1.CacheConfigProto.key_query:type_name -> csar.v1.CacheKeyQueryConfigProto
+	64,  // 75: csar.v1.CacheConfigProto.stale_if_error:type_name -> google.protobuf.Duration
+	64,  // 76: csar.v1.CacheConfigProto.stale_while_revalidate:type_name -> google.protobuf.Duration
+	25,  // 77: csar.v1.CacheConfigProto.response_ttl_rules:type_name -> csar.v1.CacheResponseTTLRuleProto
+	26,  // 78: csar.v1.CacheConfigProto.response_tags:type_name -> csar.v1.CacheResponseTagProto
+	28,  // 79: csar.v1.CacheConfigProto.bypass:type_name -> csar.v1.CacheBypassConfigProto
+	29,  // 80: csar.v1.CacheConfigProto.coalesce:type_name -> csar.v1.CacheCoalesceConfigProto
+	64,  // 81: csar.v1.CacheInvalidationConfigProto.operation_timeout:type_name -> google.protobuf.Duration
+	64,  // 82: csar.v1.CacheInvalidationConfigProto.debounce:type_name -> google.protobuf.Duration
+	64,  // 83: csar.v1.CircuitBreakerProfileProto.interval:type_name -> google.protobuf.Duration
+	64,  // 84: csar.v1.CircuitBreakerProfileProto.timeout:type_name -> google.protobuf.Duration
+	37,  // 85: csar.v1.AuthzRouteConfigProto.any_of:type_name -> csar.v1.AuthzRouteConfigProto
+	61,  // 86: csar.v1.QuotaAssignment.quotas:type_name -> csar.v1.QuotaAssignment.QuotasEntry
+	62,  // 87: csar.v1.HealthReport.queue_depths:type_name -> csar.v1.HealthReport.QueueDepthsEntry
+	63,  // 88: csar.v1.HealthReport.metadata:type_name -> csar.v1.HealthReport.MetadataEntry
+	34,  // 89: csar.v1.FullConfigSnapshot.CircuitBreakersEntry.value:type_name -> csar.v1.CircuitBreakerProfileProto
+	10,  // 90: csar.v1.FullConfigSnapshot.SecurityProfilesEntry.value:type_name -> csar.v1.SecurityConfigProto
+	15,  // 91: csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry.value:type_name -> csar.v1.ThrottlingPolicyProto
+	21,  // 92: csar.v1.FullConfigSnapshot.CorsPoliciesEntry.value:type_name -> csar.v1.CORSConfigProto
+	18,  // 93: csar.v1.FullConfigSnapshot.RetryPoliciesEntry.value:type_name -> csar.v1.RetryConfigProto
+	19,  // 94: csar.v1.FullConfigSnapshot.RedactPoliciesEntry.value:type_name -> csar.v1.RedactConfigProto
+	17,  // 95: csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry.value:type_name -> csar.v1.AuthValidateConfigProto
+	37,  // 96: csar.v1.FullConfigSnapshot.AuthzPoliciesEntry.value:type_name -> csar.v1.AuthzRouteConfigProto
+	8,   // 97: csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry.value:type_name -> csar.v1.BackendTLSConfigProto
+	9,   // 98: csar.v1.FullConfigSnapshot.BackendPoolsEntry.value:type_name -> csar.v1.BackendPoolConfigProto
+	30,  // 99: csar.v1.FullConfigSnapshot.CachePoliciesEntry.value:type_name -> csar.v1.CacheConfigProto
+	31,  // 100: csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry.value:type_name -> csar.v1.CacheInvalidationConfigProto
+	20,  // 101: csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntry.value:type_name -> csar.v1.AuditCaptureConfigProto
+	39,  // 102: csar.v1.QuotaAssignment.QuotasEntry.value:type_name -> csar.v1.RouteQuota
+	0,   // 103: csar.v1.CoordinatorService.Subscribe:input_type -> csar.v1.SubscribeRequest
+	40,  // 104: csar.v1.CoordinatorService.ReportHealth:input_type -> csar.v1.HealthReport
+	1,   // 105: csar.v1.CoordinatorService.Subscribe:output_type -> csar.v1.ConfigUpdate
+	41,  // 106: csar.v1.CoordinatorService.ReportHealth:output_type -> csar.v1.HealthAck
+	105, // [105:107] is the sub-list for method output_type
+	103, // [103:105] is the sub-list for method input_type
+	103, // [103:103] is the sub-list for extension type_name
+	103, // [103:103] is the sub-list for extension extendee
+	0,   // [0:103] is the sub-list for field type_name
 }
 
 func init() { file_proto_csar_v1_coordinator_proto_init() }
