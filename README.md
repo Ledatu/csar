@@ -1170,3 +1170,15 @@ Release the matching helper and coordinator/router readers before publishing
 configs with `response` fields. Existing audit ingest/storage transports preserve
 the additive metadata without a schema migration. Disabling response capture
 stops further collection while old events remain readable.
+
+## Stored token freshness
+
+Coordinators validate a stored credential on the first request after
+`--stored-token-refresh-interval` (default `1m`, must be positive). Each ref is
+checked independently; idle tenants cause no reads and S3 mode performs no
+listing or periodic token scan. Concurrent checks for the same ref share one
+bounded backend fetch. A changed credential is returned to the triggering
+request immediately. A missing/invalid credential is not served from the old
+cache; a backend outage fails closed with a five-second validation retry delay.
+Local rotation/deletion wins over a backend read started earlier. Minted tokens
+retain their separate soft refresh and hard expiry behavior.

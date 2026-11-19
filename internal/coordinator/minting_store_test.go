@@ -417,7 +417,7 @@ func TestAuthServiceServesMintedTokenAcrossFailedRefresh(t *testing.T) {
 	}
 }
 
-func TestStaticTokensNeverExpire(t *testing.T) {
+func TestStaticTokensRevalidateWithoutMinting(t *testing.T) {
 	env := newMintTestEnv(t, 3)
 	env.store.putPlaintext("accounts/wb/1/content/read", "wb-token")
 
@@ -435,7 +435,7 @@ func TestStaticTokensNeverExpire(t *testing.T) {
 	if _, err := svc.GetEncryptedToken(context.Background(), tokenReq("accounts/wb/1/content/read")); err != nil {
 		t.Fatalf("GetEncryptedToken a month later: %v", err)
 	}
-	if env.store.fetches.Load() != after {
-		t.Error("a stored token was re-fetched — static refs must keep their pre-minting behavior")
+	if env.store.fetches.Load() != after+1 {
+		t.Error("stored token was not validated once on the next demand")
 	}
 }
