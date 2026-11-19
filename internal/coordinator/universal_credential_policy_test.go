@@ -80,11 +80,11 @@ func TestUniversalOwnerRouterAndRejectionPolicy(t *testing.T) {
 			security := config.SecurityConfigs{{TokenRef: ref, InjectHeader: tc.header, InjectFormat: tc.format}}
 			dual := append(append(config.SecurityConfigs(nil), security...), config.SecurityConfig{TokenRef: clientRef, InjectHeader: "X-Client-ID"})
 			cfg := &config.Config{ListenAddr: ":0", Paths: map[string]config.PathConfig{
-				"/submit":     {"POST": {Backend: config.BackendConfig{TargetURL: vendor.URL}, Security: security}},
+				"/submit":     {"POST": {Backend: config.BackendConfig{TargetURL: vendor.URL}, Security: dual}},
 				"/unselected": {"GET": {Backend: config.BackendConfig{TargetURL: vendor.URL}, Security: dual}},
 			}}
 			injector := middleware.NewAuthInjector(newCredentialRPCFetcher(t, e), &mockKMSProvider{}, quietLogger())
-			gateway, err := router.New(cfg, quietLogger(), router.WithAuthInjector(injector), router.WithCredentialRejectionRoutes("POST:/submit"))
+			gateway, err := router.New(cfg, quietLogger(), router.WithAuthInjector(injector), router.WithCredentialRejectionRoutes("POST:/submit#"+tc.header))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -118,6 +118,10 @@ func TestUniversalOwnerRouterAndRejectionPolicy(t *testing.T) {
 			}
 			if code := request(http.MethodPost, "/submit"); code != http.StatusBadGateway || vendorCalls.Load() != before+1 {
 				t.Fatal("selected rejected value reused")
+			}
+			clientState, clientErr := e.states.GetTokenState(context.Background(), clientRef)
+			if clientErr != nil || clientState.RejectedID != "" {
+				t.Fatal("explicit target quarantined auxiliary credential")
 			}
 			replacement := tc.value + "-replacement"
 			put(ref, replacement, expiry)

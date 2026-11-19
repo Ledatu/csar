@@ -73,7 +73,7 @@ func run() error {
 	tokenFile := flag.String("token-file", "", "path to YAML file with token_ref -> plaintext mappings (local dev)")
 
 	var rejectionRoutes []string
-	flag.Func("credential-rejection-route", "opt an exact METHOD:/configured/path with one injected credential into upstream-401 quarantine (repeatable; disabled by default)", func(value string) error { rejectionRoutes = append(rejectionRoutes, value); return nil })
+	flag.Func("credential-rejection-route", "opt METHOD:/configured/path[#Header] into upstream-401 quarantine; #Header selects one injected entry (repeatable; disabled by default)", func(value string) error { rejectionRoutes = append(rejectionRoutes, value); return nil })
 
 	// Config source flags (S3, HTTP, manifest); env-var driven like coordinator/authn/authz.
 	sf := configload.NewSourceFlags()

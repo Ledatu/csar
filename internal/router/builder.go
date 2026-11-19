@@ -154,7 +154,7 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 		upstreamTimeout: fr.Route.Backend.Timeout.Duration,
 	}
 
-	_, rt.rejectCredentialUnauthorized = r.credentialRejectionKeys[key]
+	rt.rejectionHeader, rt.rejectCredentialUnauthorized = r.credentialRejectionKeys[key]
 
 	// Set up load balancing if multiple targets are configured (audit §3.2 Criticism 3).
 	allTargets := fr.Route.Backend.AllTargets()
