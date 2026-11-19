@@ -21,6 +21,15 @@ import (
 // indefinitely under degraded DB/network conditions (audit §4).
 const defaultFetchTimeout = 5 * time.Second
 
+const storedRefreshRetry = 5 * time.Second
+
+type tokenCacheState struct {
+	epoch     uint64
+	checkedAt time.Time
+	retryAt   time.Time
+	failure   error
+}
+
 // DefaultFetchTimeout exposes the default read-through deadline so callers can
 // tell whether their own work (e.g. a token mint) would outlast it.
 func DefaultFetchTimeout() time.Duration { return defaultFetchTimeout }
@@ -43,8 +52,7 @@ type TokenEntry struct {
 	Descriptor *tokenmint.Descriptor
 
 	// Mint is set only on entries whose value was produced by a grant. It is
-	// nil for stored tokens, which therefore never expire and behave exactly
-	// as they did before minting existed.
+	// nil for stored tokens, whose freshness is validated separately on demand.
 	Mint *MintInfo
 }
 
@@ -99,20 +107,20 @@ func (e TokenEntry) LogValue() slog.Value {
 // It serves encrypted tokens to routers via the GetEncryptedToken RPC.
 // Tokens are loaded into the in-memory store at startup (from file, TokenStore, etc.).
 //
-// When a TokenStore is configured (via SetBackend), cache misses trigger a
-// read-through query to the backing store. Successful fetches are cached
-// in-memory so subsequent requests are served without hitting the backend.
-// This is critical when the polling interval is long (e.g. 4h) and a new
-// token_ref is added between polls.
+// A configured TokenStore is queried on misses and on the first request after
+// the stored-token freshness interval. Idle refs cause no backend reads.
 type AuthServiceImpl struct {
 	csarv1.UnimplementedAuthServiceServer
 
-	mu           sync.RWMutex
-	tokens       map[string]TokenEntry // token_ref -> entry
-	logger       *slog.Logger
-	backend      TokenStore // optional read-through backend (e.g. PostgresTokenStore)
-	sf           singleflight.Group
-	fetchTimeout time.Duration // max time for read-through backend queries (audit §4)
+	mu                    sync.RWMutex
+	tokens                map[string]TokenEntry // token_ref -> entry
+	logger                *slog.Logger
+	backend               TokenStore // optional read-through backend (e.g. PostgresTokenStore)
+	sf                    singleflight.Group
+	fetchTimeout          time.Duration // max time for read-through backend queries (audit §4)
+	storedRefreshInterval time.Duration
+	cacheEpoch            uint64
+	cacheState            map[string]tokenCacheState
 
 	// lastServed records when each minted ref was last handed to a router, so
 	// the refresher can drop entries nobody is using. Kept off mu because it
@@ -131,10 +139,12 @@ type AuthServiceImpl struct {
 // NewAuthService creates an AuthServiceImpl with an empty token store.
 func NewAuthService(logger *slog.Logger) *AuthServiceImpl {
 	return &AuthServiceImpl{
-		tokens:       make(map[string]TokenEntry),
-		logger:       logger,
-		fetchTimeout: defaultFetchTimeout,
-		now:          time.Now,
+		tokens:                make(map[string]TokenEntry),
+		logger:                logger,
+		fetchTimeout:          defaultFetchTimeout,
+		storedRefreshInterval: time.Minute,
+		cacheState:            make(map[string]tokenCacheState),
+		now:                   time.Now,
 	}
 }
 
@@ -208,7 +218,7 @@ func (s *AuthServiceImpl) Refresh(ctx context.Context, tokenRef string) error {
 	if backend == nil {
 		return fmt.Errorf("no backend configured")
 	}
-	_, err := s.fetchThrough(ctx, backend, tokenRef)
+	_, err := s.fetchThrough(ctx, backend, tokenRef, true)
 	return err
 }
 
@@ -236,8 +246,23 @@ func (s *AuthServiceImpl) refreshInBackground(tokenRef string) {
 
 // fetchThrough queries the backend for one ref and caches a valid result.
 // Concurrent callers for the same ref collapse into a single backend query.
-func (s *AuthServiceImpl) fetchThrough(ctx context.Context, backend TokenStore, tokenRef string) (TokenEntry, error) {
+func (s *AuthServiceImpl) fetchThrough(ctx context.Context, backend TokenStore, tokenRef string, force bool) (TokenEntry, error) {
 	res, err, _ := s.sf.Do(tokenRef, func() (interface{}, error) {
+		s.mu.RLock()
+		previous, existed := s.tokens[tokenRef]
+		stamp := s.cacheState[tokenRef]
+		interval := s.storedRefreshInterval
+		s.mu.RUnlock()
+		if !force {
+			now := s.clock()
+			if stamp.failure != nil && now.Before(stamp.retryAt) {
+				return nil, stamp.failure
+			}
+			// Another caller may have completed validation before this flight.
+			if existed && !previous.Minted() && now.Sub(stamp.checkedAt) < interval {
+				return previous, nil
+			}
+		}
 		// Use context.WithoutCancel to decouple the backend query from the
 		// first caller's lifecycle. If that caller cancels or times out,
 		// other goroutines waiting in the singleflight group are not affected.
@@ -252,18 +277,36 @@ func (s *AuthServiceImpl) fetchThrough(ctx context.Context, backend TokenStore, 
 		}
 
 		fetched, fetchErr := backend.FetchOne(fetchCtx, tokenRef)
+		s.mu.Lock()
+		// A local write/delete is newer than a backend read started before it.
+		if s.cacheState[tokenRef].epoch != stamp.epoch {
+			current, present := s.tokens[tokenRef]
+			s.mu.Unlock()
+			if !present {
+				return nil, ErrTokenNotFound
+			}
+			return current, nil
+		}
+		if fetchErr == nil && !s.isValid(tokenRef, fetched) {
+			fetchErr = ErrTokenNotFound
+		}
 		if fetchErr != nil {
+			if existed && !previous.Minted() {
+				// Fail closed on a stale stored credential; bound repeated failure
+				// checks without declaring the old credential fresh again.
+				stamp.failure = fetchErr
+				stamp.retryAt = s.clock().Add(storedRefreshRetry)
+				if errors.Is(fetchErr, ErrTokenNotFound) {
+					s.cacheEpoch++
+					stamp.epoch = s.cacheEpoch
+					delete(s.tokens, tokenRef)
+				}
+				s.cacheState[tokenRef] = stamp
+			}
+			s.mu.Unlock()
 			return nil, fetchErr
 		}
-
-		if !s.isValid(tokenRef, fetched) {
-			return fetched, nil
-		}
-
-		// Cache inside the singleflight closure so only the leader goroutine
-		// writes, eliminating redundant lock contention from shared waiters.
-		s.mu.Lock()
-		s.tokens[tokenRef] = fetched
+		s.loadTokenLocked(tokenRef, fetched)
 		s.mu.Unlock()
 
 		s.logger.Info("token fetched from backend and cached",
@@ -328,6 +371,26 @@ func (s *AuthServiceImpl) SetFetchTimeout(d time.Duration) {
 	s.fetchTimeout = d
 }
 
+// SetStoredRefreshInterval bounds demand-driven validation of stored tokens.
+// It must be configured before requests start. No background scans are started.
+func (s *AuthServiceImpl) SetStoredRefreshInterval(d time.Duration) {
+	s.mu.Lock()
+	s.storedRefreshInterval = d
+	s.mu.Unlock()
+}
+
+func (s *AuthServiceImpl) loadTokenLocked(ref string, entry TokenEntry) {
+	s.cacheEpoch++
+	s.tokens[ref] = entry
+	s.cacheState[ref] = tokenCacheState{epoch: s.cacheEpoch, checkedAt: s.clock()}
+}
+
+func (s *AuthServiceImpl) removeTokenLocked(ref string) {
+	s.cacheEpoch++
+	delete(s.tokens, ref)
+	s.cacheState[ref] = tokenCacheState{epoch: s.cacheEpoch}
+}
+
 // SetBackend configures an optional read-through backing store.
 // When a token_ref is not found in the in-memory cache, the store is
 // queried before returning NotFound. This is useful with long polling
@@ -344,7 +407,7 @@ func (s *AuthServiceImpl) SetBackend(store TokenStore) {
 func (s *AuthServiceImpl) LoadToken(tokenRef string, entry TokenEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tokens[tokenRef] = entry
+	s.loadTokenLocked(tokenRef, entry)
 }
 
 // LoadTokens bulk-loads tokens into the store (replacing any existing ones with the same ref).
@@ -352,7 +415,7 @@ func (s *AuthServiceImpl) LoadTokens(entries map[string]TokenEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for ref, entry := range entries {
-		s.tokens[ref] = entry
+		s.loadTokenLocked(ref, entry)
 	}
 }
 
@@ -367,7 +430,7 @@ func (s *AuthServiceImpl) TokenCount() int {
 // backing store no longer contains it after a refresh).
 func (s *AuthServiceImpl) RemoveToken(tokenRef string) {
 	s.mu.Lock()
-	delete(s.tokens, tokenRef)
+	s.removeTokenLocked(tokenRef)
 	s.mu.Unlock()
 
 	s.forgetServed(tokenRef)
@@ -375,9 +438,8 @@ func (s *AuthServiceImpl) RemoveToken(tokenRef string) {
 
 // GetEncryptedToken implements csarv1.AuthServiceServer.
 //
-// On cache miss, if a TokenBackend is configured, it performs a read-through
-// query. This handles the case where a token was added to the backing store
-// (e.g. PostgreSQL) between polling intervals.
+// Missing or stale stored credentials are validated through the backend before
+// being served. Minted credentials retain their independent lifetime policy.
 func (s *AuthServiceImpl) GetEncryptedToken(ctx context.Context, req *csarv1.TokenRequest) (*csarv1.TokenResponse, error) {
 	if req.TokenRef == "" {
 		return nil, status.Error(codes.InvalidArgument, "token_ref is required")
@@ -389,7 +451,18 @@ func (s *AuthServiceImpl) GetEncryptedToken(ctx context.Context, req *csarv1.Tok
 	s.mu.RLock()
 	entry, ok := s.tokens[req.TokenRef]
 	backend := s.backend
+	stamp := s.cacheState[req.TokenRef]
+	interval := s.storedRefreshInterval
 	s.mu.RUnlock()
+	if backend != nil && stamp.failure != nil && now.Before(stamp.retryAt) {
+		if errors.Is(stamp.failure, ErrTokenNotFound) {
+			return nil, status.Error(codes.NotFound, "stored token no longer exists")
+		}
+		return nil, statusForFetchError(req.TokenRef, stamp.failure)
+	}
+	if ok && !entry.Minted() && backend != nil && now.Sub(stamp.checkedAt) >= interval {
+		ok = false
+	}
 
 	if ok && entry.Minted() {
 		s.markServed(req.TokenRef, now)
@@ -410,11 +483,11 @@ func (s *AuthServiceImpl) GetEncryptedToken(ctx context.Context, req *csarv1.Tok
 		// Read-through: query the backing store for this specific token_ref.
 		// Use singleflight to prevent cache stampede (thundering herd) if multiple
 		// concurrent requests arrive for the same missing token.
-		s.logger.Info("token ref not in cache, trying backend read-through",
+		s.logger.Info("token missing or due for validation, trying backend read-through",
 			"token_ref", req.TokenRef,
 		)
 
-		fetched, fetchErr := s.fetchThrough(ctx, backend, req.TokenRef)
+		fetched, fetchErr := s.fetchThrough(ctx, backend, req.TokenRef, false)
 
 		switch {
 		case fetchErr == nil:
@@ -510,10 +583,10 @@ func (s *AuthServiceImpl) LoadTokensFromMap(m map[string]TokenEntry) int {
 		if !s.isValid(ref, entry) {
 			// If a previously valid token is updated to be invalid,
 			// we must evict it so we don't serve a stale cached copy.
-			delete(s.tokens, ref)
+			s.removeTokenLocked(ref)
 			continue
 		}
-		s.tokens[ref] = entry
+		s.loadTokenLocked(ref, entry)
 		loaded++
 	}
 	return loaded

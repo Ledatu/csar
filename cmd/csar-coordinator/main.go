@@ -58,6 +58,7 @@ func main() {
 	// Token source flags — choose one: --token-file (dev), --token-source=postgres, or --token-source=s3.
 	tokenFile := flag.String("token-file", "", "path to YAML file with pre-encrypted token entries for AuthService")
 	tokenSourceFlag := flag.String("token-source", "", "token backend: \"file\" (default, uses --token-file), \"postgres\", \"s3\"")
+	storedRefreshInterval := flag.Duration("stored-token-refresh-interval", time.Minute, "minimum interval between demand-driven freshness checks of each stored token")
 
 	// PostgreSQL flags (used when --token-source=postgres)
 	postgresDSN := flag.String("postgres-dsn", "", "PostgreSQL connection string (e.g. \"postgres://user:pass@host:5432/db?sslmode=require\")")
@@ -232,6 +233,11 @@ func main() {
 
 	// Create AuthService for token delivery to routers
 	authSvc := coordinator.NewAuthService(logger)
+	if *storedRefreshInterval <= 0 {
+		logger.Error("--stored-token-refresh-interval must be positive")
+		os.Exit(2)
+	}
+	authSvc.SetStoredRefreshInterval(*storedRefreshInterval)
 
 	// Resolve token source: explicit flag > auto-detect from other flags.
 	resolvedTokenSource := *tokenSourceFlag

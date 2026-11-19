@@ -24,6 +24,13 @@ and internal admin surfaces.
 - Coordinator admin access is mTLS-protected and profile-guarded.
 
 ## Critical Flows
+
+- Stored-token freshness is checked on demand per ref, at most once per minute
+  by default (`--stored-token-refresh-interval`). Only the requested credential
+  is fetched; S3 mode still has no listing or background scan. Concurrent
+  checks coalesce, failures close access and retry no sooner than five seconds,
+  and a concurrent local rotation/deletion wins over an older backend fetch.
+  Minted-token soft/hard expiry policy is unchanged.
 - Request pipeline order matters: authn, authz, throttling, circuit breaking,
   retry/backpressure, response shaping, and proxying.
 - Config loading supports file, S3, and HTTP sources with profile validation.
