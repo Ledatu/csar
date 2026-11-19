@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledatu/csar-core/s3store"
 	"github.com/ledatu/csar-core/tokenmint"
 	"github.com/ledatu/csar/internal/authn"
 	"github.com/ledatu/csar/internal/kms"
@@ -153,10 +154,11 @@ func (s *AdminServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
 // --- PUT (create/update) ---
 
 type putTokenRequest struct {
-	Value    string            `json:"value"`
-	KMSKeyID string            `json:"kms_key_id"`
-	Mode     string            `json:"mode"`
-	Metadata map[string]string `json:"metadata"`
+	ExpiresAt *time.Time        `json:"expires_at,omitempty"`
+	Value     string            `json:"value"`
+	KMSKeyID  string            `json:"kms_key_id"`
+	Mode      string            `json:"mode"`
+	Metadata  map[string]string `json:"metadata"`
 
 	// Descriptor registers a minted credential instead of storing a value.
 	// Mutually exclusive with Value.
@@ -220,6 +222,10 @@ func (s *AdminServer) upsertToken(w http.ResponseWriter, r *http.Request, tokenR
 		return
 	}
 
+	if !validStoredExpiry(req.ExpiresAt) {
+		adminRejectJSON(w, http.StatusBadRequest, "invalid expires_at")
+		return
+	}
 	var entry TokenEntry
 	if s3Managed {
 		entry = TokenEntry{
@@ -250,6 +256,9 @@ func (s *AdminServer) upsertToken(w http.ResponseWriter, r *http.Request, tokenR
 		}
 	}
 
+	entry.ExpiresAt = req.ExpiresAt
+	entry.CredentialID = s3store.CredentialFingerprint([]byte(req.Value))
+	entry.Passthrough = s3Managed
 	meta := TokenMetadata{
 		UpdatedBy: claims.Sub,
 		Tenant:    claims.Tenant,
@@ -267,7 +276,7 @@ func (s *AdminServer) upsertToken(w http.ResponseWriter, r *http.Request, tokenR
 			"error", err,
 		)
 		s.metrics.FailuresTotal.WithLabelValues(auditOp, "s3_write").Inc()
-		adminRejectJSON(w, http.StatusInternalServerError, "storage write failed")
+		rejectTokenMutation(w, err)
 		return
 	}
 
@@ -323,7 +332,7 @@ func (s *AdminServer) handleDeleteToken(w http.ResponseWriter, r *http.Request) 
 			"error", err,
 		)
 		s.metrics.FailuresTotal.WithLabelValues("delete", "s3_delete").Inc()
-		adminRejectJSON(w, http.StatusInternalServerError, "storage delete failed")
+		rejectTokenMutation(w, err)
 		return
 	}
 
@@ -460,6 +469,14 @@ func (s *AdminServer) handleInvalidate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if s.authSvc.states != nil {
+		for _, ref := range req.TokenRefs {
+			if err := RevalidateRef(r.Context(), s.authSvc.states, ref); err != nil {
+				adminRejectJSON(w, http.StatusServiceUnavailable, "invalidation publication failed")
+				return
+			}
+		}
+	}
 	s.coord.BroadcastTokenInvalidation(req.TokenRefs)
 	s.metrics.InvalidationBroadcasts.Inc()
 

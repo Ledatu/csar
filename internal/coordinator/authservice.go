@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ledatu/csar-core/tokenmint"
+	"github.com/ledatu/csar/internal/statestore"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
 	"golang.org/x/sync/singleflight"
 	"google.golang.org/grpc/codes"
@@ -24,10 +25,13 @@ const defaultFetchTimeout = 5 * time.Second
 const storedRefreshRetry = 5 * time.Second
 
 type tokenCacheState struct {
-	epoch     uint64
-	checkedAt time.Time
-	retryAt   time.Time
-	failure   error
+	validationFailure error
+	validationRetryAt time.Time
+	controlRevision   int64
+	epoch             uint64
+	checkedAt         time.Time
+	retryAt           time.Time
+	failure           error
 }
 
 // DefaultFetchTimeout exposes the default read-through deadline so callers can
@@ -36,6 +40,8 @@ func DefaultFetchTimeout() time.Duration { return defaultFetchTimeout }
 
 // TokenEntry holds an encrypted token and its associated KMS key.
 type TokenEntry struct {
+	ExpiresAt      *time.Time
+	CredentialID   string
 	EncryptedToken []byte
 	KMSKeyID       string
 	// Passthrough indicates the token is already plaintext (e.g. S3 SSE
@@ -52,7 +58,7 @@ type TokenEntry struct {
 	Descriptor *tokenmint.Descriptor
 
 	// Mint is set only on entries whose value was produced by a grant. It is
-	// nil for stored tokens, whose freshness is validated separately on demand.
+	// nil for stored tokens, whose lifetime/invalidation is independent.
 	Mint *MintInfo
 }
 
@@ -76,10 +82,13 @@ func (e TokenEntry) NeedsRefresh(now time.Time) bool {
 	return e.Mint != nil && !e.Mint.RefreshAfter.IsZero() && !now.Before(e.Mint.RefreshAfter)
 }
 
-// Usable reports whether the entry may still be served. Always true for stored
-// tokens, which have no expiry.
+// Usable enforces inspected stored expiry with clock skew. Minted entries retain
+// their independent hard-expiry behavior.
 func (e TokenEntry) Usable(now time.Time) bool {
-	return e.Mint == nil || e.Mint.HardExpiry.IsZero() || now.Before(e.Mint.HardExpiry)
+	if e.Mint == nil {
+		return e.ExpiresAt == nil || now.Add(storedExpirySkew).Before(*e.ExpiresAt)
+	}
+	return e.Mint.HardExpiry.IsZero() || now.Before(e.Mint.HardExpiry)
 }
 
 // LogValue implements slog.LogValuer to prevent accidental logging of
@@ -108,15 +117,18 @@ func (e TokenEntry) LogValue() slog.Value {
 // Tokens are loaded into the in-memory store at startup (from file, TokenStore, etc.).
 //
 // A configured TokenStore is queried on misses and on the first request after
-// the stored-token freshness interval. Idle refs cause no backend reads.
+// the legacy freshness interval, or lifetime/invalidation in coherent mode.
+// Idle refs cause no backend reads.
 type AuthServiceImpl struct {
 	csarv1.UnimplementedAuthServiceServer
 
 	mu                    sync.RWMutex
 	tokens                map[string]TokenEntry // token_ref -> entry
 	logger                *slog.Logger
+	states                statestore.TokenStates
 	backend               TokenStore // optional read-through backend (e.g. PostgresTokenStore)
 	sf                    singleflight.Group
+	metadataSF            singleflight.Group
 	fetchTimeout          time.Duration // max time for read-through backend queries (audit §4)
 	storedRefreshInterval time.Duration
 	cacheEpoch            uint64
@@ -259,7 +271,7 @@ func (s *AuthServiceImpl) fetchThrough(ctx context.Context, backend TokenStore, 
 				return nil, stamp.failure
 			}
 			// Another caller may have completed validation before this flight.
-			if existed && !previous.Minted() && now.Sub(stamp.checkedAt) < interval {
+			if existed && !previous.Minted() && previous.Usable(now) && !s.storedDue(previous, stamp, now, interval) {
 				return previous, nil
 			}
 		}
@@ -277,13 +289,34 @@ func (s *AuthServiceImpl) fetchThrough(ctx context.Context, backend TokenStore, 
 		}
 
 		fetched, fetchErr := backend.FetchOne(fetchCtx, tokenRef)
+		if fetchErr == nil && !fetched.Minted() && !fetched.Usable(s.clock()) {
+			fetchErr = ErrTokenExpired
+		}
+		if fetchErr == nil && s.states != nil {
+			currentState, stateErr := s.states.GetTokenState(fetchCtx, tokenRef)
+			switch {
+			case stateErr != nil:
+				fetchErr = stateErr
+			case currentState.Pending != "" || currentState.Revision != stamp.controlRevision:
+				fetchErr = ErrTokenChanged
+			case rejected(currentState, fetched):
+				fetchErr = ErrTokenRejected
+			}
+		}
 		s.mu.Lock()
 		// A local write/delete is newer than a backend read started before it.
 		if s.cacheState[tokenRef].epoch != stamp.epoch {
+			if s.states != nil {
+				s.mu.Unlock()
+				return nil, ErrTokenChanged
+			}
 			current, present := s.tokens[tokenRef]
 			s.mu.Unlock()
 			if !present {
 				return nil, ErrTokenNotFound
+			}
+			if !current.Minted() && !current.Usable(s.clock()) {
+				return nil, ErrTokenExpired
 			}
 			return current, nil
 		}
@@ -291,7 +324,7 @@ func (s *AuthServiceImpl) fetchThrough(ctx context.Context, backend TokenStore, 
 			fetchErr = ErrTokenNotFound
 		}
 		if fetchErr != nil {
-			if existed && !previous.Minted() {
+			if !previous.Minted() {
 				// Fail closed on a stale stored credential; bound repeated failure
 				// checks without declaring the old credential fresh again.
 				stamp.failure = fetchErr
@@ -335,6 +368,8 @@ func (s *AuthServiceImpl) fetchThrough(ctx context.Context, backend TokenStore, 
 // transient endpoint failures for observability; raw messages stay internal.
 func statusForFetchError(tokenRef string, err error) error {
 	switch {
+	case errors.Is(err, ErrTokenRejected), errors.Is(err, ErrTokenExpired):
+		return status.Error(codes.Unauthenticated, "stored credential is expired or was rejected upstream")
 	case errors.Is(err, tokenmint.ErrUnknownProfile), errors.Is(err, tokenmint.ErrUnknownKind):
 		return status.Errorf(codes.FailedPrecondition,
 			"token ref %q names an unusable mint configuration", tokenRef)
@@ -370,7 +405,8 @@ func (s *AuthServiceImpl) SetFetchTimeout(d time.Duration) {
 	s.fetchTimeout = d
 }
 
-// SetStoredRefreshInterval bounds demand-driven validation of stored tokens.
+// SetStoredRefreshInterval bounds legacy demand validation of stored tokens.
+// Coherent mode uses lifetime and exact-ref invalidation instead.
 // It must be configured before requests start. No background scans are started.
 func (s *AuthServiceImpl) SetStoredRefreshInterval(d time.Duration) {
 	s.mu.Lock()
@@ -381,7 +417,7 @@ func (s *AuthServiceImpl) SetStoredRefreshInterval(d time.Duration) {
 func (s *AuthServiceImpl) loadTokenLocked(ref string, entry TokenEntry) {
 	s.cacheEpoch++
 	s.tokens[ref] = entry
-	s.cacheState[ref] = tokenCacheState{epoch: s.cacheEpoch, checkedAt: s.clock()}
+	s.cacheState[ref] = tokenCacheState{epoch: s.cacheEpoch, checkedAt: s.clock(), controlRevision: s.cacheState[ref].controlRevision}
 }
 
 func (s *AuthServiceImpl) removeTokenLocked(ref string) {
@@ -444,6 +480,9 @@ func (s *AuthServiceImpl) GetEncryptedToken(ctx context.Context, req *csarv1.Tok
 		return nil, status.Error(codes.InvalidArgument, "token_ref is required")
 	}
 
+	if err := s.checkTokenState(ctx, req.TokenRef); err != nil {
+		return nil, statusForFetchError(req.TokenRef, err)
+	}
 	now := s.clock()
 
 	// Fast path: in-memory hit.
@@ -459,7 +498,7 @@ func (s *AuthServiceImpl) GetEncryptedToken(ctx context.Context, req *csarv1.Tok
 		}
 		return nil, statusForFetchError(req.TokenRef, stamp.failure)
 	}
-	if ok && !entry.Minted() && backend != nil && now.Sub(stamp.checkedAt) >= interval {
+	if ok && !entry.Minted() && backend != nil && s.storedDue(entry, stamp, now, interval) {
 		ok = false
 	}
 
@@ -505,9 +544,9 @@ func (s *AuthServiceImpl) GetEncryptedToken(ctx context.Context, req *csarv1.Tok
 			// Fall through to NotFound below.
 
 		default:
-			// Transient error (DB down, network, mint failure, etc.) — don't
-			// cache the negative result. Log as error so operators notice.
-			s.logger.Error("backend read-through failed (transient)",
+			// Stored failures have a bounded demand retry delay. Minting retains
+			// its separate retry policy; return a typed error to the router.
+			s.logger.Error("credential read-through failed",
 				"token_ref", req.TokenRef,
 				"error", fetchErr,
 			)
@@ -520,6 +559,27 @@ func (s *AuthServiceImpl) GetEncryptedToken(ctx context.Context, req *csarv1.Tok
 		return nil, status.Errorf(codes.NotFound, "token ref %q not found", req.TokenRef)
 	}
 
+	if s.states != nil && !entry.Minted() {
+		s.mu.RLock()
+		verifyEpoch := s.cacheState[req.TokenRef].epoch
+		s.mu.RUnlock()
+		verifyCtx, cancel := context.WithTimeout(ctx, defaultFetchTimeout)
+		latest, verifyErr := s.states.GetTokenState(verifyCtx, req.TokenRef)
+		cancel()
+		if verifyErr != nil {
+			s.cacheMetadataFailure(req.TokenRef, verifyEpoch, verifyErr)
+			return nil, statusForFetchError(req.TokenRef, verifyErr)
+		}
+		if latest.Pending != "" || latest.Revision != stamp.controlRevision {
+			return nil, statusForFetchError(req.TokenRef, ErrTokenChanged)
+		}
+		if rejected(latest, entry) {
+			return nil, statusForFetchError(req.TokenRef, ErrTokenRejected)
+		}
+	}
+	if ok && !entry.Minted() && !entry.Usable(s.clock()) {
+		return nil, statusForFetchError(req.TokenRef, ErrTokenExpired)
+	}
 	s.logger.Debug("serving encrypted token", "token_ref", req.TokenRef)
 	return &csarv1.TokenResponse{
 		TokenRef:       req.TokenRef,

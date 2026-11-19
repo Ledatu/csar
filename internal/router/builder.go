@@ -36,6 +36,15 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 	for _, opt := range opts {
 		opt(r)
 	}
+	flatRoutes := cfg.FlatRoutes()
+	selections, selectionErr := credentialRejectionSelections(r.credentialRejectionRoutes, flatRoutes)
+	if selectionErr != nil {
+		return nil, selectionErr
+	}
+	if len(selections) > 0 && (r.authInjector == nil || !r.authInjector.SupportsCredentialRejection()) {
+		return nil, fmt.Errorf("credential rejection routes require a rejection-capable auth injector")
+	}
+	r.credentialRejectionKeys = selections
 	r.transportRegistry = newTransportRegistry(cfg.BackendPools, r.ssrfProtection)
 
 	// Resolve the request ID header name once at construction time.
@@ -101,7 +110,6 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 		logger.Info("registered circuit breaker", "name", name)
 	}
 
-	flatRoutes := cfg.FlatRoutes()
 	for i := range flatRoutes {
 		fr := &flatRoutes[i]
 		if err := r.buildRoute(cfg, *fr, cbManager, logger); err != nil {
@@ -145,6 +153,8 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 		originalPath:    fr.Path,
 		upstreamTimeout: fr.Route.Backend.Timeout.Duration,
 	}
+
+	_, rt.rejectCredentialUnauthorized = r.credentialRejectionKeys[key]
 
 	// Set up load balancing if multiple targets are configured (audit §3.2 Criticism 3).
 	allTargets := fr.Route.Backend.AllTargets()

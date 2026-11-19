@@ -39,7 +39,13 @@ var (
 // transport failure. The callback runs synchronously in ModifyResponse or ErrorHandler;
 // it must not write to the client. It is request-local and survives retries.
 func WithResponseObserver(ctx context.Context, observe func(status int)) context.Context {
-	return context.WithValue(ctx, ctxKeyResponseObserver, observe)
+	previous, _ := ctx.Value(ctxKeyResponseObserver).(func(int))
+	return context.WithValue(ctx, ctxKeyResponseObserver, func(code int) {
+		if previous != nil {
+			previous(code)
+		}
+		observe(code)
+	})
 }
 
 func observeResponse(ctx context.Context, status int) {

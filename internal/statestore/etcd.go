@@ -167,12 +167,15 @@ func (s *EtcdStore) DeleteRoute(ctx context.Context, routeID string) error {
 }
 
 func (s *EtcdStore) WatchRoutes(ctx context.Context) (<-chan []RouteEntry, error) {
+	watchCh, cancel, err := s.watchPrefix(ctx, s.routeKeyPrefix())
+	if err != nil {
+		return nil, err
+	}
 	ch := make(chan []RouteEntry, 16)
 
 	go func() {
 		defer close(ch)
-
-		watchCh := s.client.Watch(ctx, s.routeKeyPrefix(), clientv3.WithPrefix())
+		defer cancel()
 		for {
 			select {
 			case <-ctx.Done():
