@@ -44,7 +44,7 @@ func TestS3LifetimeRoundTripBothEncryptionModes(t *testing.T) {
 			defer func() { _ = client.Close() }()
 			store := NewS3TokenStore(client, mode, quietLogger())
 			deadline := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
-			entry := lifetimeEntry("fixture", &deadline)
+			entry := lifetimeEntry("eyJhbGciOiJub25lIn0.eyJleHAiOjF9.not-a-signature", &deadline)
 			if mode == "kms" {
 				entry.KMSKeyID = "fixture-key"
 				entry.Passthrough = false
@@ -65,14 +65,14 @@ func TestS3LifetimeRoundTripBothEncryptionModes(t *testing.T) {
 }
 
 func TestServiceCopyPreservesLifetimeAndIdentity(t *testing.T) {
-	server, store := newTestSvcServer(true, map[string]string{"svc:aurumskynet-campaigns": "accounts/"})
+	server, store := newTestSvcServer(true, map[string]string{"svc:credential-manager": "apps/"})
 	deadline := time.Now().UTC().Add(24 * time.Hour)
-	source := "accounts/wildberries/a/preadds/stage/promotion/read"
-	target := "accounts/wildberries/a/promotion/read"
+	source := "apps/tenant_a/staging/external_api_key"
+	target := "apps/tenant_a/external_api_key"
 	store.entries[source] = lifetimeEntry("fixture", &deadline)
 	mux := http.NewServeMux()
 	server.registerRoutes(mux)
-	request := svcRequest(http.MethodPost, "/svc/tokens/"+target, `{"source_ref":"`+source+`"}`, "svc:aurumskynet-campaigns")
+	request := svcRequest(http.MethodPost, "/svc/tokens/"+target, `{"source_ref":"`+source+`"}`, "svc:credential-manager")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, request)
 	copied := store.entries[target]

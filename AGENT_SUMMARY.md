@@ -28,8 +28,11 @@ and internal admin surfaces.
   etcd revisions and trusted upstream-401 reports. Read
   `STORED_CREDENTIAL_LIFETIME.md` for the all-writer activation boundary,
   unknown-expiry compatibility and pending-write recovery requirements.
+  Upstream-401 quarantine requires explicit `--credential-rejection-route`
+  selection of one configured route with one injected credential; default off.
+  Owners supply expiry; storage/injection never infer it from JWT shape.
 
-- Stored-token freshness is checked on demand per ref, at most once per minute
+- Legacy stored-credential freshness is checked on demand per ref, at most once per minute
   by default (`--stored-token-refresh-interval`). Only the requested credential
   is fetched; S3 mode still has no listing or background scan. Concurrent
   checks coalesce, failures close access and retry no sooner than five seconds,

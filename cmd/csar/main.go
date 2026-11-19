@@ -72,6 +72,9 @@ func run() error {
 	// Token source flags (one required when secure routes exist)
 	tokenFile := flag.String("token-file", "", "path to YAML file with token_ref -> plaintext mappings (local dev)")
 
+	var rejectionRoutes []string
+	flag.Func("credential-rejection-route", "opt an exact METHOD:/configured/path with one injected credential into upstream-401 quarantine (repeatable; disabled by default)", func(value string) error { rejectionRoutes = append(rejectionRoutes, value); return nil })
+
 	// Config source flags (S3, HTTP, manifest); env-var driven like coordinator/authn/authz.
 	sf := configload.NewSourceFlags()
 	sf.RegisterFlags(flag.CommandLine)
@@ -167,7 +170,7 @@ func run() error {
 	sharedTM := throttle.NewManager()
 
 	// --- Auth Injection (KMS + Token Fetcher) ---
-	var routerOpts []router.Option
+	routerOpts := []router.Option{router.WithCredentialRejectionRoutes(rejectionRoutes...)}
 	routerOpts = append(routerOpts, router.WithMetrics(m), router.WithTelemetry(tp), router.WithSSRFProtection(ssrfP), router.WithThrottleManager(sharedTM))
 
 	// --- Redis client for distributed router policies (throttling/cache) ---

@@ -19,10 +19,8 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-func TestActualProxy401ReportsExactCredentialWithoutReplayingPOST(t *testing.T) {
-	e := newLifetimeEnv(t)
-	deadline := time.Now().Add(24 * time.Hour)
-	e.put(t, "seller/a", "old", &deadline)
+func newCredentialRPCFetcher(t *testing.T, e *lifetimeEnv) *middleware.CoordinatorTokenFetcher {
+	t.Helper()
 	listener := bufconn.Listen(1 << 20)
 	server := grpc.NewServer()
 	csarv1.RegisterAuthServiceServer(server, e.auth[0])
@@ -34,7 +32,14 @@ func TestActualProxy401ReportsExactCredentialWithoutReplayingPOST(t *testing.T) 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	fetcher := middleware.NewCoordinatorTokenFetcher(csarv1.NewAuthServiceClient(conn), credentialv1.NewCredentialServiceClient(conn))
+	return middleware.NewCoordinatorTokenFetcher(csarv1.NewAuthServiceClient(conn), credentialv1.NewCredentialServiceClient(conn))
+}
+
+func TestActualProxy401ReportsExactCredentialWithoutReplayingPOST(t *testing.T) {
+	e := newLifetimeEnv(t)
+	deadline := time.Now().Add(24 * time.Hour)
+	e.put(t, "seller/a", "old", &deadline)
+	fetcher := newCredentialRPCFetcher(t, e)
 	injector := middleware.NewAuthInjector(fetcher, &mockKMSProvider{}, quietLogger())
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +55,7 @@ func TestActualProxy401ReportsExactCredentialWithoutReplayingPOST(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := injector.Wrap(middleware.AuthInjectorConfig{TokenRef: "seller/a", InjectHeader: "Authorization", InjectFormat: "Bearer {token}", OnKMSError: "serve_stale"}, rp)
+	handler := injector.Wrap(middleware.AuthInjectorConfig{RejectOnUnauthorized: true, TokenRef: "seller/a", InjectHeader: "Authorization", InjectFormat: "Bearer {token}", OnKMSError: "serve_stale"}, rp)
 	observed := 0
 	req := httptest.NewRequest(http.MethodPost, "/external/action", strings.NewReader(`{"value":1}`))
 	req = req.WithContext(proxy.WithResponseObserver(req.Context(), func(code int) { observed = code }))
@@ -86,7 +91,7 @@ func (f *observingFetcher) ReportCredentialRejection(context.Context, string, st
 func TestLocalAuthentication401DoesNotReportProviderRejection(t *testing.T) {
 	fetcher := &observingFetcher{}
 	injector := middleware.NewAuthInjector(fetcher, &mockKMSProvider{}, quietLogger())
-	handler := injector.Wrap(middleware.AuthInjectorConfig{TokenRef: "seller/a", InjectHeader: "Authorization"}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	handler := injector.Wrap(middleware.AuthInjectorConfig{RejectOnUnauthorized: true, TokenRef: "seller/a", InjectHeader: "Authorization"}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("X-CSAR-Upstream-Status", "401")
 		w.WriteHeader(http.StatusUnauthorized)
 	}))

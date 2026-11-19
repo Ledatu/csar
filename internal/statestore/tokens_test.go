@@ -12,7 +12,7 @@ func testTokenStates(t *testing.T, store TokenStates) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	const ref = "accounts/wb/seller/promotion/read"
+	const ref = "apps/inventory/tenant_a/vendor_key"
 	state, err := store.GetTokenState(ctx, ref)
 	if err != nil || state.Revision != 0 {
 		t.Fatalf("initial state %v %v", state, err)
