@@ -18,6 +18,7 @@ import (
 	"github.com/ledatu/csar-core/health"
 	"github.com/ledatu/csar-core/tlsx"
 
+	credentialv1 "github.com/ledatu/csar-proto/csar/credential/v1"
 	"github.com/ledatu/csar/internal/audit"
 	"github.com/ledatu/csar/internal/authz"
 	"github.com/ledatu/csar/internal/config"
@@ -274,7 +275,7 @@ func run() error {
 			}
 			defer conn.Close()
 			authClient := csarv1.NewAuthServiceClient(conn)
-			fetcher = middleware.NewCoordinatorTokenFetcher(authClient)
+			fetcher = middleware.NewCoordinatorTokenFetcher(authClient, credentialv1.NewCredentialServiceClient(conn))
 			logger.Info("token source: coordinator gRPC", "address", cfg.Coordinator.Address)
 
 		default:

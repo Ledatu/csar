@@ -104,6 +104,8 @@ func (s *S3TokenStore) UpsertToken(ctx context.Context, ref string, entry TokenE
 	if err != nil {
 		return "", fmt.Errorf("s3 token store: encode %q: %w", ref, err)
 	}
+	obj.ExpiresAt = entry.ExpiresAt
+	obj.CredentialID = entry.CredentialID
 	obj.SchemaVersion = 1
 	obj.UpdatedBy = meta.UpdatedBy
 	obj.Tenant = meta.Tenant
@@ -161,12 +163,17 @@ func (s *S3TokenStore) parseObject(obj s3store.ObjectEntry) (TokenEntry, error) 
 	}
 
 	entry := TokenEntry{
-		KMSKeyID:    decoded.KMSKeyID,
-		Passthrough: decoded.Passthrough,
-		Version:     obj.ETag,
+		ExpiresAt:    tokenObj.ExpiresAt,
+		CredentialID: tokenObj.CredentialID,
+		KMSKeyID:     decoded.KMSKeyID,
+		Passthrough:  decoded.Passthrough,
+		Version:      obj.ETag,
 	}
 	if decoded.Passthrough {
 		entry.EncryptedToken = []byte(decoded.Plaintext)
+		if entry.CredentialID == "" {
+			entry.CredentialID = s3store.CredentialFingerprint(entry.EncryptedToken)
+		}
 	} else {
 		entry.EncryptedToken = decoded.EncryptedToken
 	}

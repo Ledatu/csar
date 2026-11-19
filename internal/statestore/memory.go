@@ -9,12 +9,15 @@ import (
 // MemoryStore implements StateStore using in-memory maps.
 // Suitable for development, testing, and single-instance deployments.
 type MemoryStore struct {
-	mu       sync.RWMutex
-	routes   map[string]RouteEntry
-	routers  map[string]RouterInfo
-	quotas   map[string]*QuotaPolicy
-	watchers []chan []RouteEntry
-	closed   map[chan []RouteEntry]bool
+	tokenStates   map[string]TokenState
+	tokenRevision int64
+	tokenWatchers map[chan TokenEvent]struct{}
+	mu            sync.RWMutex
+	routes        map[string]RouteEntry
+	routers       map[string]RouterInfo
+	quotas        map[string]*QuotaPolicy
+	watchers      []chan []RouteEntry
+	closed        map[chan []RouteEntry]bool
 }
 
 // NewMemoryStore creates a new in-memory StateStore.
@@ -148,6 +151,10 @@ func (m *MemoryStore) Close() error {
 		}
 	}
 	m.watchers = nil
+	for ch := range m.tokenWatchers {
+		close(ch)
+		delete(m.tokenWatchers, ch)
+	}
 	return nil
 }
 
