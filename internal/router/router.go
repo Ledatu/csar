@@ -38,6 +38,7 @@ type auditRecorder interface {
 // route holds a compiled route with its proxy and throttler.
 type route struct {
 	rejectCredentialUnauthorized bool
+	rejectionHeader              string
 
 	config              config.RouteConfig
 	proxy               *proxy.ReverseProxy
@@ -89,7 +90,7 @@ type vipOverride struct {
 // the pipeline: ip_check -> cors -> security_inject -> throttle.Wait -> circuit_breaker -> proxy.Forward.
 type Router struct {
 	credentialRejectionRoutes []string
-	credentialRejectionKeys   map[string]struct{}
+	credentialRejectionKeys   map[string]string
 
 	routes               map[string]*route // keyed by "METHOD:PATH" (exact/prefix routes)
 	regexRoutes          []*route          // routes with {var:regex} patterns (checked after exact, before prefix)

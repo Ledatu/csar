@@ -43,6 +43,11 @@ func TestCredentialRejectionSelectionMustBeExactAndUnambiguous(t *testing.T) {
 		{"ambiguous configuration", []string{key}, []config.FlatRoute{route, route}, true},
 		{"no injection", []string{key}, []config.FlatRoute{absent}, true},
 		{"multiple refs", []string{key}, []config.FlatRoute{multiple}, true},
+		{"explicit header", []string{key + "#x-api-key"}, []config.FlatRoute{multiple}, false},
+		{"explicit missing header", []string{key + "#Authorization"}, []config.FlatRoute{multiple}, true},
+		{"empty header", []string{key + "#"}, []config.FlatRoute{multiple}, true},
+		{"invalid header", []string{key + "#X Key"}, []config.FlatRoute{multiple}, true},
+		{"duplicate route different target", []string{key + "#X-Api-Key", key + "#X-Client-ID"}, []config.FlatRoute{multiple}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

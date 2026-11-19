@@ -2,6 +2,7 @@ package router
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/ledatu/csar/internal/config"
@@ -17,9 +18,13 @@ func WithCredentialRejectionRoutes(keys ...string) Option {
 	return func(r *Router) { r.credentialRejectionRoutes = snapshot }
 }
 
-func credentialRejectionSelections(keys []string, routes []config.FlatRoute) (map[string]struct{}, error) {
-	selected := make(map[string]struct{}, len(keys))
-	for _, key := range keys {
+func credentialRejectionSelections(keys []string, routes []config.FlatRoute) (map[string]string, error) {
+	selected := make(map[string]string, len(keys))
+	for _, selection := range keys {
+		key, header, explicit := strings.Cut(selection, "#")
+		if explicit && !httpguts.ValidHeaderFieldName(header) {
+			return nil, fmt.Errorf("credential rejection selection %q has an invalid header", selection)
+		}
 		method, path, ok := strings.Cut(key, ":")
 		if !ok || !httpguts.ValidHeaderFieldName(method) || method != strings.ToUpper(method) || !strings.HasPrefix(path, "/") || strings.TrimSpace(key) != key {
 			return nil, fmt.Errorf("credential rejection route %q must use METHOD:/configured/path", key)
@@ -41,10 +46,26 @@ func credentialRejectionSelections(keys []string, routes []config.FlatRoute) (ma
 		if match == nil {
 			return nil, fmt.Errorf("credential rejection route %q is not configured", key)
 		}
-		if len(match.Route.Security) != 1 || match.Route.Security[0].TokenRef == "" || match.Route.Security[0].InjectHeader == "" {
-			return nil, fmt.Errorf("credential rejection route %q requires exactly one injected credential ref", key)
+		if !explicit && len(match.Route.Security) != 1 {
+			return nil, fmt.Errorf("credential rejection route %q requires one injected credential or an explicit #Header target", key)
 		}
-		selected[key] = struct{}{}
+		matches := 0
+		for _, entry := range match.Route.Security {
+			if explicit && !strings.EqualFold(entry.InjectHeader, header) {
+				continue
+			}
+			if entry.TokenRef == "" || !httpguts.ValidHeaderFieldName(entry.InjectHeader) {
+				return nil, fmt.Errorf("credential rejection route %q has an invalid target", key)
+			}
+			matches++
+			if !explicit {
+				header = entry.InjectHeader
+			}
+		}
+		if matches != 1 {
+			return nil, fmt.Errorf("credential rejection route %q must identify exactly one injected header", key)
+		}
+		selected[key] = http.CanonicalHeaderKey(header)
 	}
 	return selected, nil
 }

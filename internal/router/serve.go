@@ -261,7 +261,7 @@ func (r *Router) serveAfterAuth(w http.ResponseWriter, req *http.Request, rt *ro
 		for i := len(rt.config.Security) - 1; i >= 0; i-- {
 			sec := rt.config.Security[i]
 			authCfg := middleware.AuthInjectorConfig{
-				RejectOnUnauthorized: rt.rejectCredentialUnauthorized,
+				RejectOnUnauthorized: rt.rejectCredentialUnauthorized && strings.EqualFold(sec.InjectHeader, rt.rejectionHeader),
 				TokenRef:             sec.TokenRef,
 				KMSKeyID:             sec.KMSKeyID,
 				InjectHeader:         sec.InjectHeader,
