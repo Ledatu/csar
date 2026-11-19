@@ -50,7 +50,7 @@ func (s *AuthServiceImpl) checkTokenState(ctx context.Context, ref string) error
 		defer cancel()
 		state, readErr := s.states.GetTokenState(bounded, ref)
 		if readErr != nil {
-			s.cacheMetadataFailure(ref, readErr)
+			s.cacheMetadataFailure(ref, stamp.epoch, readErr)
 			return nil, readErr
 		}
 		s.mu.Lock()
@@ -111,10 +111,13 @@ func WatchTokenChanges(ctx context.Context, states statestore.TokenStates, auth 
 	}
 }
 
-func (s *AuthServiceImpl) cacheMetadataFailure(ref string, err error) {
+func (s *AuthServiceImpl) cacheMetadataFailure(ref string, epoch uint64, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	stamp := s.cacheState[ref]
+	if stamp.epoch != epoch {
+		return
+	}
 	stamp.validationFailure = err
 	stamp.validationRetryAt = s.clock().Add(storedRefreshRetry)
 	s.cacheState[ref] = stamp

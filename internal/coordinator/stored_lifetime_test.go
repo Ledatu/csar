@@ -408,3 +408,89 @@ func TestMetadataOutageFailsClosedAndWaitsBeforeRetry(t *testing.T) {
 		t.Fatal("metadata recovery reread unchanged token value")
 	}
 }
+
+type deadlineDuringMetadataRead struct {
+	statestore.TokenStates
+	reads int
+	clock *atomic.Int64
+}
+
+func (s *deadlineDuringMetadataRead) GetTokenState(ctx context.Context, ref string) (statestore.TokenState, error) {
+	s.reads++
+	if s.reads == 2 {
+		s.clock.Add(int64(40 * time.Second))
+	}
+	return s.TokenStates.GetTokenState(ctx, ref)
+}
+func TestLifetimeRecheckedAfterBlockingMetadataValidation(t *testing.T) {
+	e := newLifetimeEnv(t)
+	deadline := time.Unix(0, e.clock.Load()).Add(65 * time.Second)
+	e.put(t, "seller/a", "working", &deadline)
+	e.get(t, 0, "seller/a", "working")
+	e.auth[0].SetTokenStates(&deadlineDuringMetadataRead{TokenStates: e.states, clock: &e.clock})
+	resp, err := e.auth[0].GetEncryptedToken(context.Background(), tokenReq("seller/a"))
+	if resp != nil || status.Code(err) != codes.Unauthenticated {
+		t.Fatal("deadline crossed during validation but credential was issued")
+	}
+}
+
+type delayedMetadataFailure struct {
+	statestore.TokenStates
+	reads   atomic.Int32
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *delayedMetadataFailure) GetTokenState(ctx context.Context, ref string) (statestore.TokenState, error) {
+	if s.reads.Add(1) == 1 {
+		close(s.started)
+		select {
+		case <-s.release:
+			return statestore.TokenState{}, errors.New("old metadata request failed")
+		case <-ctx.Done():
+			return statestore.TokenState{}, ctx.Err()
+		}
+	}
+	return s.TokenStates.GetTokenState(ctx, ref)
+}
+func TestOldMetadataFailureCannotBackoffNewLocalMutation(t *testing.T) {
+	for _, remove := range []bool{false, true} {
+		t.Run(fmt.Sprint(remove), func(t *testing.T) {
+			e := newLifetimeEnv(t)
+			e.put(t, "seller/a", "old", nil)
+			e.get(t, 0, "seller/a", "old")
+			states := &delayedMetadataFailure{TokenStates: e.states, started: make(chan struct{}), release: make(chan struct{})}
+			e.auth[0].SetTokenStates(states)
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				resp, err := e.auth[0].GetEncryptedToken(context.Background(), tokenReq("seller/a"))
+				if resp != nil || err == nil {
+					t.Error("failed metadata request issued a token")
+				}
+			}()
+			<-states.started
+			if remove {
+				if err := e.store.DeleteToken(context.Background(), "seller/a"); err != nil {
+					t.Fatal(err)
+				}
+				e.auth[0].RemoveToken("seller/a")
+			} else {
+				version := e.put(t, "seller/a", "new", nil)
+				entry := lifetimeEntry("new", nil)
+				entry.Version = version
+				e.auth[0].LoadToken("seller/a", entry)
+			}
+			close(states.release)
+			<-done
+			if remove {
+				resp, err := e.auth[0].GetEncryptedToken(context.Background(), tokenReq("seller/a"))
+				if resp != nil || status.Code(err) != codes.NotFound {
+					t.Fatal("old metadata failure overrode deletion")
+				}
+			} else {
+				e.get(t, 0, "seller/a", "new")
+			}
+		})
+	}
+}

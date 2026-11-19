@@ -24,7 +24,7 @@ make a cache entry authoritative. Watches never list S3 or prefetch idle refs.
 
 Within one minute of inspected expiry, demand can check for a replacement, at
 most once per five seconds per coordinator. A value within 30 seconds of expiry
-cannot be injected. An unchanged expired value fails closed. Fetches coalesce
+cannot be issued by the coordinator. An unchanged expired value fails closed. Fetches coalesce
 per ref and have a five-second deadline (existing mint timeout widening remains
 independent). Failed stored validations have a five-second demand retry delay;
 a committed owner rotation clears the old failure immediately through revision
