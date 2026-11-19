@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ledatu/csar-core/s3store"
 	"github.com/ledatu/csar-core/tokenmint"
 )
 
@@ -35,6 +36,10 @@ func (s *AdminServer) handleSvcPutToken(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if !validStoredExpiry(req.ExpiresAt) || (req.Descriptor != nil && req.ExpiresAt != nil) {
+		adminRejectJSON(w, http.StatusBadRequest, "invalid stored credential lifetime")
+		return
+	}
 	var entry TokenEntry
 	switch {
 	case req.Descriptor != nil && req.Value != "":
@@ -60,6 +65,11 @@ func (s *AdminServer) handleSvcPutToken(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if entry.Descriptor == nil {
+		entry.ExpiresAt = req.ExpiresAt
+		entry.CredentialID = s3store.CredentialFingerprint([]byte(req.Value))
+		entry.Passthrough = true
+	}
 	meta := TokenMetadata{
 		UpdatedBy: subject,
 	}
@@ -71,7 +81,7 @@ func (s *AdminServer) handleSvcPutToken(w http.ResponseWriter, r *http.Request) 
 			"error", err,
 		)
 		s.metrics.FailuresTotal.WithLabelValues("svc_put", "s3_write").Inc()
-		adminRejectJSON(w, http.StatusInternalServerError, "storage write failed")
+		rejectTokenMutation(w, err)
 		return
 	}
 
@@ -168,7 +178,7 @@ func (s *AdminServer) handleSvcCopyToken(w http.ResponseWriter, r *http.Request)
 			"error", err,
 		)
 		s.metrics.FailuresTotal.WithLabelValues("svc_copy", "write").Inc()
-		adminRejectJSON(w, http.StatusInternalServerError, "storage write failed")
+		rejectTokenMutation(w, err)
 		return
 	}
 
@@ -209,7 +219,7 @@ func (s *AdminServer) handleSvcDeleteToken(w http.ResponseWriter, r *http.Reques
 			"error", err,
 		)
 		s.metrics.FailuresTotal.WithLabelValues("svc_delete", "s3_delete").Inc()
-		adminRejectJSON(w, http.StatusInternalServerError, "storage delete failed")
+		rejectTokenMutation(w, err)
 		return
 	}
 

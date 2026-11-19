@@ -33,6 +33,7 @@ import (
 	"github.com/ledatu/csar-core/s3store"
 	"github.com/ledatu/csar-core/tokenmint"
 	"github.com/ledatu/csar-core/ycloud"
+	credentialv1 "github.com/ledatu/csar-proto/csar/credential/v1"
 
 	csarcfg "github.com/ledatu/csar/internal/config"
 	csarcsrc "github.com/ledatu/csar/internal/configsource"
@@ -58,7 +59,8 @@ func main() {
 	// Token source flags — choose one: --token-file (dev), --token-source=postgres, or --token-source=s3.
 	tokenFile := flag.String("token-file", "", "path to YAML file with pre-encrypted token entries for AuthService")
 	tokenSourceFlag := flag.String("token-source", "", "token backend: \"file\" (default, uses --token-file), \"postgres\", \"s3\"")
-	storedRefreshInterval := flag.Duration("stored-token-refresh-interval", time.Minute, "minimum interval between demand-driven freshness checks of each stored token")
+	storedCoherence := flag.Bool("stored-token-coherence", false, "use lifetime and durable exact-ref invalidation; requires all token writers upgraded")
+	storedRefreshInterval := flag.Duration("stored-token-refresh-interval", time.Minute, "legacy mode only: interval between demand-driven stored-token checks")
 
 	// PostgreSQL flags (used when --token-source=postgres)
 	postgresDSN := flag.String("postgres-dsn", "", "PostgreSQL connection string (e.g. \"postgres://user:pass@host:5432/db?sslmode=require\")")
@@ -389,6 +391,26 @@ func main() {
 		os.Exit(1)
 	}
 
+	var coherentStore *coordinator.CoherentTokenStore
+	var tokenStates statestore.TokenStates
+	if *storedCoherence {
+		if !*allowInsecureDev && (*storeType != "etcd" || *clientCA == "") {
+			logger.Error("stored-token-coherence requires shared etcd and trusted-router mTLS outside local development")
+			os.Exit(1)
+		}
+		states, supported := store.(statestore.TokenStates)
+		mutable, writable := tokenStore.(coordinator.MutableTokenStore)
+		if !supported || !writable || resolvedTokenSource != "s3" {
+			logger.Error("stored-token-coherence requires S3 and token-state-capable storage")
+			os.Exit(1)
+		}
+		tokenStates = states
+		coherentStore = coordinator.NewCoherentTokenStore(mutable, states)
+		tokenStore = coherentStore
+		authSvc.SetBackend(coherentStore)
+		authSvc.SetTokenStates(states)
+	}
+
 	// Token minting. The decorator is wired into the AuthService read-through
 	// path only — tokenStore itself stays the raw store, so the admin API's
 	// copy endpoint can never materialize a live minted bearer as a permanent
@@ -537,6 +559,9 @@ func main() {
 	srv := grpc.NewServer(serverOpts...)
 	csarv1.RegisterCoordinatorServiceServer(srv, coord)
 	csarv1.RegisterAuthServiceServer(srv, authSvc)
+	if coherentStore != nil {
+		credentialv1.RegisterCredentialServiceServer(srv, coordinator.NewCredentialRejections(coherentStore, authSvc, coord))
+	}
 	logger.Info("registered gRPC services: CoordinatorService, AuthService")
 
 	lis, err := net.Listen("tcp", *listenAddr)
@@ -574,6 +599,9 @@ func main() {
 	// events to all connected routers when tokens are rotated or removed.
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	defer ctxCancel()
+	if coherentStore != nil {
+		go coordinator.WatchTokenChanges(ctx, tokenStates, authSvc, coord)
+	}
 
 	// Start admin API server (if enabled).
 	var adminSrv *coordinator.AdminServer

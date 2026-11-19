@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/ledatu/csar-core/apierror"
+	"github.com/ledatu/csar-core/s3store"
 	"github.com/ledatu/csar/internal/kms"
+	"github.com/ledatu/csar/internal/proxy"
 	"github.com/ledatu/csar/pkg/middleware/authzmw"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -21,9 +23,13 @@ import (
 // Supported sources: {query.param_name}, {header.Header-Name}, and {path.var_name}.
 var placeholderRe = regexp.MustCompile(`\{(query|header|path)\.([^}]+)\}`)
 
-// TokenFetcher fetches encrypted tokens by reference.
-// This matches the AuthService proto contract but can be implemented
-// without gRPC for local development.
+// CredentialRejectionReporter is an optional trusted upstream feedback path.
+type CredentialRejectionReporter interface {
+	ReportCredentialRejection(context.Context, string, string, string) error
+}
+
+// TokenFetcher fetches encrypted tokens by reference, with the AuthService
+// contract or a local implementation for development.
 type TokenFetcher interface {
 	// GetEncryptedToken returns the encrypted blob, associated KMS key ID, and version.
 	GetEncryptedToken(ctx context.Context, tokenRef string) (encryptedToken []byte, kmsKeyID string, version string, err error)
@@ -70,9 +76,10 @@ type staleEntry struct {
 // AuthInjector is middleware that fetches, decrypts, and injects tokens
 // into upstream request headers.
 type AuthInjector struct {
-	fetcher  TokenFetcher
-	provider kms.Provider
-	logger   *slog.Logger
+	rejections credentialRejections
+	fetcher    TokenFetcher
+	provider   kms.Provider
+	logger     *slog.Logger
 
 	// staleCache holds the last successfully decrypted header value per token_ref.
 	// Used when on_kms_error = "serve_stale".
@@ -129,6 +136,7 @@ func (a *AuthInjector) Wrap(cfg AuthInjectorConfig, next http.Handler) http.Hand
 			return
 		}
 
+		_, strictCredentials := a.fetcher.(CredentialRejectionReporter)
 		onError := cfg.OnKMSError
 		if onError == "" {
 			onError = "fail_closed"
@@ -153,7 +161,7 @@ func (a *AuthInjector) Wrap(cfg AuthInjectorConfig, next http.Handler) http.Hand
 				"token_ref", resolvedRef,
 				"error", err,
 			)
-			if onError == "serve_stale" {
+			if onError == "serve_stale" && !strictCredentials {
 				if stale := a.getStale(resolvedRef); stale != "" {
 					a.logger.Warn("serving stale token due to fetch error",
 						"token_ref", resolvedRef,
@@ -198,7 +206,7 @@ func (a *AuthInjector) Wrap(cfg AuthInjectorConfig, next http.Handler) http.Hand
 					"kms_key_id", keyID,
 					"error", err,
 				)
-				if onError == "serve_stale" {
+				if onError == "serve_stale" && !strictCredentials {
 					if stale := a.getStale(resolvedRef); stale != "" {
 						a.logger.Warn("serving stale token due to decrypt error",
 							"token_ref", resolvedRef,
@@ -211,6 +219,19 @@ func (a *AuthInjector) Wrap(cfg AuthInjectorConfig, next http.Handler) http.Hand
 				http.Error(w, `{"error":"auth: token decrypt failed"}`, http.StatusBadGateway)
 				return
 			}
+		}
+
+		if reporter, supported := a.fetcher.(CredentialRejectionReporter); supported {
+			fingerprint := s3store.CredentialFingerprint(plainToken)
+			if !a.credentialAllowed(r.Context(), reporter, resolvedRef, version, fingerprint) {
+				apierror.New(apierror.CodeCredentialInvalid, http.StatusBadGateway, "Credential was rejected upstream").Write(w)
+				return
+			}
+			r = r.WithContext(proxy.WithResponseObserver(r.Context(), func(code int) {
+				if code == http.StatusUnauthorized {
+					a.rejectCredential(r.Context(), reporter, resolvedRef, version, fingerprint)
+				}
+			}))
 		}
 
 		// Format and inject the header

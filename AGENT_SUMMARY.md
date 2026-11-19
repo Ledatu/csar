@@ -24,6 +24,10 @@ and internal admin surfaces.
 - Coordinator admin access is mTLS-protected and profile-guarded.
 
 ## Critical Flows
+- Opt-in `--stored-token-coherence` uses inspected stored expiry, durable exact-ref
+  etcd revisions and trusted upstream-401 reports. Read
+  `STORED_CREDENTIAL_LIFETIME.md` for the all-writer activation boundary,
+  unknown-expiry compatibility and pending-write recovery requirements.
 
 - Stored-token freshness is checked on demand per ref, at most once per minute
   by default (`--stored-token-refresh-interval`). Only the requested credential
