@@ -554,20 +554,20 @@ func (s *AuthServiceImpl) GetEncryptedToken(ctx context.Context, req *csarv1.Tok
 		}
 	}
 
-	if ok && !entry.Minted() && !entry.Usable(s.clock()) {
-		return nil, statusForFetchError(req.TokenRef, ErrTokenExpired)
-	}
 	if !ok {
 		s.logger.Warn("token ref not found", "token_ref", req.TokenRef)
 		return nil, status.Errorf(codes.NotFound, "token ref %q not found", req.TokenRef)
 	}
 
 	if s.states != nil && !entry.Minted() {
+		s.mu.RLock()
+		verifyEpoch := s.cacheState[req.TokenRef].epoch
+		s.mu.RUnlock()
 		verifyCtx, cancel := context.WithTimeout(ctx, defaultFetchTimeout)
 		latest, verifyErr := s.states.GetTokenState(verifyCtx, req.TokenRef)
 		cancel()
 		if verifyErr != nil {
-			s.cacheMetadataFailure(req.TokenRef, verifyErr)
+			s.cacheMetadataFailure(req.TokenRef, verifyEpoch, verifyErr)
 			return nil, statusForFetchError(req.TokenRef, verifyErr)
 		}
 		if latest.Pending != "" || latest.Revision != stamp.controlRevision {
@@ -576,6 +576,9 @@ func (s *AuthServiceImpl) GetEncryptedToken(ctx context.Context, req *csarv1.Tok
 		if rejected(latest, entry) {
 			return nil, statusForFetchError(req.TokenRef, ErrTokenRejected)
 		}
+	}
+	if ok && !entry.Minted() && !entry.Usable(s.clock()) {
+		return nil, statusForFetchError(req.TokenRef, ErrTokenExpired)
 	}
 	s.logger.Debug("serving encrypted token", "token_ref", req.TokenRef)
 	return &csarv1.TokenResponse{
