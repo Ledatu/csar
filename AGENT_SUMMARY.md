@@ -29,7 +29,8 @@ and internal admin surfaces.
   `STORED_CREDENTIAL_LIFETIME.md` for the all-writer activation boundary,
   unknown-expiry compatibility and pending-write recovery requirements.
   Upstream-401 quarantine requires explicit `--credential-rejection-route`
-  selection of one configured route with one injected credential; default off.
+  selection of one configured route and one injected credential; `#Header` explicitly
+  targets one entry on multi-entry routes. Default off.
   Owners supply expiry; storage/injection never infer it from JWT shape.
 
 - Legacy stored-credential freshness is checked on demand per ref, at most once per minute

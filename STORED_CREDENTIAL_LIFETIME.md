@@ -48,8 +48,13 @@ csar --credential-rejection-route 'POST:/v2/jobs/{tenant_id}'
 
 The flag is repeatable and selects exact `METHOD:/configured/path` keys, including
 the configured path pattern. Startup and route-table reload require each key to
-resolve to exactly one route with one injected credential entry. Invalid, absent,
-duplicate, ambiguous and multi-credential selections are rejected. The injector
+resolve to exactly one route with one injected credential entry. For a route with
+additional injected metadata, append `#Header` (for example
+`POST:/v2/jobs/{tenant_id}#X-Remote-Key`) to select exactly one injected entry.
+Only that entry is quarantined. The operator explicitly declares that this route's
+401 rejects the selected header; do not select a target if the upstream contract
+cannot distinguish an unrelated authentication failure. Invalid, absent,
+duplicate, ambiguous and implicit multi-credential selections are rejected. The injector
 must support rejection feedback. An omitted selection never creates or consults
 local quarantine and never reports a 401. For embedded use, the corresponding
 explicit setting is `AuthInjectorConfig.RejectOnUnauthorized`.
@@ -57,8 +62,8 @@ explicit setting is `AuthInjectorConfig.RejectOnUnauthorized`.
 A generic route could inject ref `apps/reporting/{path.tenant_id}/remote_key` into
 `X-Remote-Key`, or use an opaque bearer value in `Authorization`. This policy does
 not infer credential validity from a provider name, URL, JWT shape, arbitrary 403,
-or a 401 on an unrelated route. Multi-credential APIs continue ordinary injection
-without automatic attribution to every ref. A selected route must have unambiguous
+or a 401 on an unrelated route. Multi-credential APIs require explicit header attribution; no automatic attribution
+to every ref occurs. A selected route must have unambiguous
 rejection semantics; a shared ref's durable rejection affects all uses of that ref.
 
 On an opted-in route, only a real reverse-proxy upstream 401 triggers a report.
