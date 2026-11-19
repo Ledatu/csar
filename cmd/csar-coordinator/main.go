@@ -126,7 +126,7 @@ func main() {
 	adminAllowInsecure := flag.Bool("admin-allow-insecure", false, "allow admin API to start without TLS (local development only)")
 
 	// Service-facing token API flags
-	svcTokenPrefixMap := flag.String("svc-token-prefix-map", "", `service-facing token API prefix map (subject=prefix,...), e.g. "svc:aurumskynet-campaigns=campaigns/"`)
+	svcTokenPrefixMap := flag.String("svc-token-prefix-map", "", `service-facing token API prefix map (subject=prefix,...), e.g. "svc:credential-manager=apps/"`)
 
 	// KMS flags for coordinator (used when admin API encrypts tokens)
 	adminKMSProvider := flag.String("admin-kms-provider", "local", "KMS provider for admin API encryption: local, yandexapi")

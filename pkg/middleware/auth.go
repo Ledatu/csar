@@ -37,6 +37,10 @@ type TokenFetcher interface {
 
 // AuthInjectorConfig configures how a decrypted token is injected into the request.
 type AuthInjectorConfig struct {
+	// RejectOnUnauthorized explicitly declares that this route's upstream 401
+	// rejects this credential. Disabled by default; never infer from a provider.
+	RejectOnUnauthorized bool
+
 	// TokenRef is the reference name to look up in the AuthService.
 	TokenRef string
 
@@ -121,6 +125,12 @@ func NewAuthInjector(fetcher TokenFetcher, provider kms.Provider, logger *slog.L
 	return a
 }
 
+// SupportsCredentialRejection reports whether trusted rejection feedback is available.
+func (a *AuthInjector) SupportsCredentialRejection() bool {
+	_, ok := a.fetcher.(CredentialRejectionReporter)
+	return ok
+}
+
 // Wrap returns an http.Handler that injects the decrypted token into
 // the request before forwarding to the next handler.
 //
@@ -130,6 +140,10 @@ func NewAuthInjector(fetcher TokenFetcher, provider kms.Provider, logger *slog.L
 // without duplicating config entries.
 func (a *AuthInjector) Wrap(cfg AuthInjectorConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if cfg.RejectOnUnauthorized && (cfg.TokenRef == "" || !a.SupportsCredentialRejection()) {
+			apierror.New(apierror.CodeCredentialConfiguration, http.StatusBadGateway, "Credential rejection policy is unavailable").Write(w)
+			return
+		}
 		if cfg.TokenRef == "" {
 			// No token injection needed, pass through
 			next.ServeHTTP(w, r)
@@ -221,7 +235,7 @@ func (a *AuthInjector) Wrap(cfg AuthInjectorConfig, next http.Handler) http.Hand
 			}
 		}
 
-		if reporter, supported := a.fetcher.(CredentialRejectionReporter); supported {
+		if reporter, supported := a.fetcher.(CredentialRejectionReporter); supported && cfg.RejectOnUnauthorized {
 			fingerprint := s3store.CredentialFingerprint(plainToken)
 			if !a.credentialAllowed(r.Context(), reporter, resolvedRef, version, fingerprint) {
 				apierror.New(apierror.CodeCredentialInvalid, http.StatusBadGateway, "Credential was rejected upstream").Write(w)

@@ -34,7 +34,7 @@ func TestEarly401BlocksLocalReuseWhenReportUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := a.Wrap(AuthInjectorConfig{TokenRef: "seller/a", InjectHeader: "Authorization"}, rp)
+	handler := a.Wrap(AuthInjectorConfig{RejectOnUnauthorized: true, TokenRef: "seller/a", InjectHeader: "Authorization"}, rp)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
 	if rec.Code != http.StatusUnauthorized || fetcher.calls.Load() != 1 {
@@ -81,5 +81,52 @@ func TestDelayedOld401CannotEraseNewLocalQuarantine(t *testing.T) {
 	}
 	if !a.credentialAllowed(ctx, fetcher, "seller/a", "v3", s3store.CredentialFingerprint([]byte("replacement"))) {
 		t.Fatal("old 401 blocked replacement")
+	}
+}
+
+func TestUnselected401DoesNotConsultOrCreateLocalQuarantine(t *testing.T) {
+	fetcher := &unavailableReporter{}
+	injector := NewAuthInjector(fetcher, nil, newTestLogger())
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { calls.Add(1); w.WriteHeader(http.StatusUnauthorized) }))
+	defer upstream.Close()
+	rp, err := proxy.New(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordinary := injector.Wrap(AuthInjectorConfig{TokenRef: "apps/mail/service_key", InjectHeader: "X-API-Key"}, rp)
+	for range 2 {
+		rec := httptest.NewRecorder()
+		ordinary.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatal("unselected 401 changed ordinary response behavior")
+		}
+	}
+	if fetcher.calls.Load() != 0 || calls.Load() != 2 {
+		t.Fatal("unselected 401 created rejection feedback")
+	}
+	optedIn := injector.Wrap(AuthInjectorConfig{RejectOnUnauthorized: true, TokenRef: "apps/mail/service_key", InjectHeader: "X-API-Key"}, rp)
+	rec := httptest.NewRecorder()
+	optedIn.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+	if fetcher.calls.Load() != 1 {
+		t.Fatal("explicit policy did not report")
+	}
+	rec = httptest.NewRecorder()
+	ordinary.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+	if rec.Code != http.StatusUnauthorized || calls.Load() != 4 || fetcher.calls.Load() != 1 {
+		t.Fatal("unselected route consulted local quarantine")
+	}
+}
+
+func TestDirectOptInWithoutReportingFailsClosed(t *testing.T) {
+	fetcher := NewStaticTokenFetcher()
+	fetcher.Add("apps/mail/service_key", []byte("fixture"), "")
+	injector := NewAuthInjector(fetcher, nil, newTestLogger())
+	called := false
+	handler := injector.Wrap(AuthInjectorConfig{RejectOnUnauthorized: true, TokenRef: "apps/mail/service_key", InjectHeader: "X-API-Key"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+	if called || rec.Code != http.StatusBadGateway {
+		t.Fatal("unsupported explicit policy silently reached upstream")
 	}
 }
