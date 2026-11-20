@@ -482,6 +482,7 @@ func protoToAuthValidateConfig(a *csarv1.AuthValidateConfigProto) *config.AuthVa
 		IntrospectionTLS:      a.GetIntrospectionTls(),
 		RequiredScope:         a.GetRequiredScope(),
 		SellerPathParam:       a.GetSellerPathParam(),
+		ResourcePathParam:     a.GetResourcePathParam(),
 		ForwardHeaders:        a.GetForwardHeaders(),
 		Issuer:                a.GetIssuer(),
 		Audiences:             a.GetAudiences(),

@@ -966,14 +966,16 @@ type AuthValidateConfig struct {
 	// subrequest HTTP client in session mode.
 	SessionTLS string `yaml:"session_tls,omitempty" json:"session_tls,omitempty"`
 
-	// IntrospectionEndpoint and IntrospectionTLS are used for opaque personal
-	// API keys in token mode. The endpoint must be reachable over mTLS.
+	// IntrospectionEndpoint and IntrospectionTLS select the issuer and transport
+	// for opaque credentials. Delegation requires verified mutual TLS.
 	IntrospectionEndpoint string `yaml:"introspection_endpoint,omitempty" json:"introspection_endpoint,omitempty"`
 	IntrospectionTLS      string `yaml:"introspection_tls,omitempty" json:"introspection_tls,omitempty"`
 
-	// RequiredScope and SellerPathParam constrain a token route to one scope
-	// and its selected Wildberries cabinet. SellerPathParam defaults to seller_id.
-	RequiredScope   string `yaml:"required_scope,omitempty" json:"required_scope,omitempty"`
+	// RequiredScope binds the credential to the route operation.
+	RequiredScope string `yaml:"required_scope,omitempty" json:"required_scope,omitempty"`
+	// ResourcePathParam identifies the matched route parameter for grant-resource.
+	ResourcePathParam string `yaml:"resource_path_param,omitempty" json:"resource_path_param,omitempty"`
+	// SellerPathParam is the legacy seller protocol binding.
 	SellerPathParam string `yaml:"seller_path_param,omitempty" json:"seller_path_param,omitempty"`
 
 	// ForwardHeaders lists response headers to copy from the session
@@ -983,7 +985,7 @@ type AuthValidateConfig struct {
 	// Issuer, if set, validates the "iss" claim matches (jwt mode).
 	Issuer string `yaml:"issuer,omitempty" json:"issuer,omitempty"`
 
-	// Audiences, if set, validates the "aud" claim contains at least one entry (jwt mode).
+	// Audiences lists accepted JWT audiences. Delegation requires exactly one audience.
 	Audiences []string `yaml:"audiences,omitempty" json:"audiences,omitempty"`
 
 	// HeaderName is the HTTP header carrying the token. Default: "X-Csar-Authorization".

@@ -61,6 +61,9 @@ func (c *Config) resolveAuthValidate(input AuthValidateConfig, terminal bool) (A
 	if input.RequiredScope != "" {
 		merged.RequiredScope = input.RequiredScope
 	}
+	if input.ResourcePathParam != "" {
+		merged.ResourcePathParam = input.ResourcePathParam
+	}
 	if input.SellerPathParam != "" {
 		merged.SellerPathParam = input.SellerPathParam
 	}

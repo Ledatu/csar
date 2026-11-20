@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ledatu/csar-core/authntokens"
 )
 
 // Validate checks the configuration for required fields and consistency.
@@ -269,7 +271,10 @@ func (c *Config) Validate() error {
 				if err := c.validateAuthValidate(route.AuthValidate, path, method); err != nil {
 					return err
 				}
-				if route.AuthValidate.Mode == "mcp" || route.AuthValidate.Mode == "mcp-account" {
+				if route.Authz == nil && route.AuthValidate.requiresResourceAuthorization() {
+					return fmt.Errorf("path %s method %s: resource delegation requires authorization", path, method)
+				}
+				if route.AuthValidate.Mode == "mcp" || route.AuthValidate.Mode == "mcp-account" || route.AuthValidate.Mode == authntokens.GrantExchange {
 					if route.AuthValidate.Mode == "mcp" && route.Authz == nil {
 						return fmt.Errorf("path %s method %s: cabinet MCP delegation requires authorization", path, method)
 					}

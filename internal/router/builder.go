@@ -768,11 +768,14 @@ func (r *Router) setupToken(rt *route, fr config.FlatRoute, cfg *config.Config, 
 	}
 	rt.tokenValidator = validator
 	rt.tokenConfig = &authn.TokenConfig{
-		Mode:            fr.Route.AuthValidate.Mode,
-		Endpoint:        fr.Route.AuthValidate.IntrospectionEndpoint,
-		RequiredScope:   fr.Route.AuthValidate.RequiredScope,
-		SellerPathParam: fr.Route.AuthValidate.SellerPathParam,
-		CacheTTL:        fr.Route.AuthValidate.CacheTTL.Duration,
+		Mode:              fr.Route.AuthValidate.Mode,
+		Endpoint:          fr.Route.AuthValidate.IntrospectionEndpoint,
+		RequiredScope:     fr.Route.AuthValidate.RequiredScope,
+		SellerPathParam:   fr.Route.AuthValidate.SellerPathParam,
+		ResourcePathParam: fr.Route.AuthValidate.ResourcePathParam,
+		PlatformResource:  fr.Route.Authz != nil && fr.Route.Authz.ScopeType == "platform" && len(fr.Route.Authz.AnyOf) == 0,
+		Audiences:         fr.Route.AuthValidate.Audiences,
+		CacheTTL:          fr.Route.AuthValidate.CacheTTL.Duration,
 	}
 	return nil
 }

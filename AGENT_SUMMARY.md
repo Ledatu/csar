@@ -164,6 +164,6 @@ not exposed. A fake token endpoint → Minter → MintingStore → AuthService �
 integration test covers invalid credentials, provider quota, malformed responses
 and timeout. Existing stale/fail-closed policy is unchanged.
 
-## Account-wide MCP grants
+## Delegated access
 
-The delegated-discovery validator consumes a discovery credential and provides the authenticated grant and subject to Campaigns. Delegated report validation binds the introspection request to the seller ID from the matched route before the existing authorization and cache steps.
+The grant-exchange, grant-discovery and grant-resource policies use the shared authntokens contract. The gateway binds a verified grant to the configured audience, purpose and scope. Resource use also binds the matched route parameter and the issuer-provided tenant before authorization and response caching. The deployment chooses the discovery backend. The original seller modes retain their wire contract during migration.
