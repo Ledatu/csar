@@ -1,5 +1,10 @@
 # csar Agent Summary
 
+## Hosted seller authentication
+
+The dedicated `mcp` validation mode exchanges a resource bearer at Authn and forwards a per-request delegation to the hosted seller adapter. The `delegated` mode consumes it before cabinet authorization and report-cache lookup. Both modes consult Authn on every request. Personal-key routes forward only the scope verified for that route.
+
+
 ## Role In Prod
 `csar` is the trusted API router and coordinator pair for the stack. The router
 owns authn validation, authz enforcement, throttling, circuit breaking, token

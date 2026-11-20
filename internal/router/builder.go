@@ -763,11 +763,12 @@ func (r *Router) setupToken(rt *route, fr config.FlatRoute, cfg *config.Config, 
 		if err != nil {
 			return fmt.Errorf("route %s: build introspection mTLS transport: %w", key, err)
 		}
-		validator = authn.NewTokenValidator(logger, &http.Client{Transport: transport, Timeout: 5 * time.Second})
+		validator = authn.NewTokenValidator(logger, &http.Client{Transport: transport, Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }})
 		r.tokenValidators[tlsRef] = validator
 	}
 	rt.tokenValidator = validator
 	rt.tokenConfig = &authn.TokenConfig{
+		Mode:            fr.Route.AuthValidate.Mode,
 		Endpoint:        fr.Route.AuthValidate.IntrospectionEndpoint,
 		RequiredScope:   fr.Route.AuthValidate.RequiredScope,
 		SellerPathParam: fr.Route.AuthValidate.SellerPathParam,

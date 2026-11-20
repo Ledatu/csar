@@ -37,7 +37,7 @@ func TestTokenValidatorScopesCabinetAndStripsCredential(t *testing.T) {
 		if r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" {
 			t.Fatal("raw credentials reached backend")
 		}
-		if r.Header.Get(gatewayctx.HeaderSubject) != "user-1" ||
+		if r.Header.Get(gatewayctx.HeaderScopes) != "adverts:read" || r.Header.Get(gatewayctx.HeaderSubject) != "user-1" ||
 			r.Header.Get(gatewayctx.HeaderCredentialID) != "key-1" {
 			t.Fatal("verified identity not forwarded")
 		}
