@@ -31,6 +31,8 @@ type TokenConfig struct {
 }
 
 type tokenResult struct {
+	AccountGrant   bool      `json:"account_grant"`
+	Discovery      bool      `json:"discovery"`
 	DelegatedToken string    `json:"delegated_token"`
 	Active         bool      `json:"active"`
 	Subject        string    `json:"subject"`
@@ -66,9 +68,9 @@ func (v *TokenValidator) Wrap(cfg TokenConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		header, prefix := "Authorization", "aurum_pat_"
 		switch cfg.Mode {
-		case "mcp":
+		case "mcp", "mcp-account":
 			prefix = "aurum_mcp_"
-		case "delegated":
+		case "delegated", "delegated-discovery":
 			header, prefix = gatewayctx.HeaderCsarAuthorization, "aurum_dlg_"
 		}
 		if len(r.Header.Values(header)) != 1 {
@@ -102,16 +104,34 @@ func (v *TokenValidator) Wrap(cfg TokenConfig, next http.Handler) http.Handler {
 			return
 		}
 		vars := authzmw.PathVarsFromContext(r.Context())
-		if result.SellerID == "" || (cfg.Mode != "mcp" && vars[cfg.SellerPathParam] != result.SellerID) {
-			v.reject(w, http.StatusForbidden, "cabinet not allowed for this key")
-			return
+		switch cfg.Mode {
+		case "mcp":
+			if result.SellerID == "" {
+				v.reject(w, 403, "missing grant")
+				return
+			}
+		case "mcp-account":
+			if !result.AccountGrant {
+				v.reject(w, http.StatusForbidden, "account grant required")
+				return
+			}
+		case "delegated-discovery":
+			if !result.Discovery || !result.AccountGrant {
+				v.reject(w, 403, "discovery grant required")
+				return
+			}
+		default:
+			if result.Discovery || result.SellerID == "" || vars[cfg.SellerPathParam] != result.SellerID {
+				v.reject(w, 403, "cabinet not allowed for this key")
+				return
+			}
 		}
 		// Credentials are consumed at the edge, even if the backend is another
 		// trusted service. Only verified gateway context is forwarded.
 		r.Header.Del("Authorization")
 		r.Header.Del("Cookie")
 		r.Header.Del(gatewayctx.HeaderCsarAuthorization)
-		if cfg.Mode == "mcp" {
+		if cfg.Mode == "mcp" || cfg.Mode == "mcp-account" {
 			if !strings.HasPrefix(result.DelegatedToken, "aurum_dlg_") || len(result.DelegatedToken) != len("aurum_dlg_")+43 {
 				v.reject(w, http.StatusUnauthorized, "delegation unavailable")
 				return
@@ -121,7 +141,9 @@ func (v *TokenValidator) Wrap(cfg TokenConfig, next http.Handler) http.Handler {
 		r.Header.Set(gatewayctx.HeaderScopes, cfg.RequiredScope)
 		r.Header.Set(gatewayctx.HeaderSubject, result.Subject)
 		r.Header.Set(gatewayctx.HeaderCredentialID, result.CredentialID)
-		r.Header.Set(gatewayctx.HeaderTenant, "wildberries:"+result.SellerID)
+		if result.SellerID != "" && cfg.Mode != "delegated-discovery" {
+			r.Header.Set(gatewayctx.HeaderTenant, "wildberries:"+result.SellerID)
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -140,7 +162,15 @@ func (v *TokenValidator) introspect(r *http.Request, cfg TokenConfig, raw string
 			return entry.result, nil
 		}
 	}
-	body, err := json.Marshal(map[string]string{"token": raw})
+	payload := map[string]string{"token": raw}
+	if cfg.Mode == "delegated" {
+		seller := authzmw.PathVarsFromContext(r.Context())[cfg.SellerPathParam]
+		if seller == "" {
+			return tokenResult{}, nil
+		}
+		payload["seller_id"] = seller
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return tokenResult{}, err
 	}

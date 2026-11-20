@@ -36,7 +36,7 @@ func (c *Config) validateAuthValidate(a *AuthValidateConfig, path, method string
 		if a.CookieName == "" {
 			return fmt.Errorf("path %s method %s: x-csar-authn-validate.cookie_name is required for session mode", path, method)
 		}
-	case "token", "mcp", "delegated":
+	case "token", "mcp", "mcp-account", "delegated", "delegated-discovery":
 		if len(a.IssueTokens) > 0 || a.CookieName != "" || a.HeaderName != "" || a.TokenPrefix != "" {
 			return fmt.Errorf("path %s method %s: token mode cannot use session or JWT header options", path, method)
 		}
@@ -79,7 +79,7 @@ func (c *Config) validateAuthValidate(a *AuthValidateConfig, path, method string
 			}
 		}
 	default:
-		return fmt.Errorf("path %s method %s: x-csar-authn-validate.mode %q is not recognized (expected jwt, session, token, mcp, delegated or select)", path, method, a.Mode)
+		return fmt.Errorf("path %s method %s: x-csar-authn-validate.mode %q is not recognized (expected jwt, session, token, mcp, mcp-account, delegated, delegated-discovery or select)", path, method, a.Mode)
 	}
 	for i := range a.IssueTokens {
 		token := &a.IssueTokens[i]
@@ -152,9 +152,9 @@ func (a AuthValidateConfig) CredentialSource() (string, error) {
 			return "", fmt.Errorf("session credential source requires a cookie_name")
 		}
 		return "cookie:" + a.CookieName, nil
-	case "mcp":
+	case "mcp", "mcp-account":
 		return "", fmt.Errorf("MCP ingress requires a dedicated route")
-	case "delegated":
+	case "delegated", "delegated-discovery":
 		return "header:" + gatewayctx.HeaderCsarAuthorization, nil
 	case "token":
 		return "header:Authorization", nil

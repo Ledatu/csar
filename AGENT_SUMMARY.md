@@ -163,3 +163,7 @@ for fail-closed HTTP 502 responses. Raw provider errors and token references are
 not exposed. A fake token endpoint → Minter → MintingStore → AuthService → router
 integration test covers invalid credentials, provider quota, malformed responses
 and timeout. Existing stale/fail-closed policy is unchanged.
+
+## Account-wide MCP grants
+
+The delegated-discovery validator consumes a discovery credential and provides the authenticated grant and subject to Campaigns. Delegated report validation binds the introspection request to the seller ID from the matched route before the existing authorization and cache steps.

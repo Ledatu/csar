@@ -985,7 +985,7 @@
       "description": "Validates inbound JWTs, browser sessions, or opaque seller API keys before proxying.",
       "additionalProperties": false,
       "properties": {
-        "mode": { "type": "string", "enum": ["jwt", "session", "token", "select", "mcp", "delegated"], "description": "Single validator, or select exactly one presented credential using the terminal methods below. Failed authentication never falls back." },
+        "mode": { "type": "string", "enum": ["jwt", "session", "token", "select", "mcp", "mcp-account", "delegated", "delegated-discovery"], "description": "Single validator, or select exactly one presented credential using the terminal methods below. Failed authentication never falls back." },
         "methods": { "type": "array", "minItems": 2, "maxItems": 3, "description": "For mode select: 2–3 terminal policy names or inline validators with distinct header/cookie sources. No nested selectors, parent validator options or session token issuance. Conflicting credentials fail closed. Requires compatible router/coordinator binaries.", "items": { "$ref": "#/$defs/AuthValidateConfig" } },
         "use": {
           "type": "string",
