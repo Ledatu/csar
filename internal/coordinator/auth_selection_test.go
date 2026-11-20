@@ -14,7 +14,7 @@ func TestAuthSelectionSurvivesCoordinatorSnapshot(t *testing.T) {
 	original := &config.AuthValidateConfig{Mode: "select", Methods: []config.AuthValidateConfig{
 		{Mode: "jwt", JWKSURL: "https://authn/jwks", JWKSTLS: "authn", Audiences: []string{"reader"}, ForwardClaims: map[string]string{"sub": "X-Gateway-Subject"}},
 		{Mode: "session", SessionEndpoint: "https://authn/auth/validate", CookieName: "csar_session", SessionTLS: "authn", ForwardHeaders: []string{"X-Gateway-Subject"}},
-		{Mode: "token", IntrospectionEndpoint: "https://authn/introspect", IntrospectionTLS: "authn", RequiredScope: "adverts:read", SellerPathParam: "seller_id"},
+		{Mode: "grant-resource", Audiences: []string{"projects"}, IntrospectionEndpoint: "https://authn/introspect", IntrospectionTLS: "authn", RequiredScope: "documents:read", ResourcePathParam: "project_id"},
 	}}
 	snapshot := &csarv1.FullConfigSnapshot{Routes: []*csarv1.RouteConfig{{Path: "/catalog", Method: "GET", AuthValidate: authValidateToProto(original)}}}
 	wire, err := proto.Marshal(snapshot)

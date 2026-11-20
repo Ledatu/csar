@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"net/textproto"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/ledatu/csar-core/authntokens"
 	"github.com/ledatu/csar-core/gatewayctx"
 )
 
@@ -36,7 +38,18 @@ func (c *Config) validateAuthValidate(a *AuthValidateConfig, path, method string
 		if a.CookieName == "" {
 			return fmt.Errorf("path %s method %s: x-csar-authn-validate.cookie_name is required for session mode", path, method)
 		}
-	case "token", "mcp", "mcp-account", "delegated", "delegated-discovery":
+	case "token", "mcp", "mcp-account", "delegated", "delegated-discovery", authntokens.GrantExchange, authntokens.GrantDiscovery, authntokens.GrantResource:
+		if authntokens.IsDelegation(a.Mode) {
+			if len(a.Audiences) != 1 || strings.TrimSpace(a.Audiences[0]) == "" || a.SellerPathParam != "" {
+				return fmt.Errorf("path %s method %s: delegation requires one audience and forbids seller_path_param", path, method)
+			}
+			if (a.Mode == authntokens.GrantResource) != (a.ResourcePathParam != "") ||
+				(a.ResourcePathParam != "" && !strings.Contains(path, "{"+a.ResourcePathParam+"}")) {
+				return fmt.Errorf("path %s method %s: grant-resource requires a matched resource_path_param", path, method)
+			}
+		} else if a.ResourcePathParam != "" {
+			return fmt.Errorf("resource_path_param requires grant-resource")
+		}
 		if len(a.IssueTokens) > 0 || a.CookieName != "" || a.HeaderName != "" || a.TokenPrefix != "" {
 			return fmt.Errorf("path %s method %s: token mode cannot use session or JWT header options", path, method)
 		}
@@ -79,7 +92,7 @@ func (c *Config) validateAuthValidate(a *AuthValidateConfig, path, method string
 			}
 		}
 	default:
-		return fmt.Errorf("path %s method %s: x-csar-authn-validate.mode %q is not recognized (expected jwt, session, token, mcp, mcp-account, delegated, delegated-discovery or select)", path, method, a.Mode)
+		return fmt.Errorf("path %s method %s: x-csar-authn-validate.mode %q is not recognized (expected a supported authentication mode)", path, method, a.Mode)
 	}
 	for i := range a.IssueTokens {
 		token := &a.IssueTokens[i]
@@ -152,9 +165,9 @@ func (a AuthValidateConfig) CredentialSource() (string, error) {
 			return "", fmt.Errorf("session credential source requires a cookie_name")
 		}
 		return "cookie:" + a.CookieName, nil
-	case "mcp", "mcp-account":
+	case "mcp", "mcp-account", authntokens.GrantExchange:
 		return "", fmt.Errorf("MCP ingress requires a dedicated route")
-	case "delegated", "delegated-discovery":
+	case "delegated", "delegated-discovery", authntokens.GrantDiscovery, authntokens.GrantResource:
 		return "header:" + gatewayctx.HeaderCsarAuthorization, nil
 	case "token":
 		return "header:Authorization", nil
@@ -174,4 +187,25 @@ func (a AuthValidateConfig) CredentialSource() (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported authentication method %q", a.Mode)
 	}
+}
+
+func (a *AuthValidateConfig) hasMode(modes ...string) bool {
+	if slices.Contains(modes, a.Mode) {
+		return true
+	}
+	for i := range a.Methods {
+		if slices.Contains(modes, a.Methods[i].Mode) {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateGrantCache also applies when the router builds routes from a coordinator snapshot.
+func (r *RouteConfig) ValidateGrantCache() error {
+	if r.Cache != nil && r.Cache.IsEnabled() && r.AuthValidate != nil &&
+		r.AuthValidate.hasMode(authntokens.GrantExchange, authntokens.GrantDiscovery) {
+		return fmt.Errorf("delegated exchange and discovery routes must reach their owner on every request; disable response caching")
+	}
+	return nil
 }

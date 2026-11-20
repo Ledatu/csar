@@ -1728,6 +1728,7 @@ type AuthValidateConfigProto struct {
 	RequiredScope         string                     `protobuf:"bytes,19,opt,name=required_scope,json=requiredScope,proto3" json:"required_scope,omitempty"`
 	SellerPathParam       string                     `protobuf:"bytes,20,opt,name=seller_path_param,json=sellerPathParam,proto3" json:"seller_path_param,omitempty"`
 	Methods               []*AuthValidateConfigProto `protobuf:"bytes,21,rep,name=methods,proto3" json:"methods,omitempty"`
+	ResourcePathParam     string                     `protobuf:"bytes,22,opt,name=resource_path_param,json=resourcePathParam,proto3" json:"resource_path_param,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -1907,6 +1908,13 @@ func (x *AuthValidateConfigProto) GetMethods() []*AuthValidateConfigProto {
 		return x.Methods
 	}
 	return nil
+}
+
+func (x *AuthValidateConfigProto) GetResourcePathParam() string {
+	if x != nil {
+		return x.ResourcePathParam
+	}
+	return ""
 }
 
 type RetryConfigProto struct {
@@ -4002,7 +4010,7 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x13GlobalThrottleProto\x12\x10\n" +
 	"\x03rps\x18\x01 \x01(\x01R\x03rps\x12\x14\n" +
 	"\x05burst\x18\x02 \x01(\x05R\x05burst\x124\n" +
-	"\bmax_wait\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\amaxWait\"\xb3\b\n" +
+	"\bmax_wait\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\amaxWait\"\xe3\b\n" +
 	"\x17AuthValidateConfigProto\x12\x10\n" +
 	"\x03use\x18\x01 \x01(\tR\x03use\x12\x19\n" +
 	"\bjwks_url\x18\x02 \x01(\tR\ajwksUrl\x12\x16\n" +
@@ -4028,7 +4036,8 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x11introspection_tls\x18\x12 \x01(\tR\x10introspectionTls\x12%\n" +
 	"\x0erequired_scope\x18\x13 \x01(\tR\rrequiredScope\x12*\n" +
 	"\x11seller_path_param\x18\x14 \x01(\tR\x0fsellerPathParam\x12:\n" +
-	"\amethods\x18\x15 \x03(\v2 .csar.v1.AuthValidateConfigProtoR\amethods\x1aA\n" +
+	"\amethods\x18\x15 \x03(\v2 .csar.v1.AuthValidateConfigProtoR\amethods\x12.\n" +
+	"\x13resource_path_param\x18\x16 \x01(\tR\x11resourcePathParam\x1aA\n" +
 	"\x13RequiredClaimsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a@\n" +

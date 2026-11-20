@@ -1182,3 +1182,17 @@ request immediately. A missing/invalid credential is not served from the old
 cache; a backend outage fails closed with a five-second validation retry delay.
 Local rotation/deletion wins over a backend read started earlier. Minted tokens
 retain their separate soft refresh and hard expiry behavior.
+
+## Delegated access for service routes
+
+Configure three named authentication policies with a versioned HTTPS introspection endpoint, verified client TLS, one entry in `audiences`, and a `required_scope`. The issuer implements the JSON request and result in `csar-core/authntokens`.
+
+| Mode | Inbound bearer header | Upstream receives |
+| --- | --- | --- |
+| `grant-exchange` | Authorization | Verified identity and a fresh proof in Authorization over backend mTLS |
+| `grant-discovery` | X-Csar-Authorization | Verified subject and grant ID for the configured catalog owner |
+| `grant-resource` | X-Csar-Authorization | Verified identity and canonical tenant after checking the matched resource |
+
+For example, a documents service can configure `audiences: ["https://documents.example"]`, `required_scope: documents:read`, and `resource_path_param: project_id` on `/projects/{project_id}/files`. Set the route Authz policy to the required action and tenant. A platform-scoped policy can authorize a resource without a tenant. The issuer independently checks the credential, audience, purpose, scope and requested resource. It issues and consumes short-lived one-time proofs. The gateway checks the returned bindings on each request. Discovery and resource routes consume the credential before proxying. Exchange and discovery routes always reach the backend, so the catalog owner can evaluate current access on each call. Response caching is available on authorized resource routes.
+
+Install compatible routers, coordinators and an issuer before distributing the new modes. Existing seller routes continue to use their original protocol until migrated.

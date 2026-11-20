@@ -950,6 +950,7 @@ func authValidateToProto(a *config.AuthValidateConfig) *csarv1.AuthValidateConfi
 		IntrospectionTls:      a.IntrospectionTLS,
 		RequiredScope:         a.RequiredScope,
 		SellerPathParam:       a.SellerPathParam,
+		ResourcePathParam:     a.ResourcePathParam,
 		ForwardHeaders:        a.ForwardHeaders,
 		Issuer:                a.Issuer,
 		Audiences:             a.Audiences,

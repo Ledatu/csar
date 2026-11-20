@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledatu/csar-core/authntokens"
 	"github.com/ledatu/csar-core/gatewayctx"
 	"github.com/ledatu/csar/internal/apierror"
 	"github.com/ledatu/csar/pkg/middleware/authzmw"
@@ -23,11 +24,14 @@ const defaultTokenCacheTTL = 15 * time.Second
 const maxTokenCacheEntries = 10000
 
 type TokenConfig struct {
-	Mode            string
-	Endpoint        string
-	RequiredScope   string
-	SellerPathParam string
-	CacheTTL        time.Duration
+	Mode              string
+	Endpoint          string
+	RequiredScope     string
+	PlatformResource  bool
+	ResourcePathParam string
+	Audiences         []string
+	SellerPathParam   string
+	CacheTTL          time.Duration
 }
 
 type tokenResult struct {
@@ -59,6 +63,9 @@ func NewTokenValidator(logger *slog.Logger, client *http.Client) *TokenValidator
 }
 
 func (v *TokenValidator) Wrap(cfg TokenConfig, next http.Handler) http.Handler {
+	if authntokens.IsDelegation(cfg.Mode) {
+		return v.wrapGrant(cfg, next)
+	}
 	if cfg.CacheTTL <= 0 {
 		cfg.CacheTTL = defaultTokenCacheTTL
 	}
@@ -128,9 +135,7 @@ func (v *TokenValidator) Wrap(cfg TokenConfig, next http.Handler) http.Handler {
 		}
 		// Credentials are consumed at the edge, even if the backend is another
 		// trusted service. Only verified gateway context is forwarded.
-		r.Header.Del("Authorization")
-		r.Header.Del("Cookie")
-		r.Header.Del(gatewayctx.HeaderCsarAuthorization)
+		clearCredentials(r)
 		if cfg.Mode == "mcp" || cfg.Mode == "mcp-account" {
 			if !strings.HasPrefix(result.DelegatedToken, "aurum_dlg_") || len(result.DelegatedToken) != len("aurum_dlg_")+43 {
 				v.reject(w, http.StatusUnauthorized, "delegation unavailable")
@@ -170,26 +175,9 @@ func (v *TokenValidator) introspect(r *http.Request, cfg TokenConfig, raw string
 		}
 		payload["seller_id"] = seller
 	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return tokenResult{}, err
-	}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, cfg.Endpoint, bytes.NewReader(body))
-	if err != nil {
-		return tokenResult{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := v.client.Do(req)
-	if err != nil {
-		return tokenResult{}, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return tokenResult{}, fmt.Errorf("introspection returned HTTP %d", resp.StatusCode)
-	}
 	var result tokenResult
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&result); err != nil {
-		return tokenResult{}, fmt.Errorf("decode introspection: %w", err)
+	if err := v.postIntrospection(r, cfg.Endpoint, payload, &result); err != nil {
+		return tokenResult{}, err
 	}
 	if cacheable && result.Active && result.ExpiresAt.After(now) {
 		expires := now.Add(cfg.CacheTTL)
@@ -222,4 +210,47 @@ func (v *TokenValidator) reject(w http.ResponseWriter, status int, message strin
 		code = apierror.CodeAccessDenied
 	}
 	apierror.New(code, status, message).Write(w)
+}
+
+func clearCredentials(r *http.Request) {
+	r.Header.Del("Authorization")
+	r.Header.Del("Cookie")
+	r.Header.Del(gatewayctx.HeaderCsarAuthorization)
+}
+
+func (v *TokenValidator) postIntrospection(r *http.Request, endpoint string, payload, result any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := v.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("introspection returned HTTP %d", resp.StatusCode)
+	}
+
+	if err := decodeTokenResponse(resp.Body, result); err != nil {
+		return fmt.Errorf("decode introspection: %w", err)
+	}
+	return nil
+}
+
+func decodeTokenResponse(body io.Reader, result any) error {
+	const limit = 16 << 10
+	buf, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return err
+	}
+	if len(buf) > limit {
+		return fmt.Errorf("introspection response too large")
+	}
+	return json.Unmarshal(buf, result)
 }

@@ -125,6 +125,9 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 
 // buildRoute creates and registers a single route from a FlatRoute definition.
 func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *resilience.CircuitBreakerManager, logger *slog.Logger) error {
+	if err := fr.Route.ValidateGrantCache(); err != nil {
+		return fmt.Errorf("route %s %s: %w", fr.Method, fr.Path, err)
+	}
 	// Build proxy options (TLS, SSRF protection, etc.)
 	var proxyOpts []proxy.Option
 	backendTransport, transportKey, err := r.transportRegistry.forBackend(fr.Route.Backend)
@@ -768,11 +771,14 @@ func (r *Router) setupToken(rt *route, fr config.FlatRoute, cfg *config.Config, 
 	}
 	rt.tokenValidator = validator
 	rt.tokenConfig = &authn.TokenConfig{
-		Mode:            fr.Route.AuthValidate.Mode,
-		Endpoint:        fr.Route.AuthValidate.IntrospectionEndpoint,
-		RequiredScope:   fr.Route.AuthValidate.RequiredScope,
-		SellerPathParam: fr.Route.AuthValidate.SellerPathParam,
-		CacheTTL:        fr.Route.AuthValidate.CacheTTL.Duration,
+		Mode:              fr.Route.AuthValidate.Mode,
+		Endpoint:          fr.Route.AuthValidate.IntrospectionEndpoint,
+		RequiredScope:     fr.Route.AuthValidate.RequiredScope,
+		SellerPathParam:   fr.Route.AuthValidate.SellerPathParam,
+		ResourcePathParam: fr.Route.AuthValidate.ResourcePathParam,
+		PlatformResource:  fr.Route.Authz != nil && fr.Route.Authz.ScopeType == "platform" && len(fr.Route.Authz.AnyOf) == 0,
+		Audiences:         fr.Route.AuthValidate.Audiences,
+		CacheTTL:          fr.Route.AuthValidate.CacheTTL.Duration,
 	}
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/ledatu/csar-core/authntokens"
 	"github.com/ledatu/csar/internal/authn"
 	"github.com/ledatu/csar/internal/config"
 )
@@ -54,7 +55,7 @@ func (r *Router) setupTerminalAuthentication(rt *route, fr config.FlatRoute, cfg
 	switch fr.Route.AuthValidate.Mode {
 	case "session":
 		return r.setupSession(rt, fr, cfg, key, logger)
-	case "token", "mcp", "mcp-account", "delegated", "delegated-discovery":
+	case "token", "mcp", "mcp-account", "delegated", "delegated-discovery", authntokens.GrantExchange, authntokens.GrantDiscovery, authntokens.GrantResource:
 		return r.setupToken(rt, fr, cfg, key, logger)
 	case "", "jwt":
 		return r.setupJWT(rt, fr, cfg, key, logger)

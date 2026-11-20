@@ -87,3 +87,68 @@ paths:
 		})
 	}
 }
+
+func TestServiceDelegationPolicy(t *testing.T) {
+	const policy = `
+listen_addr: ":8080"
+backend_tls_policies:
+  issuer-client: {cert_file: client.pem, key_file: client.key}
+authz: {address: "authz:9091"}
+paths:
+  /projects/{project}/documents:
+    get:
+      x-csar-authn-validate:
+        mode: grant-resource
+        required_scope: documents:read
+        audiences: ["https://projects.example"]
+        resource_path_param: project
+        introspection_endpoint: https://projects-issuer/v1/introspect
+        introspection_tls: issuer-client
+      x-csar-authz: {subject: "{header.X-Gateway-Subject}", resource: document, action: read, scope_type: tenant, scope_id: "{header.X-Gateway-Tenant}"}
+      x-csar-backend: {target_url: "https://documents"}
+`
+	if _, err := ParseBytes([]byte(policy)); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, old, new string }{
+		{"absent audience", `audiences: ["https://projects.example"]`, ""},
+		{"ambiguous audience", `audiences: ["https://projects.example"]`, `audiences: [a,b]`},
+		{"unknown route parameter", "resource_path_param: project", "resource_path_param: company"},
+		{"unbound use", "resource_path_param: project", ""},
+		{"unverified issuer", "cert_file: client.pem", "insecure_skip_verify: true, cert_file: client.pem"},
+		{"cached use", "mode: grant-resource", "mode: grant-resource\n        cache_ttl: 1s"},
+		{"no permission policy", `x-csar-authz: {subject: "{header.X-Gateway-Subject}", resource: document, action: read, scope_type: tenant, scope_id: "{header.X-Gateway-Tenant}"}`, ""},
+		{"discovery with resource input", "mode: grant-resource", "mode: grant-discovery"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := ParseBytes([]byte(strings.Replace(policy, tc.old, tc.new, 1))); err == nil {
+				t.Fatal("unsafe delegation policy accepted")
+			}
+		})
+	}
+}
+
+func TestGrantResponseCache(t *testing.T) {
+	disabled := false
+	for _, tc := range []struct {
+		name    string
+		policy  AuthValidateConfig
+		allowed bool
+	}{
+		{"exchange", AuthValidateConfig{Mode: "grant-exchange"}, false},
+		{"discovery", AuthValidateConfig{Mode: "grant-discovery"}, false},
+		{"selected discovery", AuthValidateConfig{Mode: "select", Methods: []AuthValidateConfig{{Mode: "token"}, {Mode: "grant-discovery"}}}, false},
+		{"authorized resource", AuthValidateConfig{Mode: "grant-resource"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			route := RouteConfig{AuthValidate: &tc.policy, Cache: &CacheConfig{}}
+			if err := route.ValidateGrantCache(); (err == nil) != tc.allowed {
+				t.Fatalf("unexpected cache validation: %v", err)
+			}
+			route.Cache.Enabled = &disabled
+			if err := route.ValidateGrantCache(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
