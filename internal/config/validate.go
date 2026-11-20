@@ -269,10 +269,13 @@ func (c *Config) Validate() error {
 				if err := c.validateAuthValidate(route.AuthValidate, path, method); err != nil {
 					return err
 				}
-				if route.AuthValidate.Mode == "mcp" {
+				if route.AuthValidate.Mode == "mcp" || route.AuthValidate.Mode == "mcp-account" {
+					if route.AuthValidate.Mode == "mcp" && route.Authz == nil {
+						return fmt.Errorf("path %s method %s: cabinet MCP delegation requires authorization", path, method)
+					}
 					tls := route.Backend.TLS
-					if route.Authz == nil || tls == nil || tls.InsecureSkipVerify || tls.CertFile == "" || tls.KeyFile == "" {
-						return fmt.Errorf("path %s method %s: forwarding MCP delegation requires authorization and verified backend mTLS", path, method)
+					if tls == nil || tls.InsecureSkipVerify || tls.CertFile == "" || tls.KeyFile == "" {
+						return fmt.Errorf("path %s method %s: forwarding MCP delegation requires verified backend mTLS", path, method)
 					}
 					for _, target := range route.Backend.AllTargets() {
 						if !strings.HasPrefix(target, "https://") {
