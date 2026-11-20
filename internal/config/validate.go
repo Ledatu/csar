@@ -269,6 +269,17 @@ func (c *Config) Validate() error {
 				if err := c.validateAuthValidate(route.AuthValidate, path, method); err != nil {
 					return err
 				}
+				if route.AuthValidate.Mode == "mcp" {
+					tls := route.Backend.TLS
+					if route.Authz == nil || tls == nil || tls.InsecureSkipVerify || tls.CertFile == "" || tls.KeyFile == "" {
+						return fmt.Errorf("path %s method %s: forwarding MCP delegation requires authorization and verified backend mTLS", path, method)
+					}
+					for _, target := range route.Backend.AllTargets() {
+						if !strings.HasPrefix(target, "https://") {
+							return fmt.Errorf("path %s method %s: MCP backend must use HTTPS", path, method)
+						}
+					}
+				}
 			}
 
 			// Validate redact (DLP) config

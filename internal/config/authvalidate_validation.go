@@ -36,7 +36,7 @@ func (c *Config) validateAuthValidate(a *AuthValidateConfig, path, method string
 		if a.CookieName == "" {
 			return fmt.Errorf("path %s method %s: x-csar-authn-validate.cookie_name is required for session mode", path, method)
 		}
-	case "token":
+	case "token", "mcp", "delegated":
 		if len(a.IssueTokens) > 0 || a.CookieName != "" || a.HeaderName != "" || a.TokenPrefix != "" {
 			return fmt.Errorf("path %s method %s: token mode cannot use session or JWT header options", path, method)
 		}
@@ -46,11 +46,18 @@ func (c *Config) validateAuthValidate(a *AuthValidateConfig, path, method string
 		if a.IntrospectionTLS == "" {
 			return fmt.Errorf("path %s method %s: token introspection_tls is required", path, method)
 		}
-		if _, ok := c.BackendTLSPolicies[a.IntrospectionTLS]; !ok {
+		policy, ok := c.BackendTLSPolicies[a.IntrospectionTLS]
+		if !ok {
 			return fmt.Errorf("path %s method %s: token introspection_tls policy not found", path, method)
+		}
+		if a.Mode != "token" && (policy.CertFile == "" || policy.KeyFile == "" || policy.InsecureSkipVerify) {
+			return fmt.Errorf("path %s method %s: %s introspection requires verified mutual TLS", path, method, a.Mode)
 		}
 		if a.RequiredScope == "" {
 			return fmt.Errorf("path %s method %s: token required_scope is required", path, method)
+		}
+		if a.Mode != "token" && a.CacheTTL.Duration != 0 {
+			return fmt.Errorf("path %s method %s: %s credentials require per-request introspection", path, method, a.Mode)
 		}
 		if a.CacheTTL.Duration > 30*time.Second {
 			return fmt.Errorf("path %s method %s: token cache_ttl exceeds 30s", path, method)
@@ -72,7 +79,7 @@ func (c *Config) validateAuthValidate(a *AuthValidateConfig, path, method string
 			}
 		}
 	default:
-		return fmt.Errorf("path %s method %s: x-csar-authn-validate.mode %q is not recognized (expected \"jwt\", \"session\", \"token\", or \"select\")", path, method, a.Mode)
+		return fmt.Errorf("path %s method %s: x-csar-authn-validate.mode %q is not recognized (expected jwt, session, token, mcp, delegated or select)", path, method, a.Mode)
 	}
 	for i := range a.IssueTokens {
 		token := &a.IssueTokens[i]
@@ -145,6 +152,10 @@ func (a AuthValidateConfig) CredentialSource() (string, error) {
 			return "", fmt.Errorf("session credential source requires a cookie_name")
 		}
 		return "cookie:" + a.CookieName, nil
+	case "mcp":
+		return "", fmt.Errorf("MCP ingress requires a dedicated route")
+	case "delegated":
+		return "header:" + gatewayctx.HeaderCsarAuthorization, nil
 	case "token":
 		return "header:Authorization", nil
 	case "", "jwt":
