@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/textproto"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -188,14 +189,23 @@ func (a AuthValidateConfig) CredentialSource() (string, error) {
 	}
 }
 
-func (a AuthValidateConfig) requiresResourceAuthorization() bool {
-	if a.Mode == authntokens.GrantResource {
+func (a *AuthValidateConfig) hasMode(modes ...string) bool {
+	if slices.Contains(modes, a.Mode) {
 		return true
 	}
 	for i := range a.Methods {
-		if a.Methods[i].Mode == authntokens.GrantResource {
+		if slices.Contains(modes, a.Methods[i].Mode) {
 			return true
 		}
 	}
 	return false
+}
+
+// ValidateGrantCache also applies when the router builds routes from a coordinator snapshot.
+func (r *RouteConfig) ValidateGrantCache() error {
+	if r.Cache != nil && r.Cache.IsEnabled() && r.AuthValidate != nil &&
+		r.AuthValidate.hasMode(authntokens.GrantExchange, authntokens.GrantDiscovery) {
+		return fmt.Errorf("delegated exchange and discovery routes must reach their owner on every request; disable response caching")
+	}
+	return nil
 }

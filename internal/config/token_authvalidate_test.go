@@ -127,3 +127,28 @@ paths:
 		})
 	}
 }
+
+func TestGrantResponseCache(t *testing.T) {
+	disabled := false
+	for _, tc := range []struct {
+		name    string
+		policy  AuthValidateConfig
+		allowed bool
+	}{
+		{"exchange", AuthValidateConfig{Mode: "grant-exchange"}, false},
+		{"discovery", AuthValidateConfig{Mode: "grant-discovery"}, false},
+		{"selected discovery", AuthValidateConfig{Mode: "select", Methods: []AuthValidateConfig{{Mode: "token"}, {Mode: "grant-discovery"}}}, false},
+		{"authorized resource", AuthValidateConfig{Mode: "grant-resource"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			route := RouteConfig{AuthValidate: &tc.policy, Cache: &CacheConfig{}}
+			if err := route.ValidateGrantCache(); (err == nil) != tc.allowed {
+				t.Fatalf("unexpected cache validation: %v", err)
+			}
+			route.Cache.Enabled = &disabled
+			if err := route.ValidateGrantCache(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

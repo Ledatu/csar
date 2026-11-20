@@ -271,7 +271,10 @@ func (c *Config) Validate() error {
 				if err := c.validateAuthValidate(route.AuthValidate, path, method); err != nil {
 					return err
 				}
-				if route.Authz == nil && route.AuthValidate.requiresResourceAuthorization() {
+				if err := route.ValidateGrantCache(); err != nil {
+					return fmt.Errorf("path %s method %s: %w", path, method, err)
+				}
+				if route.Authz == nil && route.AuthValidate.hasMode(authntokens.GrantResource) {
 					return fmt.Errorf("path %s method %s: resource delegation requires authorization", path, method)
 				}
 				if route.AuthValidate.Mode == "mcp" || route.AuthValidate.Mode == "mcp-account" || route.AuthValidate.Mode == authntokens.GrantExchange {

@@ -125,6 +125,9 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 
 // buildRoute creates and registers a single route from a FlatRoute definition.
 func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *resilience.CircuitBreakerManager, logger *slog.Logger) error {
+	if err := fr.Route.ValidateGrantCache(); err != nil {
+		return fmt.Errorf("route %s %s: %w", fr.Method, fr.Path, err)
+	}
 	// Build proxy options (TLS, SSRF protection, etc.)
 	var proxyOpts []proxy.Option
 	backendTransport, transportKey, err := r.transportRegistry.forBackend(fr.Route.Backend)
