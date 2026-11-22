@@ -95,16 +95,20 @@ func TestReloadRejectsIncompatibleOriginPolicySnapshot(t *testing.T) {
 }
 
 func TestReloadRejectsLostReleasePolicy(t *testing.T) {
-	rl := newTestReloader(t, reloadTestConfig("http://example.com", nil))
-	rl.policyCapabilities = map[string]uint32{config.AuditReleaseCapability: 1}
-	prior := rl.currentRouter
-	cfg := reloadTestConfig("http://other.example", nil)
-	if err := rl.Apply(cfg); err == nil || rl.currentRouter != prior {
-		t.Fatal("legacy snapshot removed release barrier")
-	}
-	cfg.PolicyVersions = config.PolicyCapabilities()
-	if err := rl.Apply(cfg); err != nil || len(rl.policyCapabilities) != 0 {
-		t.Fatal("explicit policy removal failed", err)
+	for _, capability := range []string{config.AuditReleaseCapability, config.UsageBudgetCapability} {
+		t.Run(capability, func(t *testing.T) {
+			rl := newTestReloader(t, reloadTestConfig("http://example.com", nil))
+			rl.policyCapabilities = map[string]uint32{capability: 1}
+			prior := rl.currentRouter
+			cfg := reloadTestConfig("http://other.example", nil)
+			if err := rl.Apply(cfg); err == nil || rl.currentRouter != prior {
+				t.Fatal("legacy snapshot removed release barrier")
+			}
+			cfg.PolicyVersions = config.PolicyCapabilities()
+			if err := rl.Apply(cfg); err != nil || len(rl.policyCapabilities) != 0 {
+				t.Fatal("explicit policy removal failed", err)
+			}
+		})
 	}
 }
 

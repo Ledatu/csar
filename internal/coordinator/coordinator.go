@@ -375,6 +375,9 @@ func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_Su
 
 	protoRoutes := make([]*csarv1.RouteConfig, 0, len(routes))
 	for i := range routes {
+		if routes[i].Route.UsageBudget != nil && metadata[config.UsageBudgetCapability] != "1" {
+			return status.Error(codes.FailedPrecondition, "router does not support usage budget policies")
+		}
 		if routes[i].Route.AuditRelease && metadata[config.AuditReleaseCapability] != "1" {
 			return status.Error(codes.FailedPrecondition, "router does not support audit release policies")
 		}
@@ -581,6 +584,14 @@ func routeEntryToProto(r *statestore.RouteEntry) *csarv1.RouteConfig {
 	}
 
 	rc.Backend = backendToProto(&r.Route.Backend)
+	if budget := r.Route.UsageBudget; budget != nil {
+		rc.UsageBudgetName = budget.Name
+		rc.UsageBudgetWindow = durationpb.New(budget.Window.Duration)
+		rc.UsageBudgetCaller = budget.Caller
+		rc.UsageBudgetOwner = budget.Owner
+		rc.UsageBudgetOwnerSeller = budget.OwnerSeller
+		rc.UsageBudgetFleet = budget.Fleet
+	}
 
 	if len(r.Route.Security) > 0 {
 		rc.Securities = make([]*csarv1.SecurityConfigProto, 0, len(r.Route.Security))

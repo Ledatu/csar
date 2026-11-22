@@ -195,6 +195,11 @@ func (c *Config) Validate() error {
 	for path, methods := range c.Paths {
 		for method := range methods {
 			route := methods[method]
+			if route.UsageBudget != nil {
+				if err := route.UsageBudget.Validate(); err != nil {
+					return fmt.Errorf("path %s method %s: invalid usage budget: %w", path, method, err)
+				}
+			}
 			if route.OriginReceiver != "" && !caller.ValidReference(route.OriginReceiver) {
 				return fmt.Errorf("path %s method %s: invalid x-csar-origin-receiver", path, method)
 			}

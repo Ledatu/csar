@@ -13,6 +13,7 @@ import (
 	"time"
 
 	auditcore "github.com/ledatu/csar-core/audit"
+	"github.com/ledatu/csar-core/usagebudget"
 	"github.com/ledatu/csar/internal/authn"
 	"github.com/ledatu/csar/internal/authz"
 	"github.com/ledatu/csar/internal/cache"
@@ -89,6 +90,8 @@ type vipOverride struct {
 // It matches incoming requests to configured routes and applies
 // the pipeline: ip_check -> cors -> security_inject -> throttle.Wait -> circuit_breaker -> proxy.Forward.
 type Router struct {
+	usageLimiter              *usagebudget.Limiter
+	usageRedis                *redis.Client
 	originIssuer              RootIssuer
 	originReceivers           map[string]string
 	credentialRejectionRoutes []string
@@ -161,6 +164,9 @@ func (r *Router) RegisteredKeys() []string {
 // Call this before discarding a router instance (e.g. on SIGHUP reload) to prevent
 // goroutine leaks. Safe to call multiple times.
 func (r *Router) Close() {
+	if r.usageRedis != nil {
+		_ = r.usageRedis.Close()
+	}
 	for _, p := range r.pools {
 		p.Stop()
 	}

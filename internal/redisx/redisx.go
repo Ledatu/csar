@@ -13,6 +13,7 @@ import (
 const (
 	SubsystemCache    = "cache"
 	SubsystemThrottle = "throttle"
+	SubsystemUsage    = "usage"
 	SubsystemStartup  = "startup"
 	SubsystemUnknown  = "unknown"
 )

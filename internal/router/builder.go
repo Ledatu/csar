@@ -48,6 +48,9 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 	if err := r.validateOriginSelections(flatRoutes); err != nil {
 		return nil, err
 	}
+	if err := r.setupUsage(cfg); err != nil {
+		return nil, err
+	}
 	selections, selectionErr := credentialRejectionSelections(r.credentialRejectionRoutes, flatRoutes)
 	if selectionErr != nil {
 		return nil, selectionErr
