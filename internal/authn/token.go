@@ -50,6 +50,7 @@ type tokenResult struct {
 
 type tokenCacheEntry struct {
 	result    tokenResult
+	fetchedAt time.Time
 	expiresAt time.Time
 }
 
@@ -170,7 +171,7 @@ func (v *TokenValidator) introspect(r *http.Request, cfg TokenConfig, raw string
 		v.mu.RLock()
 		entry, ok := v.cache[cacheKey]
 		v.mu.RUnlock()
-		if ok && now.Before(entry.expiresAt) {
+		if ok && now.Before(entry.expiresAt) && now.Before(entry.fetchedAt.Add(cfg.CacheTTL)) {
 			return entry.result, nil
 		}
 	}
@@ -198,6 +199,11 @@ func (v *TokenValidator) introspect(r *http.Request, cfg TokenConfig, raw string
 			return tokenResult{}, err // Never cache inconsistent issuer metadata.
 		}
 	}
+	if cacheable && !result.Active {
+		v.mu.Lock()
+		delete(v.cache, cacheKey)
+		v.mu.Unlock()
+	}
 	if cacheable && result.Active && result.ExpiresAt.After(now) {
 		expires := now.Add(cfg.CacheTTL)
 		if result.ExpiresAt.Before(expires) {
@@ -216,7 +222,7 @@ func (v *TokenValidator) introspect(r *http.Request, cfg TokenConfig, raw string
 				v.cache = make(map[string]tokenCacheEntry)
 			}
 		}
-		v.cache[cacheKey] = tokenCacheEntry{result: result, expiresAt: expires}
+		v.cache[cacheKey] = tokenCacheEntry{result: result, fetchedAt: now, expiresAt: expires}
 		v.mu.Unlock()
 	}
 	return result, nil

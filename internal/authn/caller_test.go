@@ -22,6 +22,44 @@ func tokenCaller(kind caller.CredentialKind) *caller.Identity {
 		EffectiveSubject: "user:1", CredentialKind: kind, CredentialID: "key:1", Assurance: caller.Verified}
 }
 
+func TestSharedTokenCacheHonorsCurrentRouteTTL(t *testing.T) {
+	var calls atomic.Int32
+	issuer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		result := tokenResult{Active: calls.Add(1) == 1, Subject: "user:1", CredentialID: "key:1", SellerID: "123",
+			Scopes: []string{"analytics:read"}, ExpiresAt: time.Now().Add(time.Hour), Identity: tokenCaller(caller.APIKey)}
+		if err := json.NewEncoder(w).Encode(result); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer issuer.Close()
+	v := NewTokenValidator(slog.New(slog.NewTextHandler(io.Discard, nil)), issuer.Client())
+	send := func(ttl time.Duration) int {
+		h := v.Wrap(TokenConfig{Mode: "token", Endpoint: issuer.URL, RequiredScope: "analytics:read", CacheTTL: ttl},
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+		r := httptest.NewRequest(http.MethodGet, "/reports/123", nil)
+		r.Header.Set("Authorization", "Bearer aurum_pat_fake")
+		r = r.WithContext(authzmw.WithPathVars(r.Context(), map[string]string{"seller_id": "123"}))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code
+	}
+	if code := send(time.Hour); code != http.StatusNoContent {
+		t.Fatal(code)
+	}
+	v.mu.Lock()
+	for key, entry := range v.cache {
+		entry.fetchedAt = time.Now().Add(-time.Minute)
+		v.cache[key] = entry
+	}
+	v.mu.Unlock()
+	if code := send(time.Second); code != http.StatusUnauthorized || calls.Load() != 2 {
+		t.Fatal("longer-policy cache hid current-route revocation", code, calls.Load())
+	}
+	if code := send(time.Hour); code != http.StatusUnauthorized || calls.Load() != 3 {
+		t.Fatal("observed revocation left a stale positive cache entry", code, calls.Load())
+	}
+}
+
 func TestOpaqueTokenCallerBindingCacheAndLegacy(t *testing.T) {
 	for _, test := range []struct {
 		name, mode string
