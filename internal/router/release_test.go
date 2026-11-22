@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -151,5 +152,31 @@ func TestReleaseWaitsAndCancellationNeverDispatches(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Fatal("cancelled receipt dispatched backend")
+	}
+}
+
+func TestLateProtectedResponseCannotReleaseExpiredData(t *testing.T) {
+	for _, flush := range []bool{false, true} {
+		t.Run(fmt.Sprint(flush), func(t *testing.T) {
+			fresh := true
+			raw := httptest.NewRecorder()
+			guard := &releaseWriter{ResponseWriter: raw, header: make(http.Header), fresh: func() bool { return fresh }}
+			guard.Header().Set("X-Private", "protected-header")
+			guard.Header().Set("Trailer", "X-Private-Trailer")
+			fresh = false // a slow cache/backend completes after the source expires
+			if flush {
+				if err := guard.FlushError(); err == nil {
+					t.Fatal("expired flush succeeded")
+				}
+			}
+			if _, err := guard.Write([]byte("protected-body")); err == nil {
+				t.Fatal("expired body accepted")
+			}
+			guard.Header().Set("X-Private-Trailer", "protected-trailer")
+			guard.finish()
+			if raw.Code != 401 || strings.Contains(raw.Body.String(), "protected-body") || raw.Header().Get("X-Private") != "" || raw.Header().Get("Trailer") != "" || raw.Header().Get("X-Private-Trailer") != "" {
+				t.Fatal("expired response leaked headers/body/trailers", raw)
+			}
+		})
 	}
 }

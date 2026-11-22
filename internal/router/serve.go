@@ -592,7 +592,7 @@ func (r *Router) serveUpstream(w http.ResponseWriter, req *http.Request, rt *rou
 		state.stage = "upstream"
 	}
 	if rt.upstreamTimeout <= 0 || isStreamingRequest(req) {
-		r.upstreamHandler(rt).ServeHTTP(w, req)
+		r.serveProtectedRelease(w, req, rt)
 		return
 	}
 
@@ -600,7 +600,7 @@ func (r *Router) serveUpstream(w http.ResponseWriter, req *http.Request, rt *rou
 	defer cancel()
 	req = req.WithContext(ctx)
 	w.Header().Set("X-CSAR-Upstream-Timeout-MS", strconv.FormatInt(rt.upstreamTimeout.Milliseconds(), 10))
-	r.upstreamHandler(rt).ServeHTTP(w, req)
+	r.serveProtectedRelease(w, req, rt)
 }
 
 // upstreamHandler returns the handler that proxies to the upstream.
