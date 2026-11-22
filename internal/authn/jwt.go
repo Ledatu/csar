@@ -32,6 +32,9 @@ import (
 
 // Config configures JWT validation for a route.
 type Config struct {
+	// OriginReceiver is the explicit backend service principal, separate from
+	// accepted access-token audiences. Empty retains legacy audience binding.
+	OriginReceiver string
 	// JWKSURL is the endpoint serving the JSON Web Key Set.
 	JWKSURL string
 

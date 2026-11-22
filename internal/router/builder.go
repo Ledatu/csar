@@ -45,6 +45,9 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 		}
 	}()
 	flatRoutes := cfg.FlatRoutes()
+	if err := r.validateOriginSelections(flatRoutes); err != nil {
+		return nil, err
+	}
 	selections, selectionErr := credentialRejectionSelections(r.credentialRejectionRoutes, flatRoutes)
 	if selectionErr != nil {
 		return nil, selectionErr
@@ -329,6 +332,9 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 		)
 	}
 
+	if err := r.checkOriginRoute(rt, backendTransport); err != nil {
+		return err
+	}
 	if rt.pathPattern != nil {
 		r.regexRoutes = append(r.regexRoutes, rt)
 	} else {
@@ -691,6 +697,7 @@ func (r *Router) setupJWT(rt *route, fr config.FlatRoute, cfg *config.Config, ke
 
 	rt.jwtValidator = jv
 	rt.jwtConfig = &authn.Config{
+		OriginReceiver: r.originReceivers[key],
 		JWKSURL:        fr.Route.AuthValidate.JWKSURL,
 		Issuer:         fr.Route.AuthValidate.Issuer,
 		Audiences:      fr.Route.AuthValidate.Audiences,

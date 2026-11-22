@@ -23,14 +23,22 @@ func (v *JWTValidator) verifyOrigin(r *http.Request, cfg Config, keyFunc func(st
 	if len(values) == 0 {
 		return r, nil
 	}
-	if len(values) != 1 || cfg.Issuer == "" || len(cfg.Audiences) != 1 || !strings.HasPrefix(values[0], "Bearer ") {
+	if len(values) != 1 || cfg.Issuer == "" || !strings.HasPrefix(values[0], "Bearer ") {
 		return nil, origincontext.ErrInvalid
+	}
+	receiver := cfg.OriginReceiver
+	if receiver == "" {
+		if len(cfg.Audiences) != 1 {
+			return nil, origincontext.ErrInvalid
+		}
+		receiver = cfg.Audiences[0]
 	}
 	id, err := gatewayctx.CallerFromHeaders(r.Header)
 	if err != nil || id == nil || id.CallerKind != caller.Service || id.CredentialKind != caller.STS || id.CallerID != id.EffectiveSubject {
 		return nil, origincontext.ErrInvalid
 	}
-	claims, err := origincontext.Verify(strings.TrimPrefix(values[0], "Bearer "), keyFunc, cfg.Issuer, cfg.Audiences[0])
+	token := strings.TrimPrefix(values[0], "Bearer ")
+	claims, err := origincontext.Verify(token, keyFunc, cfg.Issuer, receiver)
 	if err != nil {
 		return nil, err
 	}
@@ -38,7 +46,7 @@ func (v *JWTValidator) verifyOrigin(r *http.Request, cfg Config, keyFunc func(st
 	if err != nil || claims.CheckHop(id.CallerID, claims.Resource, hash) != nil {
 		return nil, origincontext.ErrInvalid
 	}
-	return r.WithContext(origincontext.WithVerified(r.Context(), claims)), nil
+	return r.WithContext(origincontext.WithVerifiedProof(r.Context(), &origincontext.Proof{Token: token, Claims: claims})), nil
 }
 
 // RejectUnconsumedOrigin prevents attribution credentials on unsupported auth
