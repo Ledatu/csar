@@ -264,8 +264,17 @@ func TestResponseCache_POSTReadFailure(t *testing.T) {
 	}
 }
 
+type postFollowerBarrier struct{ joined chan struct{} }
+
+func (b postFollowerBarrier) RecordResponseCache(_, event string) {
+	if event == "coalesced_follower" {
+		b.joined <- struct{}{}
+	}
+}
+
 func TestResponseCache_POSTCoalesce(t *testing.T) {
-	rc := NewResponseCache(slog.Default())
+	followers := make(chan struct{}, 2)
+	rc := NewResponseCache(slog.Default(), WithStatsRecorder(postFollowerBarrier{joined: followers}))
 	var calls atomic.Int64
 	started := make(chan struct{}, 2)
 	release := make(chan struct{})
@@ -297,6 +306,17 @@ func TestResponseCache_POSTCoalesce(t *testing.T) {
 			close(release)
 			wg.Wait()
 			t.Fatal("different bodies were coalesced")
+		}
+	}
+	// Leaders alone do not prove overlap: a delayed goroutine can arrive after
+	// completion and correctly start a third call. Require both followers first.
+	for range 2 {
+		select {
+		case <-followers:
+		case <-time.After(time.Second):
+			close(release)
+			wg.Wait()
+			t.Fatal("same-body followers did not join")
 		}
 	}
 	close(release)
