@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/ledatu/csar-core/caller"
@@ -13,6 +14,7 @@ import (
 	"github.com/ledatu/csar/internal/apierror"
 	"github.com/ledatu/csar/internal/authn"
 	"github.com/ledatu/csar/internal/config"
+	"github.com/ledatu/csar/internal/throttle"
 	"github.com/ledatu/csar/pkg/middleware/authzmw"
 )
 
@@ -80,6 +82,10 @@ func (r *Router) forwardOrigin(rt *route, next http.Handler) http.Handler {
 		}
 		proof, present := origincontext.ProofFromContext(req.Context())
 		if !present {
+			if _, hasOrigin := origincontext.FromContext(req.Context()); hasOrigin {
+				apierror.New(apierror.CodeUpstreamError, http.StatusBadGateway, "verified origin credential unavailable").Write(w)
+				return
+			}
 			hash, hashErr := origincontext.RequestHash(req)
 			if hashErr != nil {
 				apierror.New(apierror.CodeAuthFailed, http.StatusBadRequest, "request cannot carry origin context").Write(w)
@@ -134,8 +140,8 @@ func (w *originResponseWriter) Write(body []byte) (int, error) {
 
 func (r *Router) validateOriginSelections(routes []config.FlatRoute) error {
 	known := make(map[string]bool, len(routes))
-	for _, rt := range routes {
-		known[rt.Method+":"+rt.Path] = true
+	for i := range routes {
+		known[throttle.RouteKey(strings.ToUpper(routes[i].Method), routes[i].Path)] = true
 	}
 	for key := range r.originReceivers {
 		if !known[key] {
