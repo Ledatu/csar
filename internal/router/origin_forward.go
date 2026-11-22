@@ -62,9 +62,9 @@ func (r *Router) checkOriginRoute(rt *route, transport http.RoundTripper) error 
 	return nil
 }
 
-func (r *Router) originSource(req *http.Request) (*authn.Source, string, error) {
+func (r *Router) verifiedTenantSource(req *http.Request) (*authn.Source, string, error) {
 	source, ok := authn.SourceFromContext(req.Context())
-	if !ok || source.Caller == nil || !time.Now().Before(source.ValidUntil) {
+	if !ok || req.Context().Err() != nil || source.Caller == nil || !time.Now().Before(source.ValidUntil) {
 		return nil, "", origincontext.ErrInvalid
 	}
 	id, err := gatewayctx.CallerFromHeaders(req.Header)
@@ -81,7 +81,7 @@ func (r *Router) forwardOrigin(rt *route, next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		source, resource, err := r.originSource(req)
+		source, resource, err := r.verifiedTenantSource(req)
 		if err != nil {
 			apierror.New(apierror.CodeAuthFailed, http.StatusUnauthorized, "verified origin source expired or unavailable").Write(w)
 			return

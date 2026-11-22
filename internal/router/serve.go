@@ -575,7 +575,7 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 
 func (r *Router) serveUpstream(w http.ResponseWriter, req *http.Request, rt *route) {
 	if r.originReceivers[rt.routeKey] != "" {
-		_, resource, err := r.originSource(req)
+		_, resource, err := r.verifiedTenantSource(req)
 		if err != nil || isStreamingRequest(req) {
 			apierror.New(apierror.CodeAuthFailed, http.StatusUnauthorized, "verified origin source expired or unsupported").Write(w)
 			return

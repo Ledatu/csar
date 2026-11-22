@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/ledatu/csar-core/caller"
+	"github.com/ledatu/csar-core/origincontext"
 	"github.com/ledatu/csar-core/usagebudget"
 	"github.com/ledatu/csar/internal/apierror"
 	"github.com/ledatu/csar/internal/config"
 	"github.com/ledatu/csar/internal/redisx"
-	"github.com/ledatu/csar/pkg/middleware/authzmw"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -72,15 +72,14 @@ func (r *Router) admitUsage(w http.ResponseWriter, req *http.Request, rt *route)
 		return true
 	}
 	auditStage(req, "usage_admission")
-	state := auditState(req)
-	scope, allowed := authzmw.ScopeFromContext(req.Context())
-	if state == nil || !state.verified || !allowed || scope.Type != "tenant" || scope.ID == "" || !caller.ValidReference(scope.ID) {
+	source, resource, sourceErr := r.verifiedTenantSource(req)
+	if sourceErr != nil || !caller.ValidReference(resource) {
 		apierror.New("caller_context_required", http.StatusForbidden, "usage admission requires verified tenant context").Write(w)
 		return false
 	}
-	principal := state.identity.Caller
-	if state.originCaller != nil {
-		principal = state.originCaller
+	principal := source.Caller
+	if origin, present := origincontext.FromContext(req.Context()); present {
+		principal = origin.Origin
 	}
 	if principal == nil || principal.CallerID == "" || principal.Assurance != caller.Verified {
 		apierror.New("caller_context_required", http.StatusForbidden, "usage admission requires registered caller metadata").Write(w)
@@ -94,7 +93,7 @@ func (r *Router) admitUsage(w http.ResponseWriter, req *http.Request, rt *route)
 		apierror.New("caller_context_required", http.StatusForbidden, "usage admission requires verified owner").Write(w)
 		return false
 	}
-	request := policy.Request(string(principal.CallerKind)+":"+principal.CallerID, owner, scope.ID)
+	request := policy.Request(string(principal.CallerKind)+":"+principal.CallerID, owner, resource)
 	err := r.usageLimiter.Take(redisx.WithSubsystem(req.Context(), redisx.SubsystemUsage), request)
 	if err == nil {
 		return true
