@@ -317,28 +317,6 @@ func TestThrottleManager_RegisterWaiter(t *testing.T) {
 	}
 }
 
-func TestThrottleManager_GlobalThrottle(t *testing.T) {
-	m := NewManager()
-
-	// Before setting
-	if m.GetGlobal() != nil {
-		t.Error("GetGlobal should return nil before setting")
-	}
-
-	// After setting
-	m.SetGlobal(1000, 2000, 0)
-	g := m.GetGlobal()
-	if g == nil {
-		t.Fatal("GetGlobal should return non-nil after setting")
-	}
-
-	// Should be usable
-	ctx := context.Background()
-	if err := g.Wait(ctx); err != nil {
-		t.Fatalf("global throttle Wait failed: %v", err)
-	}
-}
-
 func TestThrottleManager_UpdateQuota_Waiter(t *testing.T) {
 	m := NewManager()
 	th := New(1, 1, time.Second)

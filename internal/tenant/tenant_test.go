@@ -6,11 +6,35 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
 func newTestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestTenantNotFoundEscapesUntrustedIdentifier(t *testing.T) {
+	tr := NewRouter(newTestLogger())
+	h := tr.Proxy(Config{Header: "X-Tenant-ID"}, nil)
+	want := "tenant<>&\"\\\x01suffix"
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	req.Header.Set("X-Tenant-ID", want)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	var body struct {
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("error response is not valid JSON: %v", err)
+	}
+	if rr.Code != http.StatusNotFound || body.Code != "tenant_not_found" || body.Detail != want {
+		t.Fatal("tenant-not-found response changed the identifier or status")
+	}
+	if strings.ContainsAny(rr.Body.String(), "<>&") {
+		t.Fatal("untrusted markup was not escaped")
+	}
 }
 
 func TestRouter_Resolve_ByCustomHeader(t *testing.T) {

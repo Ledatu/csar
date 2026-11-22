@@ -27,10 +27,6 @@ linters:
     - nilerr
     - sqlclosecheck
   settings:
-    gosec:
-      excludes:
-        # G114: net/http server missing timeouts — we set them explicitly.
-        - G114
     gocritic:
       enabled-checks:
         - appendCombine

@@ -35,7 +35,6 @@ import (
 	"github.com/ledatu/csar-core/ycloud"
 	credentialv1 "github.com/ledatu/csar-proto/csar/credential/v1"
 
-	csarcfg "github.com/ledatu/csar/internal/config"
 	csarcsrc "github.com/ledatu/csar/internal/configsource"
 	"github.com/ledatu/csar/internal/coordinator"
 	"github.com/ledatu/csar/internal/kms"
@@ -185,9 +184,14 @@ func main() {
 		logger.Error("unknown state store type", "store", *storeType)
 		os.Exit(1)
 	}
-	defer store.Close()
+	closeStore := func() {
+		if err := store.Close(); err != nil {
+			logger.Error("closing state store", "error", err)
+		}
+	}
+	defer closeStore()
 
-	// Create coordinator (before config watcher so we can wire the OnConfigParsed callback).
+	// Create coordinator before wiring the successful-config-apply callback.
 	coord := coordinator.New(store, logger)
 	coord.SetInvalidationBufferSize(*invalidationBufferSize)
 	coord.SetSnapshotDebounce(*snapshotDebounce)
@@ -199,8 +203,8 @@ func main() {
 		src, err := configsource.BuildSource(&srcParams, logger)
 		if err != nil {
 			logger.Error("failed to build config source", "error", err)
-			store.Close()
-			os.Exit(1) //nolint:gocritic // exitAfterDefer: store.Close() called explicitly above
+			closeStore()
+			os.Exit(1) //nolint:gocritic // exitAfterDefer: closeStore() called explicitly above
 		}
 
 		watcherOpts := cfgFlags.WatcherOptions()
@@ -214,9 +218,7 @@ func main() {
 			src, store,
 			logger.With("component", "config_watcher"),
 			[]csarcsrc.WatcherOption{
-				csarcsrc.WithOnConfigParsed(func(cfg *csarcfg.Config) {
-					coord.SetTopLevelConfig(cfg)
-				}),
+				csarcsrc.WithOnConfigApplied(coord.SetTopLevelConfig),
 			},
 			watcherOpts...,
 		)
@@ -226,7 +228,7 @@ func main() {
 		if _, err := configWatcher.Apply(initCtx); err != nil {
 			initCancel()
 			logger.Error("initial config load failed", "error", err)
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 		initCancel()
@@ -265,13 +267,13 @@ func main() {
 	case "postgres":
 		if *postgresDSN == "" {
 			logger.Error("--token-source=postgres requires --postgres-dsn")
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 		db, err := sql.Open("postgres", *postgresDSN)
 		if err != nil {
 			logger.Error("failed to open postgres connection", "error", err)
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 		db.SetMaxOpenConns(*postgresMaxConns)
@@ -282,9 +284,11 @@ func main() {
 		pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := db.PingContext(pingCtx); err != nil {
 			pingCancel()
-			db.Close()
+			if closeErr := db.Close(); closeErr != nil {
+				logger.Error("closing failed database connection", "error", closeErr)
+			}
 			logger.Error("postgres ping failed", "error", err)
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 		pingCancel()
@@ -296,7 +300,7 @@ func main() {
 		entries, err := pgStore.LoadAll(context.Background())
 		if err != nil {
 			logger.Error("failed to load tokens from token store", "error", err)
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 		loaded := authSvc.LoadTokensFromMap(entries)
@@ -320,7 +324,7 @@ func main() {
 	case "s3":
 		if *s3Bucket == "" {
 			logger.Error("--token-source=s3 requires --s3-bucket")
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 
@@ -340,7 +344,7 @@ func main() {
 		}, logger)
 		if err != nil {
 			logger.Error("failed to create S3 client", "error", err)
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 
@@ -365,7 +369,7 @@ func main() {
 			entries, err := loadCoordinatorTokenFile(*tokenFile)
 			if err != nil {
 				logger.Error("failed to load coordinator token file", "error", err)
-				store.Close()
+				closeStore()
 				os.Exit(1)
 			}
 			loaded := authSvc.LoadTokensFromMap(entries)
@@ -374,7 +378,7 @@ func main() {
 			if err := authSvc.Validate(); err != nil {
 				logger.Error("AuthService token store is empty after loading token file — "+
 					"check file format and contents", "file", *tokenFile, "error", err)
-				store.Close()
+				closeStore()
 				os.Exit(1)
 			}
 		} else {
@@ -387,7 +391,7 @@ func main() {
 		logger.Error("unknown --token-source value; supported: \"file\", \"postgres\", \"s3\"",
 			"token_source", resolvedTokenSource,
 		)
-		store.Close()
+		closeStore()
 		os.Exit(1)
 	}
 
@@ -422,7 +426,7 @@ func main() {
 	if *tokenMintConfig != "" {
 		if resolvedTokenSource != "s3" {
 			logger.Error("--token-mint-config requires --token-source=s3", "token_source", resolvedTokenSource)
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 		// A minted bearer is plaintext by construction; there is no ciphertext
@@ -431,14 +435,14 @@ func main() {
 			logger.Error("--token-mint-config requires --s3-kms-mode=passthrough (minted tokens carry no ciphertext)",
 				"s3_kms_mode", *s3KMSMode,
 			)
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 
 		loadedCfg, err := tokenmint.LoadConfigFile(*tokenMintConfig)
 		if err != nil {
 			logger.Error("failed to load token mint config", "path", *tokenMintConfig, "error", err)
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 		mintCfg = loadedCfg
@@ -447,7 +451,7 @@ func main() {
 			mintCfg.AllowPrivate = true
 			if err := mintCfg.Validate(); err != nil {
 				logger.Error("token mint config is invalid with --token-mint-allow-private", "error", err)
-				store.Close()
+				closeStore()
 				os.Exit(1)
 			}
 			logger.Warn("WARNING: token minting will accept plain HTTP and internal addresses. " +
@@ -465,7 +469,7 @@ func main() {
 		minter, err := tokenmint.New(mintCfg, logger.With("component", "token_minter"))
 		if err != nil {
 			logger.Error("failed to create token minter", "error", err)
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 
@@ -496,7 +500,7 @@ func main() {
 	allowlist := parseAllowlist(*allowedRouters)
 	if len(allowlist) > 0 && (*tlsCert == "" || *tlsKey == "" || *clientCA == "") {
 		logger.Error("--allowed-routers requires --tls-cert, --tls-key, and --client-ca to be set (mTLS must be enabled for identity verification)")
-		store.Close()
+		closeStore()
 		os.Exit(1)
 	}
 
@@ -504,7 +508,7 @@ func main() {
 		tlsCfg, err := buildTLSConfig(*tlsCert, *tlsKey, *clientCA)
 		if err != nil {
 			logger.Error("failed to build TLS config", "error", err)
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 		serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(tlsCfg)))
@@ -525,7 +529,7 @@ func main() {
 		if !*allowInsecureDev {
 			logger.Error("TLS is required by default. Provide --tls-cert and --tls-key, " +
 				"or pass --allow-insecure-dev to run without TLS (development only).")
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 		logger.Warn("WARNING: gRPC server running WITHOUT TLS — secrets will be transmitted in plaintext. " +
@@ -541,7 +545,7 @@ func main() {
 		logger.Error("AuthService has no tokens loaded in production mode (TLS enabled). " +
 			"Provide --token-file with pre-encrypted token entries. " +
 			"This prevents runtime failures when routers request tokens.")
-		store.Close()
+		closeStore()
 		os.Exit(1)
 	}
 
@@ -567,7 +571,7 @@ func main() {
 	lis, err := net.Listen("tcp", *listenAddr)
 	if err != nil {
 		logger.Error("failed to listen", "error", err)
-		store.Close()
+		closeStore()
 		os.Exit(1)
 	}
 
@@ -583,7 +587,7 @@ func main() {
 		})
 		if err != nil {
 			logger.Error("health sidecar", "error", err)
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 		go func() {
@@ -617,12 +621,12 @@ func main() {
 		case "":
 			logger.Error("--admin-s3-manages-encryption is REQUIRED when admin API is enabled. " +
 				"Set to 'true' (S3 SSE handles encryption) or 'false' (CSAR KMS encrypts before S3 write).")
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		default:
 			logger.Error("--admin-s3-manages-encryption must be 'true' or 'false'",
 				"value", *adminS3ManagesEncryptionStr)
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 
@@ -669,7 +673,7 @@ func main() {
 
 		if err := adminCfg.Validate(); err != nil {
 			logger.Error("admin API configuration invalid", "error", err)
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 
@@ -678,7 +682,7 @@ func main() {
 		if !ok || tokenStore == nil {
 			logger.Error("admin API requires a mutable token store backend (currently only S3 is supported). " +
 				"Use --token-source=s3 with --s3-bucket.")
-			store.Close()
+			closeStore()
 			os.Exit(1)
 		}
 
@@ -692,10 +696,14 @@ func main() {
 				*adminKMSYandexSAKeyFile)
 			if err != nil {
 				logger.Error("failed to initialize KMS provider for admin API", "error", err)
-				store.Close()
+				closeStore()
 				os.Exit(1)
 			}
-			defer kmsProvider.Close()
+			defer func() {
+				if err := kmsProvider.Close(); err != nil {
+					logger.Error("closing KMS provider", "error", err)
+				}
+			}()
 			logger.Info("KMS provider initialized for admin API", "provider", kmsProvider.Name())
 		}
 
@@ -755,10 +763,14 @@ func main() {
 			cancel()
 		}
 		if adminSrv != nil {
-			adminSrv.Shutdown() //nolint:errcheck
+			if err := adminSrv.Shutdown(); err != nil {
+				logger.Error("admin server shutdown error", "error", err)
+			}
 		}
 		if tokenStore != nil {
-			tokenStore.Close()
+			if err := tokenStore.Close(); err != nil {
+				logger.Error("token store shutdown error", "error", err)
+			}
 		}
 		srv.GracefulStop()
 	}()
@@ -766,7 +778,7 @@ func main() {
 	logger.Info(fmt.Sprintf("coordinator listening on %s", *listenAddr))
 	if err := srv.Serve(lis); err != nil {
 		logger.Error("gRPC server error", "error", err)
-		store.Close()
+		closeStore()
 		os.Exit(1)
 	}
 }
@@ -785,7 +797,7 @@ func buildTLSConfig(certFile, keyFile, clientCAFile string) (*tls.Config, error)
 	}
 
 	if clientCAFile != "" {
-		caCert, err := os.ReadFile(clientCAFile)
+		caCert, err := os.ReadFile(clientCAFile) // #nosec G304 -- Operator-configured local token or CA file; not supplied by an incoming request.
 		if err != nil {
 			return nil, fmt.Errorf("reading client CA file: %w", err)
 		}
@@ -915,7 +927,7 @@ type coordinatorTokenFileEntry struct {
 //	  encrypted_token: "<base64-encoded ciphertext>"
 //	  kms_key_id: "key-1"
 func loadCoordinatorTokenFile(path string) (map[string]coordinator.TokenEntry, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- Operator-configured local token or CA file; not supplied by an incoming request.
 	if err != nil {
 		return nil, fmt.Errorf("reading token file %s: %w", path, err)
 	}

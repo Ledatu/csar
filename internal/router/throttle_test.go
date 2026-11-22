@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,45 @@ import (
 	"github.com/ledatu/csar/internal/config"
 	"github.com/ledatu/csar/internal/throttle"
 )
+
+func TestFailedBuildPreservesLiveQuotaRegistry(t *testing.T) {
+	shared := throttle.NewManager()
+	makeConfig := func(rps float64) *config.Config {
+		return newTestConfig(map[string]config.PathConfig{
+			"/test": {"get": {
+				Backend: config.BackendConfig{TargetURL: "https://upstream.example"},
+				Traffic: &config.TrafficConfig{RPS: rps, Burst: 1},
+			}},
+		})
+	}
+	live, err := New(makeConfig(1), newTestLogger(), WithThrottleManager(shared))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer live.Close()
+	waiter := live.GetThrottler("GET", "/test")
+	invalid := makeConfig(1000)
+	mode := config.AuditModeAll
+	route := invalid.Paths["/test"]["get"]
+	route.Audit = &mode // Fails after throttle registration because no audit client exists.
+	invalid.Paths["/test"]["get"] = route
+	if _, err := New(invalid, newTestLogger(), WithThrottleManager(shared)); err == nil {
+		t.Fatal("invalid router build succeeded")
+	}
+	if got := shared.Get("GET:/test"); got != waiter {
+		t.Fatal("failed build redirected quota updates away from the live waiter")
+	}
+	if !shared.UpdateQuota("GET:/test", 1000, 10) {
+		t.Fatal("live route stopped receiving quota assignments")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	for range 5 {
+		if err := waiter.Wait(ctx); err != nil {
+			t.Fatalf("updated quota did not reach the live waiter: %v", err)
+		}
+	}
+}
 
 func TestRouter_WithThrottle_Passes(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

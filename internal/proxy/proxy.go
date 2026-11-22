@@ -357,7 +357,7 @@ func buildClientTLSConfig(cfg *TLSConfig) (*tls.Config, error) {
 		return nil, nil
 	}
 	tlsCfg := &tls.Config{
-		InsecureSkipVerify: cfg.InsecureSkipVerify, //nolint:gosec // configurable per-backend
+		InsecureSkipVerify: cfg.InsecureSkipVerify, // #nosec G402 -- Operator opt-out; prod validation rejects it when forbid_insecure_in_prod is enabled.
 	}
 
 	// Custom CA bundle

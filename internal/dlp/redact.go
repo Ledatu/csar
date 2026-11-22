@@ -105,7 +105,7 @@ func (rd *Redactor) Wrap(cfg Config, next http.Handler) http.Handler {
 			)
 			w.Header().Set("X-CSAR-DLP-Warning", "response too large for redaction")
 			w.WriteHeader(http.StatusBadGateway)
-			fmt.Fprintf(w, `{"code":"response_too_large","status":502,"message":"response too large for DLP processing","detail":"max_bytes: %d"}`, maxSize)
+			_, _ = fmt.Fprintf(w, `{"code":"response_too_large","status":502,"message":"response too large for DLP processing","detail":"max_bytes: %d"}`, maxSize)
 			return
 		}
 
@@ -116,7 +116,7 @@ func (rd *Redactor) Wrap(cfg Config, next http.Handler) http.Handler {
 		if !isJSON(ct) || len(body) == 0 {
 			// Write the response as-is.
 			w.WriteHeader(capture.statusCode)
-			w.Write(body) //nolint:errcheck
+			_, _ = w.Write(body) // Response is committed; a client disconnect cannot be recovered here.
 			return
 		}
 
@@ -128,7 +128,7 @@ func (rd *Redactor) Wrap(cfg Config, next http.Handler) http.Handler {
 				"content_type", ct,
 			)
 			w.WriteHeader(capture.statusCode)
-			w.Write(body) //nolint:errcheck
+			_, _ = w.Write(body) // Response is committed; a client disconnect cannot be recovered here.
 			return
 		}
 
@@ -143,7 +143,7 @@ func (rd *Redactor) Wrap(cfg Config, next http.Handler) http.Handler {
 		if !redacted {
 			// No fields matched — write original body to avoid re-serialization overhead.
 			w.WriteHeader(capture.statusCode)
-			w.Write(body) //nolint:errcheck
+			_, _ = w.Write(body) // Response is committed; a client disconnect cannot be recovered here.
 			return
 		}
 
@@ -152,14 +152,14 @@ func (rd *Redactor) Wrap(cfg Config, next http.Handler) http.Handler {
 		if err != nil {
 			rd.logger.Error("DLP: failed to re-serialize redacted response", "error", err)
 			w.WriteHeader(capture.statusCode)
-			w.Write(body) //nolint:errcheck
+			_, _ = w.Write(body) // Response is committed; a client disconnect cannot be recovered here.
 			return
 		}
 
 		// Update Content-Length and write.
 		w.Header().Del("Content-Length")
 		w.WriteHeader(capture.statusCode)
-		w.Write(redactedBody) //nolint:errcheck
+		_, _ = w.Write(redactedBody) // Response is committed; a client disconnect cannot be recovered here.
 
 		rd.logger.Debug("DLP: redacted response fields",
 			"fields", cfg.Fields,

@@ -49,7 +49,9 @@ func New(cfg *config.AuditClientConfig, logger *slog.Logger) (*Client, error) {
 		Transport: transport,
 	}, logger)
 	if err != nil {
-		conn.Close()
+		if closeErr := conn.Close(); closeErr != nil {
+			logger.Warn("closing unused audit connection", "error", closeErr)
+		}
 		return nil, fmt.Errorf("audit: creating client: %w", err)
 	}
 

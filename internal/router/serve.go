@@ -346,7 +346,7 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 	}
 
 	// Step 0: Global throttle (fast in-memory counter, checked first)
-	if globalT := r.throttleManager.GetGlobal(); globalT != nil {
+	if globalT := r.globalThrottle; globalT != nil {
 		waitStart := time.Now()
 		if err := globalT.Wait(req.Context()); err != nil {
 			r.logger.Warn("request throttled by global limit",

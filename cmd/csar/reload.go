@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledatu/csar/internal/config"
 	"github.com/ledatu/csar/internal/coordclient"
+	"github.com/ledatu/csar/internal/proxy"
 	"github.com/ledatu/csar/internal/router"
 	"github.com/ledatu/csar/internal/telemetry"
 	"github.com/ledatu/csar/internal/throttle"
@@ -35,69 +36,6 @@ func (rh *reloadableHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // swap atomically replaces the current handler.
 func (rh *reloadableHandler) swap(h http.Handler) {
 	rh.handler.Store(&h)
-}
-
-// ---------------------------------------------------------------------------
-// Restart-required field detection (reload-awareness)
-// ---------------------------------------------------------------------------
-
-// restartRequiredSnapshot captures config field values that cannot be changed
-// at runtime and require a full process restart.
-type restartRequiredSnapshot struct {
-	ListenAddr  string
-	KMSProvider string
-	TLSCertFile string
-	TLSKeyFile  string
-	Profile     string
-}
-
-// snapshotRestartRequiredFields takes a snapshot of fields that need a restart
-// to take effect. Compare with the new config on SIGHUP.
-func snapshotRestartRequiredFields(cfg *config.Config) restartRequiredSnapshot {
-	snap := restartRequiredSnapshot{
-		ListenAddr: cfg.ListenAddr,
-		Profile:    cfg.Profile,
-	}
-	if cfg.KMS != nil {
-		snap.KMSProvider = cfg.KMS.Provider
-	}
-	if cfg.TLS != nil {
-		snap.TLSCertFile = cfg.TLS.CertFile
-		snap.TLSKeyFile = cfg.TLS.KeyFile
-	}
-	return snap
-}
-
-// checkRestartRequiredChanges compares the snapshot with the new config and
-// logs warnings for fields that changed but require a restart to take effect.
-func checkRestartRequiredChanges(logger *slog.Logger, snap restartRequiredSnapshot, newCfg *config.Config) {
-	if newCfg.ListenAddr != snap.ListenAddr {
-		logger.Warn("field 'listen_addr' changed but requires restart to take effect",
-			"old", snap.ListenAddr, "new", newCfg.ListenAddr)
-	}
-	if newCfg.Profile != snap.Profile {
-		logger.Warn("field 'profile' changed but requires restart to take effect",
-			"old", snap.Profile, "new", newCfg.Profile)
-	}
-
-	newKMS := ""
-	if newCfg.KMS != nil {
-		newKMS = newCfg.KMS.Provider
-	}
-	if newKMS != snap.KMSProvider {
-		logger.Warn("field 'kms.provider' changed but requires restart to take effect",
-			"old", snap.KMSProvider, "new", newKMS)
-	}
-
-	newCert, newKey := "", ""
-	if newCfg.TLS != nil {
-		newCert = newCfg.TLS.CertFile
-		newKey = newCfg.TLS.KeyFile
-	}
-	if newCert != snap.TLSCertFile || newKey != snap.TLSKeyFile {
-		logger.Warn("TLS certificate paths changed but require restart to take effect",
-			"old_cert", snap.TLSCertFile, "new_cert", newCert)
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -175,29 +113,70 @@ func logStartupSummary(logger *slog.Logger, cfg *config.Config, r *router.Router
 // routerReloader implements coordclient.ConfigApplier by rebuilding the router
 // from a new config and atomically swapping the HTTP handler.
 type routerReloader struct {
-	mu            sync.Mutex
-	logger        *slog.Logger
-	routerOpts    []router.Option
-	reloadHandler *reloadableHandler
-	tp            *telemetry.Provider
-	sharedTM      *throttle.ThrottleManager
-	currentRouter *router.Router
+	mu              sync.Mutex
+	logger          *slog.Logger
+	routerOpts      []router.Option
+	reloadHandler   *reloadableHandler
+	tp              *telemetry.Provider
+	sharedTM        *throttle.ThrottleManager
+	currentRouter   *router.Router
+	ssrfProtection  *proxy.SSRFProtection
+	redisKeyPrefix  string
+	restartSnapshot config.RestartRequiredSnapshot
 }
 
 var _ coordclient.ConfigApplier = (*routerReloader)(nil)
 
-// Apply rebuilds the router from cfg and hot-swaps it.
+// Apply handles coordinator snapshots. Legacy coordinators omit SSRF policy,
+// so retain the last successfully applied policy in that case.
 func (rl *routerReloader) Apply(cfg *config.Config) error {
+	return rl.apply(cfg, true)
+}
+
+// Reload applies complete YAML configuration from SIGHUP or the source watcher.
+// An omitted SSRF block resets to secure defaults rather than retaining grants.
+func (rl *routerReloader) Reload(cfg *config.Config) error {
+	return rl.apply(cfg, false)
+}
+
+func (rl *routerReloader) apply(cfg *config.Config, coordinatorSnapshot bool) error {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
 	for _, w := range cfg.Warnings {
-		rl.logger.Warn("(coordinator-reload) " + w)
+		rl.logger.Warn("(reload) " + w)
+	}
+	if !coordinatorSnapshot {
+		for _, field := range rl.restartSnapshot.Changes(cfg) {
+			rl.logger.Warn("configuration field changed; router restart required", "field", field)
+		}
 	}
 
-	newRouter, err := router.New(cfg, rl.logger, rl.routerOpts...)
+	// Old coordinators omit the Redis namespace. Preserve the last successful
+	// prefix without changing the caller's config or copying connection secrets.
+	prefix := rl.redisKeyPrefix
+	if !coordinatorSnapshot || cfg.Redis != nil {
+		prefix = ""
+		if cfg.Redis != nil {
+			prefix = cfg.Redis.KeyPrefix
+		}
+	}
+	effective := *cfg
+	if coordinatorSnapshot && cfg.Redis == nil {
+		effective.Redis = &config.RedisConfig{KeyPrefix: prefix}
+	}
+	cfg = &effective
+
+	ssrfP := buildSSRFProtection(cfg.SSRF)
+	if coordinatorSnapshot && cfg.SSRF == nil && rl.ssrfProtection != nil {
+		ssrfP = rl.ssrfProtection
+		rl.logger.Warn("coordinator snapshot omitted ssrf_protection; retaining current SSRF policy")
+	}
+	opts := append([]router.Option(nil), rl.routerOpts...)
+	opts = append(opts, router.WithSSRFProtection(ssrfP))
+	newRouter, err := router.New(cfg, rl.logger, opts...)
 	if err != nil {
-		return fmt.Errorf("router rebuild from coordinator config: %w", err)
+		return fmt.Errorf("router rebuild: %w", err)
 	}
 
 	rl.reloadHandler.swap(rl.tp.HTTPMiddleware("csar", newRouter))
@@ -206,16 +185,37 @@ func (rl *routerReloader) Apply(cfg *config.Config) error {
 		rl.currentRouter.Close()
 	}
 	rl.currentRouter = newRouter
+	rl.ssrfProtection = ssrfP
+	rl.redisKeyPrefix = prefix
 
 	pruned := rl.sharedTM.SyncKeys(newRouter.RegisteredKeys())
 	if pruned > 0 {
-		rl.logger.Info("pruned stale throttle keys after coordinator reload",
+		rl.logger.Info("pruned stale throttle keys after config reload",
 			"pruned", pruned,
 		)
 	}
 
-	rl.logger.Info("configuration reloaded from coordinator",
+	rl.logger.Info("configuration reloaded",
 		"routes", len(cfg.Paths),
+		"ssrf_block_private", ssrfP.BlockPrivate,
+		"ssrf_block_loopback", ssrfP.BlockLoopback,
+		"ssrf_block_link_local", ssrfP.BlockLinkLocal,
+		"ssrf_block_metadata", ssrfP.BlockMetadata,
+		"ssrf_allowed_hosts", len(ssrfP.AllowedHosts),
 	)
 	return nil
+}
+
+func buildSSRFProtection(cfg *config.SSRFConfig) *proxy.SSRFProtection {
+	p := proxy.DefaultSSRFProtection()
+	if cfg != nil {
+		p.BlockPrivate = cfg.IsBlockPrivate()
+		p.BlockLoopback = cfg.IsBlockLoopback()
+		p.BlockLinkLocal = cfg.IsBlockLinkLocal()
+		p.BlockMetadata = cfg.IsBlockMetadata()
+		for _, host := range cfg.AllowedInternalHosts {
+			p.AllowedHosts[host] = true
+		}
+	}
+	return p
 }

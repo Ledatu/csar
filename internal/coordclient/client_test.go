@@ -13,6 +13,7 @@ import (
 	"github.com/ledatu/csar/internal/throttle"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 )
 
 type scriptedStream struct {
@@ -153,5 +154,36 @@ func TestHandleFullConfigSnapshot_RetriesAfterFailedApply(t *testing.T) {
 	c.handleFullConfigSnapshot(snapshotWithTarget("http://a:8080"), 3)
 	if applier.calls != 2 {
 		t.Fatalf("Apply calls = %d, want 2 once the snapshot is applied", applier.calls)
+	}
+}
+
+func TestHandleFullConfigSnapshot_SSRFChangesTriggerRebuild(t *testing.T) {
+	applier := &countingApplier{}
+	c := newApplyingClient(applier)
+	snap := snapshotWithTarget("http://user-preferences:8080")
+	snap.SsrfProtection = &csarv1.SSRFProtectionProto{}
+	c.handleFullConfigSnapshot(snap, 1)
+	snap.SsrfProtection.AllowedInternalHosts = []string{"user-preferences"}
+	c.handleFullConfigSnapshot(snap, 2)
+	c.handleFullConfigSnapshot(snap, 3)
+	snap.SsrfProtection.AllowedInternalHosts = nil
+	c.handleFullConfigSnapshot(snap, 4)
+	if applier.calls != 3 {
+		t.Fatalf("Apply calls = %d, want 3 for initial, grant and revocation", applier.calls)
+	}
+}
+
+func TestHandleFullConfigSnapshot_RedisPrefixChangesTriggerRebuild(t *testing.T) {
+	applier := &countingApplier{}
+	c := newApplyingClient(applier)
+	snap := snapshotWithTarget("http://upstream:8080")
+	c.handleFullConfigSnapshot(snap, 1)
+	snap.RedisKeyPrefix = proto.String("custom:")
+	c.handleFullConfigSnapshot(snap, 2)
+	c.handleFullConfigSnapshot(snap, 3)
+	snap.RedisKeyPrefix = proto.String("")
+	c.handleFullConfigSnapshot(snap, 4)
+	if applier.calls != 3 {
+		t.Fatalf("Apply calls = %d, want initial, prefix change and explicit reset", applier.calls)
 	}
 }

@@ -267,11 +267,16 @@ func (s *EtcdStore) UnregisterRouter(ctx context.Context, routerID string) error
 	}
 
 	s.mu.Lock()
-	if leaseID, ok := s.leases[routerID]; ok {
-		s.client.Revoke(ctx, leaseID) //nolint:errcheck
-		delete(s.leases, routerID)
-	}
+	leaseID, hasLease := s.leases[routerID]
+	delete(s.leases, routerID)
 	s.mu.Unlock()
+	if hasLease {
+		// The router key is already deleted; report failures without retaining
+		// local state for disconnected routers. The remote lease has a TTL.
+		if _, err := s.client.Revoke(ctx, leaseID); err != nil {
+			return fmt.Errorf("etcd revoke router lease: %w", err)
+		}
+	}
 
 	return nil
 }

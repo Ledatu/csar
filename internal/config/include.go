@@ -52,7 +52,7 @@ func (l *loader) load(path string) (*Config, error) {
 	l.stack = append(l.stack, abs)
 	defer func() { l.stack = l.stack[:len(l.stack)-1] }()
 
-	data, err := os.ReadFile(abs)
+	data, err := os.ReadFile(abs) // #nosec G304 -- Include paths are authored by the operator; relative and absolute includes are supported.
 	if err != nil {
 		return nil, fmt.Errorf("reading config file %s: %w", abs, err)
 	}

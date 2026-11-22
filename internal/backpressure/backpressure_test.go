@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,59 @@ import (
 
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+type trackedRequestBody struct {
+	io.Reader
+	closed bool
+}
+
+func (b *trackedRequestBody) Close() error { b.closed = true; return nil }
+
+type brokenRequestBody struct{ closed bool }
+
+func (*brokenRequestBody) Read(p []byte) (int, error) {
+	return copy(p, "partial sensitive body"), io.ErrUnexpectedEOF
+}
+
+func (b *brokenRequestBody) Close() error { b.closed = true; return nil }
+
+func TestMiddlewareRejectsPartialRequestBody(t *testing.T) {
+	var calls int
+	m := New(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }), Config{Enabled: true}, nil, quietLogger())
+	req := httptest.NewRequest(http.MethodPost, "/test", nil)
+	body := &brokenRequestBody{}
+	req.Body = body
+	rr := httptest.NewRecorder()
+	m.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest || calls != 0 || !body.closed {
+		t.Fatalf("status=%d upstream calls=%d body closed=%v", rr.Code, calls, body.closed)
+	}
+	if strings.Contains(rr.Body.String(), "sensitive") {
+		t.Fatal("request content leaked into the error response")
+	}
+}
+
+func TestOversizedBodyBypassPreservesBodyAndCloser(t *testing.T) {
+	want := strings.Repeat("payload", 20)
+	body := &trackedRequestBody{Reader: strings.NewReader(want)}
+	m := New(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, err := io.ReadAll(r.Body)
+		if err != nil || string(got) != want {
+			t.Errorf("forwarded body differs: %v", err)
+		}
+		if err := r.Body.Close(); err != nil {
+			t.Error(err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}), Config{Enabled: true, MaxBodyBuffer: 4}, nil, quietLogger())
+	req := httptest.NewRequest(http.MethodPost, "/test", nil)
+	req.Body, req.ContentLength = body, -1
+	rr := httptest.NewRecorder()
+	m.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent || !body.closed {
+		t.Fatalf("status=%d original body closed=%v", rr.Code, body.closed)
+	}
 }
 
 func TestExtractWaitTime(t *testing.T) {

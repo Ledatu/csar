@@ -244,9 +244,6 @@ func (t *Throttler) ApplyClientHint(clientRPS float64) {
 type ThrottleManager struct {
 	mu         sync.RWMutex
 	throttlers map[string]Waiter // keyed by "METHOD:PATH"
-
-	// globalThrottle is the global rate limiter checked before per-route throttles.
-	globalThrottle *Throttler
 }
 
 // NewManager creates a new ThrottleManager.
@@ -256,14 +253,18 @@ func NewManager() *ThrottleManager {
 	}
 }
 
-// SetGlobal sets the global throttle (fallback applied to all routes).
-func (m *ThrottleManager) SetGlobal(rps float64, burst int, maxWait time.Duration) {
-	m.globalThrottle = New(rps, burst, maxWait)
-}
-
-// GetGlobal returns the global throttle, or nil if not configured.
-func (m *ThrottleManager) GetGlobal() *Throttler {
-	return m.globalThrottle
+// ReplaceFrom publishes a completed router's registry in one operation. A failed
+// router build must not redirect coordinator quota updates away from live routes.
+func (m *ThrottleManager) ReplaceFrom(built *ThrottleManager) {
+	built.mu.RLock()
+	next := make(map[string]Waiter, len(built.throttlers))
+	for key, waiter := range built.throttlers {
+		next[key] = waiter
+	}
+	built.mu.RUnlock()
+	m.mu.Lock()
+	m.throttlers = next
+	m.mu.Unlock()
 }
 
 // Register adds or updates a local throttler for the given route key.

@@ -61,6 +61,18 @@ func FullSnapshotToConfig(snap *csarv1.FullConfigSnapshot) *config.Config {
 	if ac := snap.GetGlobalAccessControl(); ac != nil {
 		cfg.AccessControl = protoToAccessControl(ac)
 	}
+	if ssrf := snap.GetSsrfProtection(); ssrf != nil {
+		cfg.SSRF = &config.SSRFConfig{
+			BlockPrivate:         ssrf.BlockPrivate,
+			BlockLoopback:        ssrf.BlockLoopback,
+			BlockLinkLocal:       ssrf.BlockLinkLocal,
+			BlockMetadata:        ssrf.BlockMetadata,
+			AllowedInternalHosts: append([]string(nil), ssrf.GetAllowedInternalHosts()...),
+		}
+	}
+	if snap.RedisKeyPrefix != nil {
+		cfg.Redis = &config.RedisConfig{KeyPrefix: snap.GetRedisKeyPrefix()}
+	}
 
 	return cfg
 }

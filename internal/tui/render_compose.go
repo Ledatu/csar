@@ -185,9 +185,6 @@ func renderDockerCompose(r *GenerateResult) string {
 	// ─── PostgreSQL ─────────────────────────────────────────────────────────────
 	if r.IncludePostgres {
 		pgPass := r.PostgresPassword
-		if pgPass == "" {
-			pgPass = "csar_dev" //nolint:gosec // G101: dev-only default, not a real credential
-		}
 		b.WriteString("  postgres:\n")
 		b.WriteString("    image: postgres:16-alpine\n")
 		b.WriteString("    container_name: csar-postgres\n")
@@ -195,7 +192,11 @@ func renderDockerCompose(r *GenerateResult) string {
 		b.WriteString("    environment:\n")
 		b.WriteString("      POSTGRES_DB: csar\n")
 		b.WriteString("      POSTGRES_USER: csar\n")
-		fmt.Fprintf(&b, "      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-%s}\n", pgPass)
+		if pgPass == "" {
+			b.WriteString("      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}\n")
+		} else {
+			fmt.Fprintf(&b, "      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-%s}\n", pgPass)
+		}
 		b.WriteString("    ports:\n")
 		b.WriteString("      - \"5432:5432\"\n")
 		b.WriteString("    volumes:\n")

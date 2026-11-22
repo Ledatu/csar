@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledatu/csar-core/httpx"
 	"github.com/ledatu/csar-core/s3store"
 	"github.com/ledatu/csar-core/tokenmint"
 	"github.com/ledatu/csar/internal/authn"
@@ -567,9 +568,7 @@ func (r *statusRecorder) WriteHeader(code int) {
 }
 
 func respondJSON(w http.ResponseWriter, status int, v interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v) //nolint:errcheck
+	httpx.WriteJSON(w, status, v)
 }
 
 func sourceIP(r *http.Request) string {

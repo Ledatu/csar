@@ -15,11 +15,11 @@ services:
       - ./tls:/etc/csar/tls:ro
     command: >
       -listen :9090
-      -token-store postgres
-      -token-store-dsn ${CSAR_TOKEN_STORE_DSN}
+      -token-source postgres
+      -postgres-dsn ${CSAR_TOKEN_STORE_DSN}
       -tls-cert /etc/csar/tls/coordinator-cert.pem
       -tls-key /etc/csar/tls/coordinator-key.pem
-      -tls-ca /etc/csar/tls/ca.pem
+      -client-ca /etc/csar/tls/ca.pem
 
   router:
     image: csar:latest
@@ -41,7 +41,7 @@ services:
     environment:
       POSTGRES_DB: csar
       POSTGRES_USER: csar
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-csar_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:

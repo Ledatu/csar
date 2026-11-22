@@ -12,23 +12,27 @@ import (
 	"github.com/ledatu/csar/internal/statestore"
 )
 
-// ConfigCallback is called after config is parsed but before routes are applied.
-// It receives the full parsed config for use cases like updating top-level
-// policies on the coordinator.
+// ConfigCallback receives the resolved config at a watcher lifecycle boundary.
 type ConfigCallback func(cfg *config.Config)
 
 // WatcherOption configures the config watcher behavior.
 type WatcherOption func(*watcherOpts)
 
 type watcherOpts struct {
-	onConfigParsed ConfigCallback
+	onConfigParsed  ConfigCallback
+	onConfigApplied ConfigCallback
 }
 
-// WithOnConfigParsed registers a callback invoked with the full parsed config
-// on every successful config apply. Used by the coordinator to capture
-// top-level policy maps for gRPC distribution.
+// WithOnConfigParsed registers a callback before route writes. Publication must
+// use WithOnConfigApplied so a failed write cannot publish an incomplete config.
 func WithOnConfigParsed(fn ConfigCallback) WatcherOption {
 	return func(o *watcherOpts) { o.onConfigParsed = fn }
+}
+
+// WithOnConfigApplied registers a notification after all route writes succeed.
+// It also runs for policy-only updates, which produce no route-store events.
+func WithOnConfigApplied(fn ConfigCallback) WatcherOption {
+	return func(o *watcherOpts) { o.onConfigApplied = fn }
 }
 
 // NewConfigWatcher creates a ConfigWatcher that applies csar-coordinator's
@@ -57,23 +61,7 @@ func NewConfigWatcherWithOptions(
 		o(&wo)
 	}
 
-	var lastRoutes map[string]statestore.RouteEntry
-	seeded := false
-
 	applyFn := func(ctx context.Context, data []byte) (bool, error) {
-		if !seeded {
-			existing, err := store.GetRoutes(ctx)
-			if err != nil {
-				logger.Warn("could not seed routes from store; treating as empty", "error", err)
-			} else {
-				lastRoutes = make(map[string]statestore.RouteEntry, len(existing))
-				for i := range existing {
-					lastRoutes[existing[i].ID] = existing[i]
-				}
-			}
-			seeded = true
-		}
-
 		cfg, err := config.ParseBytes(data)
 		if err != nil {
 			return false, fmt.Errorf("parsing config: %w", err)
@@ -84,6 +72,16 @@ func NewConfigWatcherWithOptions(
 		}
 
 		newRoutes := ConfigToRouteEntries(cfg)
+		// A previous apply may have failed after writing only some routes.
+		// Reconcile actual state so retries and rollbacks remove those leftovers.
+		existing, err := store.GetRoutes(ctx)
+		if err != nil {
+			return false, fmt.Errorf("reading current routes: %w", err)
+		}
+		lastRoutes := make(map[string]statestore.RouteEntry, len(existing))
+		for i := range existing {
+			lastRoutes[existing[i].ID] = existing[i]
+		}
 
 		added, updated, deleted := diffRoutes(lastRoutes, newRoutes)
 
@@ -103,7 +101,9 @@ func NewConfigWatcherWithOptions(
 			}
 		}
 
-		lastRoutes = newRoutes
+		if wo.onConfigApplied != nil {
+			wo.onConfigApplied(cfg)
+		}
 
 		totalChanges := len(added) + len(updated) + len(deleted)
 		if totalChanges > 0 {
@@ -119,7 +119,8 @@ func NewConfigWatcherWithOptions(
 			)
 		}
 
-		return totalChanges > 0, nil
+		// A top-level apply can change policy without producing a route diff.
+		return totalChanges > 0 || wo.onConfigApplied != nil, nil
 	}
 
 	return coresrc.NewConfigWatcher(source, applyFn, logger, coreOpts...)

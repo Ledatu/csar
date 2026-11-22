@@ -110,6 +110,7 @@ type Router struct {
 	ssrfProtection       *proxy.SSRFProtection     // nil if SSRF protection is disabled
 	transportRegistry    *transportRegistry        // explicit outbound transport pools
 	throttleManager      *throttle.ThrottleManager // manages all per-route throttlers
+	globalThrottle       *throttle.Throttler       // owned by this router, never shared across reloads
 	redisClient          *redis.Client             // shared Redis client for distributed throttling (nil if not configured)
 	pools                []*loadbalancer.Pool      // tracked for Close() cleanup on reload
 	globalCIDRs          []*net.IPNet              // parsed global access_control.allow_cidrs
