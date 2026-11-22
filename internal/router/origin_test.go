@@ -27,7 +27,7 @@ type originPermission struct {
 }
 
 func (p *originPermission) CheckAccess(_ context.Context, in *pb.CheckAccessRequest) (*pb.CheckAccessResponse, error) {
-	return &pb.CheckAccessResponse{Allowed: p.allowed.Load() && in.Subject == "reporting", EnrichedHeaders: map[string]string{gatewayctx.HeaderAuthzResult: "allow"}}, nil
+	return &pb.CheckAccessResponse{Allowed: p.allowed.Load() && (in.Subject == "reporting" || in.Subject == "other"), EnrichedHeaders: map[string]string{gatewayctx.HeaderAuthzResult: "allow", gatewayctx.HeaderSubject: in.Subject}}, nil
 }
 
 func TestOriginRequiresServiceRequestAndAuthorizedResourceBeforeCache(t *testing.T) {
@@ -122,6 +122,10 @@ func TestOriginRequiresServiceRequestAndAuthorizedResourceBeforeCache(t *testing
 	send(makeProof("wildberries:cabinet", "/report/other", "reporting"), 401)
 	send(makeProof("wildberries:cabinet", "/report/cabinet", "foreign"), 401)
 	send(proof+"x", 401)
+	rt, _ := router.matchRoute("GET", "/report/cabinet")
+	rt.authzConfig.Subject = "other"
+	send(proof, 403)
+	rt.authzConfig.Subject = "{header.X-Gateway-Subject}"
 	permission.allowed.Store(false)
 	send(proof, 403)
 	if calls.Load() != 1 {

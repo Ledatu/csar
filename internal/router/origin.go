@@ -16,7 +16,7 @@ func validateOriginResource(req *http.Request) error {
 		return nil
 	}
 	scope, ok := authzmw.ScopeFromContext(req.Context())
-	if !ok || scope.Type != "tenant" || scope.ID == "" || scope.ID != proof.Resource || scope.Subject != req.Header.Get(gatewayctx.HeaderSubject) {
+	if !ok || scope.Type != "tenant" || scope.ID == "" || scope.ID != proof.Resource || scope.Subject != proof.Sender || scope.Subject != req.Header.Get(gatewayctx.HeaderSubject) {
 		return origincontext.ErrInvalid
 	}
 	return nil
