@@ -89,6 +89,8 @@ type vipOverride struct {
 // It matches incoming requests to configured routes and applies
 // the pipeline: ip_check -> cors -> security_inject -> throttle.Wait -> circuit_breaker -> proxy.Forward.
 type Router struct {
+	originIssuer              RootIssuer
+	originReceivers           map[string]string
 	credentialRejectionRoutes []string
 	credentialRejectionKeys   map[string]string
 
