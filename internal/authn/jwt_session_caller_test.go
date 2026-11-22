@@ -156,3 +156,30 @@ func TestSessionCallerGETPOSTAndExpiry(t *testing.T) {
 		})
 	}
 }
+
+func TestSessionRejectsAmbiguousIssuerHeaders(t *testing.T) {
+	id := &caller.Identity{Version: 1, CallerKind: caller.Human, CallerID: "owner", OwnerSubject: "owner", EffectiveSubject: "owner", CredentialKind: caller.Session, Assurance: caller.Verified}
+	for _, post := range []bool{false, true} {
+		header := make(http.Header)
+		header[gatewayctx.HeaderSubject] = []string{"owner", "foreign"}
+		var body io.ReadCloser = http.NoBody
+		cfg := SessionConfig{CacheTTL: time.Minute}
+		if post {
+			cfg.IssueTokens = []IssueTokenConfig{{Profile: "p"}}
+			payload, err := json.Marshal(authntokens.ValidateResponse{Identity: id})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body = io.NopCloser(strings.NewReader(string(payload)))
+		} else {
+			header.Set(gatewayctx.HeaderSubject, "owner")
+			if err := gatewayctx.SetCaller(header, id); err != nil {
+				t.Fatal(err)
+			}
+			header[authntokens.HeaderSessionExpiresAt] = []string{time.Now().Add(time.Minute).Format(time.RFC3339Nano), time.Now().Add(time.Hour).Format(time.RFC3339Nano)}
+		}
+		if _, err := buildSessionCacheEntry(cfg, &http.Response{StatusCode: 200, Header: header, Body: body}); err == nil {
+			t.Fatal("ambiguous issuer response accepted", post)
+		}
+	}
+}

@@ -250,6 +250,9 @@ func buildSessionCacheEntry(cfg SessionConfig, resp *http.Response) (*sessionCac
 		if err != nil {
 			return nil, fmt.Errorf("invalid session caller")
 		}
+		if values := entry.headers.Values(authntokens.HeaderSessionExpiresAt); len(values) > 1 || len(values) == 1 && values[0] == "" {
+			return nil, fmt.Errorf("ambiguous session expiry")
+		}
 		if value := entry.headers.Get(authntokens.HeaderSessionExpiresAt); value != "" {
 			expiry, err = time.Parse(time.RFC3339Nano, value)
 			if err != nil {
@@ -281,6 +284,9 @@ func buildSessionCacheEntry(cfg SessionConfig, resp *http.Response) (*sessionCac
 	}
 	if validateIssuerCaller(entry.identity, entry.headers.Get(gatewayctx.HeaderSubject), entry.headers.Get(gatewayctx.HeaderCredentialID), caller.Session) != nil {
 		return nil, fmt.Errorf("invalid session caller binding")
+	}
+	if gatewayctx.SetCaller(entry.headers, entry.identity) != nil {
+		return nil, fmt.Errorf("ambiguous session caller envelope")
 	}
 	if !expiry.IsZero() {
 		if !now.Before(expiry) {
