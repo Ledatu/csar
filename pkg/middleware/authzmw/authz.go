@@ -109,7 +109,7 @@ func (m *Middleware) Wrap(cfg Config, next http.Handler) http.Handler {
 			if branch.PolicyName != "" {
 				r.Header.Set(gatewayctx.HeaderAuthzPolicy, branch.PolicyName)
 			}
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), authorizedScopeKey{}, AuthorizedScope{Subject: req.Subject, Type: req.ScopeType, ID: req.ScopeId})))
 			return
 		}
 
