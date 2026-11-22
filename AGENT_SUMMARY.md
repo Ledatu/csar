@@ -3,7 +3,8 @@
 Separate signed-origin credentials are consumed only alongside verified service
 STS JWTs, using the existing issuer/JWKS and exactly one configured route audience
 as receiver. Sender and original request digest are checked; actual successful
-tenant authz scope must match the resource before cache/backend access. Proofs
+tenant authz scope and subject must match the resource and signed sender. Validity
+is checked again after throttle waits before cache/backend access. Proofs
 on unsupported auth modes, platform-only/no tenant scopes or ambiguous audiences
 fail closed. Proof bytes never reach upstream. Root-client/typed backend forwarding
 and activation remain separate work; STS authority is never replaced by origin.
