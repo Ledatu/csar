@@ -39,6 +39,7 @@ func validIdentity(value string) bool {
 
 func (v *TokenValidator) wrapGrant(cfg TokenConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gatewayctx.StripTrusted(r.Header)
 		source, other := gatewayctx.HeaderCsarAuthorization, "Authorization"
 		if cfg.Mode == authntokens.GrantExchange {
 			source, other = other, source
@@ -74,6 +75,12 @@ func (v *TokenValidator) wrapGrant(cfg TokenConfig, next http.Handler) http.Hand
 			rejectGrant(w, http.StatusForbidden)
 			return
 		}
+		// The universal issuer owns its credential vocabulary. Purpose/transport
+		// does not establish a caller kind or an OAuth-only credential type.
+		if err := validateIssuerCaller(result.Identity, result.Subject, result.CredentialID, ""); err != nil {
+			apierror.New(apierror.CodeUpstreamError, http.StatusBadGateway, "authentication service unavailable").Write(w)
+			return
+		}
 		clearCredentials(r)
 		r.Header.Del(gatewayctx.HeaderTenant)
 		if result.Tenant != "" {
@@ -85,6 +92,10 @@ func (v *TokenValidator) wrapGrant(cfg TokenConfig, next http.Handler) http.Hand
 		r.Header.Set(gatewayctx.HeaderScopes, req.Scope)
 		r.Header.Set(gatewayctx.HeaderSubject, result.Subject)
 		r.Header.Set(gatewayctx.HeaderCredentialID, result.CredentialID)
+		if err := gatewayctx.SetCaller(r.Header, result.Identity); err != nil {
+			apierror.New(apierror.CodeUpstreamError, http.StatusBadGateway, "authentication service unavailable").Write(w)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }

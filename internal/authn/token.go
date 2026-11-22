@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ledatu/csar-core/authntokens"
+	"github.com/ledatu/csar-core/caller"
 	"github.com/ledatu/csar-core/gatewayctx"
 	"github.com/ledatu/csar/internal/apierror"
 	"github.com/ledatu/csar/pkg/middleware/authzmw"
@@ -35,15 +36,16 @@ type TokenConfig struct {
 }
 
 type tokenResult struct {
-	AccountGrant   bool      `json:"account_grant"`
-	Discovery      bool      `json:"discovery"`
-	DelegatedToken string    `json:"delegated_token"`
-	Active         bool      `json:"active"`
-	Subject        string    `json:"subject"`
-	CredentialID   string    `json:"credential_id"`
-	SellerID       string    `json:"seller_id"`
-	Scopes         []string  `json:"scopes"`
-	ExpiresAt      time.Time `json:"expires_at"`
+	Identity       *caller.Identity `json:"identity,omitempty"`
+	AccountGrant   bool             `json:"account_grant"`
+	Discovery      bool             `json:"discovery"`
+	DelegatedToken string           `json:"delegated_token"`
+	Active         bool             `json:"active"`
+	Subject        string           `json:"subject"`
+	CredentialID   string           `json:"credential_id"`
+	SellerID       string           `json:"seller_id"`
+	Scopes         []string         `json:"scopes"`
+	ExpiresAt      time.Time        `json:"expires_at"`
 }
 
 type tokenCacheEntry struct {
@@ -73,6 +75,7 @@ func (v *TokenValidator) Wrap(cfg TokenConfig, next http.Handler) http.Handler {
 		cfg.SellerPathParam = "seller_id"
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gatewayctx.StripTrusted(r.Header)
 		header, prefix := "Authorization", "aurum_pat_"
 		switch cfg.Mode {
 		case "mcp", "mcp-account":
@@ -149,6 +152,10 @@ func (v *TokenValidator) Wrap(cfg TokenConfig, next http.Handler) http.Handler {
 		if result.SellerID != "" && cfg.Mode != "delegated-discovery" {
 			r.Header.Set(gatewayctx.HeaderTenant, "wildberries:"+result.SellerID)
 		}
+		if err := gatewayctx.SetCaller(r.Header, result.Identity); err != nil {
+			apierror.New(apierror.CodeUpstreamError, http.StatusBadGateway, "authentication service unavailable").Write(w)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -178,6 +185,18 @@ func (v *TokenValidator) introspect(r *http.Request, cfg TokenConfig, raw string
 	var result tokenResult
 	if err := v.postIntrospection(r, cfg.Endpoint, payload, &result); err != nil {
 		return tokenResult{}, err
+	}
+	kind := caller.APIKey
+	switch cfg.Mode {
+	case "mcp", "mcp-account":
+		kind = caller.OAuthAccess
+	case "delegated", "delegated-discovery":
+		kind = caller.DelegationProof
+	}
+	if result.Active {
+		if err := validateIssuerCaller(result.Identity, result.Subject, result.CredentialID, kind); err != nil {
+			return tokenResult{}, err // Never cache inconsistent issuer metadata.
+		}
 	}
 	if cacheable && result.Active && result.ExpiresAt.After(now) {
 		expires := now.Add(cfg.CacheTTL)

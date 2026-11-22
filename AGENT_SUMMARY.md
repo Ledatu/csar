@@ -1,5 +1,12 @@
 # csar Agent Summary
 
+W2 opaque API-key/MCP and universal grant validation preserve optional issuer
+caller metadata after subject/credential binding checks. Malformed present
+metadata fails closed and is not cached; legacy absence remains compatible.
+The reserved gateway namespace is stripped before validation. Backend parsing
+requires upgraded Core readers. JWT/session adoption, signed origin and audit
+receipt barriers remain later W2 work; no production configuration is changed.
+
 ## Hosted seller authentication
 
 The dedicated `mcp` validation mode exchanges a resource bearer at Authn and forwards a per-request delegation to the hosted seller adapter. The `delegated` mode consumes it before cabinet authorization and report-cache lookup. Both modes consult Authn on every request. Personal-key routes forward only the scope verified for that route.
