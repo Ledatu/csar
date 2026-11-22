@@ -45,7 +45,11 @@ Available profiles:
 		}
 
 		fmt.Printf("Generating %q config scaffolding in %s...\n", initProfile, initOutputDir)
-		return helper.InitProfile(helper.Profile(initProfile), initOutputDir, initForce)
+		if err := helper.InitProfile(helper.Profile(initProfile), initOutputDir, initForce); err != nil {
+			return err
+		}
+		fmt.Println("Configuration scaffold created.")
+		return nil
 	},
 }
 

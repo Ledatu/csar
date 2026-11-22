@@ -72,17 +72,31 @@ func GenerateKeyPair(opts GenerateOptions) (*GeneratedKey, error) {
 		return nil, err
 	}
 
-	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
+	if err := os.MkdirAll(opts.OutputDir, 0o750); err != nil {
 		return nil, fmt.Errorf("creating output directory: %w", err)
 	}
 
 	privPath := filepath.Join(opts.OutputDir, opts.KeyName+".key")
 	pubPath := filepath.Join(opts.OutputDir, opts.KeyName+".pub")
 
-	if err := os.WriteFile(privPath, privPEM, 0o600); err != nil {
+	privateFile, err := os.OpenFile(privPath, os.O_WRONLY|os.O_CREATE, 0o600) // #nosec G304 -- Private-key output path is selected by the CLI operator.
+	if err != nil {
+		return nil, fmt.Errorf("opening private key: %w", err)
+	}
+	defer func() { _ = privateFile.Close() }() // Fallback cleanup; the final close is checked.
+	if err := privateFile.Chmod(0o600); err != nil {
+		return nil, fmt.Errorf("restricting private key: %w", err)
+	}
+	if err := privateFile.Truncate(0); err != nil {
+		return nil, fmt.Errorf("truncating private key: %w", err)
+	}
+	if _, err := privateFile.Write(privPEM); err != nil {
 		return nil, fmt.Errorf("writing private key: %w", err)
 	}
-	if err := os.WriteFile(pubPath, pubPEM, 0o644); err != nil { //nolint:gosec // G306: public key is intentionally world-readable
+	if err := privateFile.Close(); err != nil {
+		return nil, fmt.Errorf("closing private key: %w", err)
+	}
+	if err := os.WriteFile(pubPath, pubPEM, 0o644); err != nil { // #nosec G306 -- This file contains only the public key.
 		return nil, fmt.Errorf("writing public key: %w", err)
 	}
 

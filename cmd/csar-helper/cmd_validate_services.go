@@ -16,7 +16,7 @@ var validateAuthnCmd = &cobra.Command{
 	Short: "Validate a csar-authn config file",
 	Long:  `Loads a csar-authn configuration file, expands environment variables, applies defaults, and validates all fields.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		data, err := os.ReadFile(validateAuthnPath)
+		data, err := os.ReadFile(validateAuthnPath) // #nosec G304 -- Explicit local --config path supplied by the CLI operator.
 		if err != nil {
 			return fmt.Errorf("reading config: %w", err)
 		}
@@ -35,7 +35,7 @@ var validateAuthzCmd = &cobra.Command{
 	Short: "Validate a csar-authz config file",
 	Long:  `Loads a csar-authz configuration file, expands environment variables, applies defaults, and validates all fields.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		data, err := os.ReadFile(validateAuthzPath)
+		data, err := os.ReadFile(validateAuthzPath) // #nosec G304 -- Explicit local --config path supplied by the CLI operator.
 		if err != nil {
 			return fmt.Errorf("reading config: %w", err)
 		}

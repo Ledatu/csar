@@ -87,7 +87,7 @@ func checkFileExists(result *StackCheckResult, path, name, level string) {
 }
 
 func checkEnvVars(result *StackCheckResult, envPath string) {
-	f, err := os.Open(envPath)
+	f, err := os.Open(envPath) // #nosec G304 -- Operator-selected local stack files inspected by a CLI preflight check.
 	if err != nil {
 		return
 	}
@@ -139,7 +139,7 @@ func checkEnvVars(result *StackCheckResult, envPath string) {
 // checkComposeVolumeMounts parses docker-compose.yaml (basic regex) and checks
 // that host paths in volume mounts exist.
 func checkComposeVolumeMounts(result *StackCheckResult, composePath, stackDir string) {
-	data, err := os.ReadFile(composePath)
+	data, err := os.ReadFile(composePath) // #nosec G304 -- Operator-selected local stack files inspected by a CLI preflight check.
 	if err != nil {
 		return
 	}
@@ -152,7 +152,7 @@ func checkComposeVolumeMounts(result *StackCheckResult, composePath, stackDir st
 		matches := volumeRegex.FindStringSubmatch(line)
 		if len(matches) >= 2 {
 			hostPath := filepath.Join(stackDir, matches[1])
-			if _, err := os.Stat(hostPath); os.IsNotExist(err) { //nolint:gosec // G703: hostPath is from config validation, not untrusted input
+			if _, err := os.Stat(hostPath); os.IsNotExist(err) { // #nosec G703 -- Metadata-only check of operator-authored Compose mounts; mounts outside the stack are supported.
 				result.addWarning("volume mount: "+matches[1],
 					fmt.Sprintf("Volume mount host path %s does not exist", hostPath))
 			}
@@ -172,7 +172,7 @@ func checkTLSCerts(result *StackCheckResult, tlsDir string) {
 }
 
 func checkDBDSN(result *StackCheckResult, envPath string) {
-	f, err := os.Open(envPath)
+	f, err := os.Open(envPath) // #nosec G304 -- Operator-selected local stack files inspected by a CLI preflight check.
 	if err != nil {
 		return
 	}
@@ -192,7 +192,7 @@ func checkDBDSN(result *StackCheckResult, envPath string) {
 			switch {
 			case err != nil:
 				result.addError("DB DSN",
-					fmt.Sprintf("CSAR_TOKEN_STORE_DSN has invalid URL syntax: %v", err))
+					"CSAR_TOKEN_STORE_DSN has invalid URL syntax")
 			case !strings.HasPrefix(dsn, "postgres://") && !strings.HasPrefix(dsn, "postgresql://") &&
 				!strings.HasPrefix(dsn, "mysql://") && !strings.HasPrefix(dsn, "sqlite://"):
 				result.addWarning("DB DSN",
@@ -206,7 +206,7 @@ func checkDBDSN(result *StackCheckResult, envPath string) {
 }
 
 func configReferencesPath(configPath, needle string) bool {
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(configPath) // #nosec G304 -- Operator-selected local stack files inspected by a CLI preflight check.
 	if err != nil {
 		return false
 	}

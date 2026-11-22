@@ -9,7 +9,7 @@ import (
 // writeFileSafe writes data to a file, creating parent directories as needed.
 func writeFileSafe(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating directory %s: %w", dir, err)
 	}
 	if err := os.WriteFile(path, data, perm); err != nil {

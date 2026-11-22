@@ -19,9 +19,9 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/ledatu/csar/internal/config"
@@ -161,23 +161,7 @@ func handleScaffold(_ context.Context, _ *mcp.CallToolRequest, in ScaffoldInput)
 		}, nil, nil
 	}
 
-	// Walk the temp dir and collect all generated files.
-	files := make(map[string]string)
-	err = filepath.Walk(tmpDir, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if info.IsDir() {
-			return nil
-		}
-		rel, _ := filepath.Rel(tmpDir, path)
-		content, readErr := os.ReadFile(path) //nolint:gosec // G122: path is from trusted WalkDir, not user input
-		if readErr != nil {
-			return readErr
-		}
-		files[rel] = string(content)
-		return nil
-	})
+	files, err := readScaffoldFiles(tmpDir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading scaffold output: %w", err)
 	}
@@ -189,6 +173,30 @@ func handleScaffold(_ context.Context, _ *mcp.CallToolRequest, in ScaffoldInput)
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
 	}, nil, nil
+}
+
+func readScaffoldFiles(dir string) (map[string]string, error) {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	files := make(map[string]string)
+	err = fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		content, readErr := root.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		files[path] = string(content)
+		return nil
+	})
+	return files, err
 }
 
 func handleListProfiles(_ context.Context, _ *mcp.CallToolRequest, _ any) (*mcp.CallToolResult, any, error) {

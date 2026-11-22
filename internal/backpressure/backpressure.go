@@ -212,25 +212,29 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var err error
 		bodyBytes, err = io.ReadAll(lr)
 		if err != nil {
-			r.Body.Close()
+			if closeErr := r.Body.Close(); closeErr != nil {
+				m.logger.Debug("backpressure: closing request body", "error", closeErr)
+			}
 			m.logger.Error("backpressure: failed to buffer request body", "error", err)
-			// Best-effort: forward what we have.
-			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-			r.ContentLength = int64(len(bodyBytes))
-			m.next.ServeHTTP(w, r)
+			apierror.New("bad_request", http.StatusBadRequest, "failed to read request body").Write(w)
 			return
 		}
 		if int64(len(bodyBytes)) > maxBody {
 			// Oversized (chunked transfer or Content-Length was missing/wrong).
 			// Reassemble body: what we read + remaining unread data.
-			r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(bodyBytes), r.Body))
+			r.Body = struct {
+				io.Reader
+				io.Closer
+			}{io.MultiReader(bytes.NewReader(bodyBytes), r.Body), r.Body}
 			r.ContentLength = -1 // total length unknown
 			m.logger.Debug("backpressure: body exceeds buffer cap (read), bypassing",
 				"buffered", len(bodyBytes), "cap", maxBody)
 			m.next.ServeHTTP(w, r)
 			return
 		}
-		r.Body.Close() // fully consumed within cap — safe to close
+		if closeErr := r.Body.Close(); closeErr != nil {
+			m.logger.Debug("backpressure: closing consumed request body", "error", closeErr)
+		}
 	}
 
 	// ── First attempt (zero response buffering for non-429) ──────

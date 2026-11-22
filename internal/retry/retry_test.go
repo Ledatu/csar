@@ -16,6 +16,30 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+type brokenRequestBody struct{ closed bool }
+
+func (*brokenRequestBody) Read(p []byte) (int, error) {
+	return copy(p, "partial sensitive body"), io.ErrUnexpectedEOF
+}
+
+func (b *brokenRequestBody) Close() error { b.closed = true; return nil }
+
+func TestMiddlewareRejectsPartialRequestBody(t *testing.T) {
+	var calls int
+	m := New(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }), Config{}, testLogger())
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	body := &brokenRequestBody{}
+	req.Body = body
+	rr := httptest.NewRecorder()
+	m.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest || calls != 0 || !body.closed {
+		t.Fatalf("status=%d upstream calls=%d body closed=%v", rr.Code, calls, body.closed)
+	}
+	if strings.Contains(rr.Body.String(), "sensitive") {
+		t.Fatal("request content leaked into the error response")
+	}
+}
+
 func TestMiddleware_NoRetryOnSuccess(t *testing.T) {
 	var calls atomic.Int32
 	upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

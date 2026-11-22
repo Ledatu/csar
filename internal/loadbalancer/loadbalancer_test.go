@@ -16,6 +16,25 @@ func newTestLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }
 
+func TestRoundRobinCounterRolloverStaysWithinTargets(t *testing.T) {
+	pool, err := New([]string{"http://one.example", "http://two.example", "http://three.example"}, RoundRobin, newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.counter.Store(^uint64(0) - 2)
+	for range 10 {
+		if idx := pool.selectTarget(); idx < 0 || idx >= pool.Size() {
+			t.Fatalf("invalid index after counter rollover: %d", idx)
+		}
+	}
+	for i := range pool.healthy {
+		pool.healthy[i].Store(false)
+	}
+	if got := pool.selectTarget(); got != -1 {
+		t.Fatalf("selected an unhealthy target: %d", got)
+	}
+}
+
 // TestNewDirector_ReplaceMode_Default verifies that the default (no pathMode)
 // behaviour uses replace mode: the target path replaces the incoming request path.
 func TestNewDirector_ReplaceMode_Default(t *testing.T) {

@@ -548,7 +548,7 @@ func RunGenerateWizard() (*GenerateResult, error) {
 			huh.NewInput().
 				Title("PostgreSQL password").
 				Value(&r.PostgresPassword).
-				Placeholder("csar_dev"),
+				Placeholder("set via POSTGRES_PASSWORD"),
 		).WithHideFunc(func() bool { return !r.GenerateCompose || !r.IncludePostgres }),
 
 		// Coordinator container — only ask if it's not already required by config.
@@ -673,9 +673,6 @@ func RunGenerateWizard() (*GenerateResult, error) {
 	}
 	if r.RedisAddress == "" && r.RateLimitBackend == "redis" {
 		r.RedisAddress = "redis:6379"
-	}
-	if r.PostgresPassword == "" {
-		r.PostgresPassword = "csar_dev"
 	}
 	if r.CoordinatorAddress == "" && r.EnableCoordinator {
 		r.CoordinatorAddress = "coordinator:9090"

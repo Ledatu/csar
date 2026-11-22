@@ -323,7 +323,9 @@ func (p *Pool) probeTCP(ctx context.Context, target *url.URL) bool {
 		)
 		return false
 	}
-	conn.Close()
+	if err := conn.Close(); err != nil {
+		p.logger.Debug("health check: closing TCP probe", "error", err)
+	}
 	return true
 }
 
@@ -401,7 +403,7 @@ func (p *Pool) selectTarget() int {
 func (p *Pool) selectRoundRobin(n int) int {
 	start := p.counter.Add(1)
 	for i := 0; i < n; i++ {
-		idx := int((start - 1 + uint64(i)) % uint64(n)) //nolint:gosec // G115: n is always non-negative (slice length)
+		idx := int((start - 1 + uint64(i)) % uint64(n)) // #nosec G115 -- n is a positive slice length and i is in [0,n); the remainder is in [0,n) and fits int.
 		if p.healthy[idx].Load() {
 			return idx
 		}
@@ -412,7 +414,7 @@ func (p *Pool) selectRoundRobin(n int) int {
 // selectRandom picks a random healthy target.
 func (p *Pool) selectRandom(n int) int {
 	// Try a random target first (fast path).
-	idx := rand.IntN(n) //nolint:gosec // G404: non-cryptographic use for load balancing
+	idx := rand.IntN(n) // #nosec G404 -- Backend selection needs distribution, not an unpredictable security token.
 	if p.healthy[idx].Load() {
 		return idx
 	}

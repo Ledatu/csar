@@ -309,8 +309,16 @@ type FullConfigSnapshot struct {
 	GlobalThrottle      *GlobalThrottleProto `protobuf:"bytes,9,opt,name=global_throttle,json=globalThrottle,proto3" json:"global_throttle,omitempty"`
 	DebugHeaders        *DebugHeadersProto   `protobuf:"bytes,10,opt,name=debug_headers,json=debugHeaders,proto3" json:"debug_headers,omitempty"`
 	GlobalAccessControl *AccessControlProto  `protobuf:"bytes,11,opt,name=global_access_control,json=globalAccessControl,proto3" json:"global_access_control,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Absent on legacy coordinators: retain the router's current SSRF policy.
+	// New coordinators send this even when YAML omits ssrf_protection, so
+	// removing the block resets the policy to secure defaults.
+	SsrfProtection *SSRFProtectionProto `protobuf:"bytes,18,opt,name=ssrf_protection,json=ssrfProtection,proto3" json:"ssrf_protection,omitempty"`
+	// Redis policy key namespace only; connection settings remain router-local.
+	// Absent on legacy coordinators: retain the active prefix. Present but empty
+	// resets to the built-in throttle/cache prefixes.
+	RedisKeyPrefix *string `protobuf:"bytes,19,opt,name=redis_key_prefix,json=redisKeyPrefix,proto3,oneof" json:"redis_key_prefix,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *FullConfigSnapshot) Reset() {
@@ -460,6 +468,20 @@ func (x *FullConfigSnapshot) GetGlobalAccessControl() *AccessControlProto {
 		return x.GlobalAccessControl
 	}
 	return nil
+}
+
+func (x *FullConfigSnapshot) GetSsrfProtection() *SSRFProtectionProto {
+	if x != nil {
+		return x.SsrfProtection
+	}
+	return nil
+}
+
+func (x *FullConfigSnapshot) GetRedisKeyPrefix() string {
+	if x != nil && x.RedisKeyPrefix != nil {
+		return *x.RedisKeyPrefix
+	}
+	return ""
 }
 
 // RouteSnapshot contains the full set of routes (legacy, kept for backward compat).
@@ -3801,6 +3823,83 @@ func (x *HealthAck) GetAcknowledged() bool {
 	return false
 }
 
+type SSRFProtectionProto struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Omitted switches default to true, matching the YAML configuration.
+	BlockPrivate         *bool    `protobuf:"varint,1,opt,name=block_private,json=blockPrivate,proto3,oneof" json:"block_private,omitempty"`
+	BlockLoopback        *bool    `protobuf:"varint,2,opt,name=block_loopback,json=blockLoopback,proto3,oneof" json:"block_loopback,omitempty"`
+	BlockLinkLocal       *bool    `protobuf:"varint,3,opt,name=block_link_local,json=blockLinkLocal,proto3,oneof" json:"block_link_local,omitempty"`
+	BlockMetadata        *bool    `protobuf:"varint,4,opt,name=block_metadata,json=blockMetadata,proto3,oneof" json:"block_metadata,omitempty"`
+	AllowedInternalHosts []string `protobuf:"bytes,5,rep,name=allowed_internal_hosts,json=allowedInternalHosts,proto3" json:"allowed_internal_hosts,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
+}
+
+func (x *SSRFProtectionProto) Reset() {
+	*x = SSRFProtectionProto{}
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SSRFProtectionProto) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SSRFProtectionProto) ProtoMessage() {}
+
+func (x *SSRFProtectionProto) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_csar_v1_coordinator_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SSRFProtectionProto.ProtoReflect.Descriptor instead.
+func (*SSRFProtectionProto) Descriptor() ([]byte, []int) {
+	return file_proto_csar_v1_coordinator_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *SSRFProtectionProto) GetBlockPrivate() bool {
+	if x != nil && x.BlockPrivate != nil {
+		return *x.BlockPrivate
+	}
+	return false
+}
+
+func (x *SSRFProtectionProto) GetBlockLoopback() bool {
+	if x != nil && x.BlockLoopback != nil {
+		return *x.BlockLoopback
+	}
+	return false
+}
+
+func (x *SSRFProtectionProto) GetBlockLinkLocal() bool {
+	if x != nil && x.BlockLinkLocal != nil {
+		return *x.BlockLinkLocal
+	}
+	return false
+}
+
+func (x *SSRFProtectionProto) GetBlockMetadata() bool {
+	if x != nil && x.BlockMetadata != nil {
+		return *x.BlockMetadata
+	}
+	return false
+}
+
+func (x *SSRFProtectionProto) GetAllowedInternalHosts() []string {
+	if x != nil {
+		return x.AllowedInternalHosts
+	}
+	return nil
+}
+
 var File_proto_csar_v1_coordinator_proto protoreflect.FileDescriptor
 
 const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
@@ -3824,7 +3923,7 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x11TokenInvalidation\x12\x1d\n" +
 	"\n" +
 	"token_refs\x18\x01 \x03(\tR\ttokenRefs\x121\n" +
-	"\x14invalidation_version\x18\x02 \x01(\x04R\x13invalidationVersion\"\x9f\x16\n" +
+	"\x14invalidation_version\x18\x02 \x01(\x04R\x13invalidationVersion\"\xaa\x17\n" +
 	"\x12FullConfigSnapshot\x12,\n" +
 	"\x06routes\x18\x01 \x03(\v2\x14.csar.v1.RouteConfigR\x06routes\x12[\n" +
 	"\x10circuit_breakers\x18\x02 \x03(\v20.csar.v1.FullConfigSnapshot.CircuitBreakersEntryR\x0fcircuitBreakers\x12^\n" +
@@ -3843,7 +3942,9 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x0fglobal_throttle\x18\t \x01(\v2\x1c.csar.v1.GlobalThrottleProtoR\x0eglobalThrottle\x12?\n" +
 	"\rdebug_headers\x18\n" +
 	" \x01(\v2\x1a.csar.v1.DebugHeadersProtoR\fdebugHeaders\x12O\n" +
-	"\x15global_access_control\x18\v \x01(\v2\x1b.csar.v1.AccessControlProtoR\x13globalAccessControl\x1ag\n" +
+	"\x15global_access_control\x18\v \x01(\v2\x1b.csar.v1.AccessControlProtoR\x13globalAccessControl\x12E\n" +
+	"\x0fssrf_protection\x18\x12 \x01(\v2\x1c.csar.v1.SSRFProtectionProtoR\x0essrfProtection\x12-\n" +
+	"\x10redis_key_prefix\x18\x13 \x01(\tH\x00R\x0eredisKeyPrefix\x88\x01\x01\x1ag\n" +
 	"\x14CircuitBreakersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x129\n" +
 	"\x05value\x18\x02 \x01(\v2#.csar.v1.CircuitBreakerProfileProtoR\x05value:\x028\x01\x1aa\n" +
@@ -3882,7 +3983,8 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\v2%.csar.v1.CacheInvalidationConfigProtoR\x05value:\x028\x01\x1ai\n" +
 	"\x19AuditCapturePoliciesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x126\n" +
-	"\x05value\x18\x02 \x01(\v2 .csar.v1.AuditCaptureConfigProtoR\x05value:\x028\x01\"=\n" +
+	"\x05value\x18\x02 \x01(\v2 .csar.v1.AuditCaptureConfigProtoR\x05value:\x028\x01B\x13\n" +
+	"\x11_redis_key_prefix\"=\n" +
 	"\rRouteSnapshot\x12,\n" +
 	"\x06routes\x18\x01 \x03(\v2\x14.csar.v1.RouteConfigR\x06routes\"\x80\v\n" +
 	"\vRouteConfig\x12\x19\n" +
@@ -4223,7 +4325,17 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"/\n" +
 	"\tHealthAck\x12\"\n" +
-	"\facknowledged\x18\x01 \x01(\bR\facknowledged2\x90\x01\n" +
+	"\facknowledged\x18\x01 \x01(\bR\facknowledged\"\xc9\x02\n" +
+	"\x13SSRFProtectionProto\x12(\n" +
+	"\rblock_private\x18\x01 \x01(\bH\x00R\fblockPrivate\x88\x01\x01\x12*\n" +
+	"\x0eblock_loopback\x18\x02 \x01(\bH\x01R\rblockLoopback\x88\x01\x01\x12-\n" +
+	"\x10block_link_local\x18\x03 \x01(\bH\x02R\x0eblockLinkLocal\x88\x01\x01\x12*\n" +
+	"\x0eblock_metadata\x18\x04 \x01(\bH\x03R\rblockMetadata\x88\x01\x01\x124\n" +
+	"\x16allowed_internal_hosts\x18\x05 \x03(\tR\x14allowedInternalHostsB\x10\n" +
+	"\x0e_block_privateB\x11\n" +
+	"\x0f_block_loopbackB\x13\n" +
+	"\x11_block_link_localB\x11\n" +
+	"\x0f_block_metadata2\x90\x01\n" +
 	"\x12CoordinatorService\x12?\n" +
 	"\tSubscribe\x12\x19.csar.v1.SubscribeRequest\x1a\x15.csar.v1.ConfigUpdate0\x01\x129\n" +
 	"\fReportHealth\x12\x15.csar.v1.HealthReport\x1a\x12.csar.v1.HealthAckB-Z+github.com/ledatu/csar/proto/csar/v1;csarv1b\x06proto3"
@@ -4240,7 +4352,7 @@ func file_proto_csar_v1_coordinator_proto_rawDescGZIP() []byte {
 	return file_proto_csar_v1_coordinator_proto_rawDescData
 }
 
-var file_proto_csar_v1_coordinator_proto_msgTypes = make([]protoimpl.MessageInfo, 64)
+var file_proto_csar_v1_coordinator_proto_msgTypes = make([]protoimpl.MessageInfo, 65)
 var file_proto_csar_v1_coordinator_proto_goTypes = []any{
 	(*SubscribeRequest)(nil),             // 0: csar.v1.SubscribeRequest
 	(*ConfigUpdate)(nil),                 // 1: csar.v1.ConfigUpdate
@@ -4284,143 +4396,145 @@ var file_proto_csar_v1_coordinator_proto_goTypes = []any{
 	(*RouteQuota)(nil),                   // 39: csar.v1.RouteQuota
 	(*HealthReport)(nil),                 // 40: csar.v1.HealthReport
 	(*HealthAck)(nil),                    // 41: csar.v1.HealthAck
-	nil,                                  // 42: csar.v1.SubscribeRequest.MetadataEntry
-	nil,                                  // 43: csar.v1.FullConfigSnapshot.CircuitBreakersEntry
-	nil,                                  // 44: csar.v1.FullConfigSnapshot.SecurityProfilesEntry
-	nil,                                  // 45: csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry
-	nil,                                  // 46: csar.v1.FullConfigSnapshot.CorsPoliciesEntry
-	nil,                                  // 47: csar.v1.FullConfigSnapshot.RetryPoliciesEntry
-	nil,                                  // 48: csar.v1.FullConfigSnapshot.RedactPoliciesEntry
-	nil,                                  // 49: csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry
-	nil,                                  // 50: csar.v1.FullConfigSnapshot.AuthzPoliciesEntry
-	nil,                                  // 51: csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry
-	nil,                                  // 52: csar.v1.FullConfigSnapshot.BackendPoolsEntry
-	nil,                                  // 53: csar.v1.FullConfigSnapshot.CachePoliciesEntry
-	nil,                                  // 54: csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry
-	nil,                                  // 55: csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntry
-	nil,                                  // 56: csar.v1.RouteConfig.HeadersEntry
-	nil,                                  // 57: csar.v1.VIPOverrideProto.ValuesEntry
-	nil,                                  // 58: csar.v1.AuthValidateConfigProto.RequiredClaimsEntry
-	nil,                                  // 59: csar.v1.AuthValidateConfigProto.ForwardClaimsEntry
-	nil,                                  // 60: csar.v1.TenantConfigProto.BackendsEntry
-	nil,                                  // 61: csar.v1.QuotaAssignment.QuotasEntry
-	nil,                                  // 62: csar.v1.HealthReport.QueueDepthsEntry
-	nil,                                  // 63: csar.v1.HealthReport.MetadataEntry
-	(*durationpb.Duration)(nil),          // 64: google.protobuf.Duration
+	(*SSRFProtectionProto)(nil),          // 42: csar.v1.SSRFProtectionProto
+	nil,                                  // 43: csar.v1.SubscribeRequest.MetadataEntry
+	nil,                                  // 44: csar.v1.FullConfigSnapshot.CircuitBreakersEntry
+	nil,                                  // 45: csar.v1.FullConfigSnapshot.SecurityProfilesEntry
+	nil,                                  // 46: csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry
+	nil,                                  // 47: csar.v1.FullConfigSnapshot.CorsPoliciesEntry
+	nil,                                  // 48: csar.v1.FullConfigSnapshot.RetryPoliciesEntry
+	nil,                                  // 49: csar.v1.FullConfigSnapshot.RedactPoliciesEntry
+	nil,                                  // 50: csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry
+	nil,                                  // 51: csar.v1.FullConfigSnapshot.AuthzPoliciesEntry
+	nil,                                  // 52: csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry
+	nil,                                  // 53: csar.v1.FullConfigSnapshot.BackendPoolsEntry
+	nil,                                  // 54: csar.v1.FullConfigSnapshot.CachePoliciesEntry
+	nil,                                  // 55: csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry
+	nil,                                  // 56: csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntry
+	nil,                                  // 57: csar.v1.RouteConfig.HeadersEntry
+	nil,                                  // 58: csar.v1.VIPOverrideProto.ValuesEntry
+	nil,                                  // 59: csar.v1.AuthValidateConfigProto.RequiredClaimsEntry
+	nil,                                  // 60: csar.v1.AuthValidateConfigProto.ForwardClaimsEntry
+	nil,                                  // 61: csar.v1.TenantConfigProto.BackendsEntry
+	nil,                                  // 62: csar.v1.QuotaAssignment.QuotasEntry
+	nil,                                  // 63: csar.v1.HealthReport.QueueDepthsEntry
+	nil,                                  // 64: csar.v1.HealthReport.MetadataEntry
+	(*durationpb.Duration)(nil),          // 65: google.protobuf.Duration
 }
 var file_proto_csar_v1_coordinator_proto_depIdxs = []int32{
-	42,  // 0: csar.v1.SubscribeRequest.metadata:type_name -> csar.v1.SubscribeRequest.MetadataEntry
+	43,  // 0: csar.v1.SubscribeRequest.metadata:type_name -> csar.v1.SubscribeRequest.MetadataEntry
 	4,   // 1: csar.v1.ConfigUpdate.route_snapshot:type_name -> csar.v1.RouteSnapshot
 	38,  // 2: csar.v1.ConfigUpdate.quota_assignment:type_name -> csar.v1.QuotaAssignment
 	2,   // 3: csar.v1.ConfigUpdate.token_invalidation:type_name -> csar.v1.TokenInvalidation
 	3,   // 4: csar.v1.ConfigUpdate.full_config_snapshot:type_name -> csar.v1.FullConfigSnapshot
 	5,   // 5: csar.v1.FullConfigSnapshot.routes:type_name -> csar.v1.RouteConfig
-	43,  // 6: csar.v1.FullConfigSnapshot.circuit_breakers:type_name -> csar.v1.FullConfigSnapshot.CircuitBreakersEntry
-	44,  // 7: csar.v1.FullConfigSnapshot.security_profiles:type_name -> csar.v1.FullConfigSnapshot.SecurityProfilesEntry
-	45,  // 8: csar.v1.FullConfigSnapshot.throttling_policies:type_name -> csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry
-	46,  // 9: csar.v1.FullConfigSnapshot.cors_policies:type_name -> csar.v1.FullConfigSnapshot.CorsPoliciesEntry
-	47,  // 10: csar.v1.FullConfigSnapshot.retry_policies:type_name -> csar.v1.FullConfigSnapshot.RetryPoliciesEntry
-	48,  // 11: csar.v1.FullConfigSnapshot.redact_policies:type_name -> csar.v1.FullConfigSnapshot.RedactPoliciesEntry
-	49,  // 12: csar.v1.FullConfigSnapshot.auth_validate_policies:type_name -> csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry
-	50,  // 13: csar.v1.FullConfigSnapshot.authz_policies:type_name -> csar.v1.FullConfigSnapshot.AuthzPoliciesEntry
-	51,  // 14: csar.v1.FullConfigSnapshot.backend_tls_policies:type_name -> csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry
-	52,  // 15: csar.v1.FullConfigSnapshot.backend_pools:type_name -> csar.v1.FullConfigSnapshot.BackendPoolsEntry
-	53,  // 16: csar.v1.FullConfigSnapshot.cache_policies:type_name -> csar.v1.FullConfigSnapshot.CachePoliciesEntry
-	54,  // 17: csar.v1.FullConfigSnapshot.cache_invalidation_policies:type_name -> csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry
-	55,  // 18: csar.v1.FullConfigSnapshot.audit_capture_policies:type_name -> csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntry
+	44,  // 6: csar.v1.FullConfigSnapshot.circuit_breakers:type_name -> csar.v1.FullConfigSnapshot.CircuitBreakersEntry
+	45,  // 7: csar.v1.FullConfigSnapshot.security_profiles:type_name -> csar.v1.FullConfigSnapshot.SecurityProfilesEntry
+	46,  // 8: csar.v1.FullConfigSnapshot.throttling_policies:type_name -> csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry
+	47,  // 9: csar.v1.FullConfigSnapshot.cors_policies:type_name -> csar.v1.FullConfigSnapshot.CorsPoliciesEntry
+	48,  // 10: csar.v1.FullConfigSnapshot.retry_policies:type_name -> csar.v1.FullConfigSnapshot.RetryPoliciesEntry
+	49,  // 11: csar.v1.FullConfigSnapshot.redact_policies:type_name -> csar.v1.FullConfigSnapshot.RedactPoliciesEntry
+	50,  // 12: csar.v1.FullConfigSnapshot.auth_validate_policies:type_name -> csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry
+	51,  // 13: csar.v1.FullConfigSnapshot.authz_policies:type_name -> csar.v1.FullConfigSnapshot.AuthzPoliciesEntry
+	52,  // 14: csar.v1.FullConfigSnapshot.backend_tls_policies:type_name -> csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry
+	53,  // 15: csar.v1.FullConfigSnapshot.backend_pools:type_name -> csar.v1.FullConfigSnapshot.BackendPoolsEntry
+	54,  // 16: csar.v1.FullConfigSnapshot.cache_policies:type_name -> csar.v1.FullConfigSnapshot.CachePoliciesEntry
+	55,  // 17: csar.v1.FullConfigSnapshot.cache_invalidation_policies:type_name -> csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry
+	56,  // 18: csar.v1.FullConfigSnapshot.audit_capture_policies:type_name -> csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntry
 	16,  // 19: csar.v1.FullConfigSnapshot.global_throttle:type_name -> csar.v1.GlobalThrottleProto
 	36,  // 20: csar.v1.FullConfigSnapshot.debug_headers:type_name -> csar.v1.DebugHeadersProto
 	32,  // 21: csar.v1.FullConfigSnapshot.global_access_control:type_name -> csar.v1.AccessControlProto
-	5,   // 22: csar.v1.RouteSnapshot.routes:type_name -> csar.v1.RouteConfig
-	10,  // 23: csar.v1.RouteConfig.security:type_name -> csar.v1.SecurityConfigProto
-	12,  // 24: csar.v1.RouteConfig.traffic:type_name -> csar.v1.TrafficConfigProto
-	6,   // 25: csar.v1.RouteConfig.backend:type_name -> csar.v1.BackendConfigProto
-	10,  // 26: csar.v1.RouteConfig.securities:type_name -> csar.v1.SecurityConfigProto
-	12,  // 27: csar.v1.RouteConfig.traffic_config:type_name -> csar.v1.TrafficConfigProto
-	18,  // 28: csar.v1.RouteConfig.retry:type_name -> csar.v1.RetryConfigProto
-	19,  // 29: csar.v1.RouteConfig.redact:type_name -> csar.v1.RedactConfigProto
-	21,  // 30: csar.v1.RouteConfig.cors:type_name -> csar.v1.CORSConfigProto
-	22,  // 31: csar.v1.RouteConfig.tenant:type_name -> csar.v1.TenantConfigProto
-	30,  // 32: csar.v1.RouteConfig.cache:type_name -> csar.v1.CacheConfigProto
-	17,  // 33: csar.v1.RouteConfig.auth_validate:type_name -> csar.v1.AuthValidateConfigProto
-	32,  // 34: csar.v1.RouteConfig.access:type_name -> csar.v1.AccessControlProto
-	33,  // 35: csar.v1.RouteConfig.resilience:type_name -> csar.v1.ResilienceConfigProto
-	56,  // 36: csar.v1.RouteConfig.headers:type_name -> csar.v1.RouteConfig.HeadersEntry
-	35,  // 37: csar.v1.RouteConfig.protocol:type_name -> csar.v1.ProtocolPolicyProto
-	37,  // 38: csar.v1.RouteConfig.authz:type_name -> csar.v1.AuthzRouteConfigProto
-	31,  // 39: csar.v1.RouteConfig.cache_invalidate:type_name -> csar.v1.CacheInvalidationConfigProto
-	20,  // 40: csar.v1.RouteConfig.audit_capture:type_name -> csar.v1.AuditCaptureConfigProto
-	7,   // 41: csar.v1.BackendConfigProto.health_check:type_name -> csar.v1.HealthCheckConfigProto
-	8,   // 42: csar.v1.BackendConfigProto.tls:type_name -> csar.v1.BackendTLSConfigProto
-	64,  // 43: csar.v1.BackendConfigProto.timeout:type_name -> google.protobuf.Duration
-	64,  // 44: csar.v1.HealthCheckConfigProto.interval:type_name -> google.protobuf.Duration
-	64,  // 45: csar.v1.HealthCheckConfigProto.timeout:type_name -> google.protobuf.Duration
-	64,  // 46: csar.v1.BackendPoolConfigProto.dial_timeout:type_name -> google.protobuf.Duration
-	64,  // 47: csar.v1.BackendPoolConfigProto.tls_handshake_timeout:type_name -> google.protobuf.Duration
-	64,  // 48: csar.v1.BackendPoolConfigProto.response_header_timeout:type_name -> google.protobuf.Duration
-	64,  // 49: csar.v1.BackendPoolConfigProto.idle_conn_timeout:type_name -> google.protobuf.Duration
-	64,  // 50: csar.v1.BackendPoolConfigProto.expect_continue_timeout:type_name -> google.protobuf.Duration
-	64,  // 51: csar.v1.TrafficConfigProto.max_wait:type_name -> google.protobuf.Duration
-	13,  // 52: csar.v1.TrafficConfigProto.vip_overrides:type_name -> csar.v1.VIPOverrideProto
-	14,  // 53: csar.v1.TrafficConfigProto.adaptive_backpressure:type_name -> csar.v1.AdaptiveBackpressureProto
-	57,  // 54: csar.v1.VIPOverrideProto.values:type_name -> csar.v1.VIPOverrideProto.ValuesEntry
-	64,  // 55: csar.v1.ThrottlingPolicyProto.max_wait:type_name -> google.protobuf.Duration
-	13,  // 56: csar.v1.ThrottlingPolicyProto.vip_overrides:type_name -> csar.v1.VIPOverrideProto
-	64,  // 57: csar.v1.GlobalThrottleProto.max_wait:type_name -> google.protobuf.Duration
-	64,  // 58: csar.v1.AuthValidateConfigProto.cache_ttl:type_name -> google.protobuf.Duration
-	58,  // 59: csar.v1.AuthValidateConfigProto.required_claims:type_name -> csar.v1.AuthValidateConfigProto.RequiredClaimsEntry
-	59,  // 60: csar.v1.AuthValidateConfigProto.forward_claims:type_name -> csar.v1.AuthValidateConfigProto.ForwardClaimsEntry
-	11,  // 61: csar.v1.AuthValidateConfigProto.issue_tokens:type_name -> csar.v1.IssueTokenConfigProto
-	17,  // 62: csar.v1.AuthValidateConfigProto.methods:type_name -> csar.v1.AuthValidateConfigProto
-	64,  // 63: csar.v1.RetryConfigProto.backoff:type_name -> google.protobuf.Duration
-	64,  // 64: csar.v1.RetryConfigProto.max_backoff:type_name -> google.protobuf.Duration
-	64,  // 65: csar.v1.RetryConfigProto.max_internal_wait:type_name -> google.protobuf.Duration
-	60,  // 66: csar.v1.TenantConfigProto.backends:type_name -> csar.v1.TenantConfigProto.BackendsEntry
-	64,  // 67: csar.v1.CacheTTLRuleProto.ttl:type_name -> google.protobuf.Duration
-	64,  // 68: csar.v1.CacheResponseTTLRuleProto.ttl:type_name -> google.protobuf.Duration
-	27,  // 69: csar.v1.CacheBypassConfigProto.headers:type_name -> csar.v1.CacheBypassHeaderProto
-	64,  // 70: csar.v1.CacheCoalesceConfigProto.wait:type_name -> google.protobuf.Duration
-	64,  // 71: csar.v1.CacheConfigProto.ttl:type_name -> google.protobuf.Duration
-	64,  // 72: csar.v1.CacheConfigProto.operation_timeout:type_name -> google.protobuf.Duration
-	23,  // 73: csar.v1.CacheConfigProto.ttl_rules:type_name -> csar.v1.CacheTTLRuleProto
-	24,  // 74: csar.v1.CacheConfigProto.key_query:type_name -> csar.v1.CacheKeyQueryConfigProto
-	64,  // 75: csar.v1.CacheConfigProto.stale_if_error:type_name -> google.protobuf.Duration
-	64,  // 76: csar.v1.CacheConfigProto.stale_while_revalidate:type_name -> google.protobuf.Duration
-	25,  // 77: csar.v1.CacheConfigProto.response_ttl_rules:type_name -> csar.v1.CacheResponseTTLRuleProto
-	26,  // 78: csar.v1.CacheConfigProto.response_tags:type_name -> csar.v1.CacheResponseTagProto
-	28,  // 79: csar.v1.CacheConfigProto.bypass:type_name -> csar.v1.CacheBypassConfigProto
-	29,  // 80: csar.v1.CacheConfigProto.coalesce:type_name -> csar.v1.CacheCoalesceConfigProto
-	64,  // 81: csar.v1.CacheInvalidationConfigProto.operation_timeout:type_name -> google.protobuf.Duration
-	64,  // 82: csar.v1.CacheInvalidationConfigProto.debounce:type_name -> google.protobuf.Duration
-	64,  // 83: csar.v1.CircuitBreakerProfileProto.interval:type_name -> google.protobuf.Duration
-	64,  // 84: csar.v1.CircuitBreakerProfileProto.timeout:type_name -> google.protobuf.Duration
-	37,  // 85: csar.v1.AuthzRouteConfigProto.any_of:type_name -> csar.v1.AuthzRouteConfigProto
-	61,  // 86: csar.v1.QuotaAssignment.quotas:type_name -> csar.v1.QuotaAssignment.QuotasEntry
-	62,  // 87: csar.v1.HealthReport.queue_depths:type_name -> csar.v1.HealthReport.QueueDepthsEntry
-	63,  // 88: csar.v1.HealthReport.metadata:type_name -> csar.v1.HealthReport.MetadataEntry
-	34,  // 89: csar.v1.FullConfigSnapshot.CircuitBreakersEntry.value:type_name -> csar.v1.CircuitBreakerProfileProto
-	10,  // 90: csar.v1.FullConfigSnapshot.SecurityProfilesEntry.value:type_name -> csar.v1.SecurityConfigProto
-	15,  // 91: csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry.value:type_name -> csar.v1.ThrottlingPolicyProto
-	21,  // 92: csar.v1.FullConfigSnapshot.CorsPoliciesEntry.value:type_name -> csar.v1.CORSConfigProto
-	18,  // 93: csar.v1.FullConfigSnapshot.RetryPoliciesEntry.value:type_name -> csar.v1.RetryConfigProto
-	19,  // 94: csar.v1.FullConfigSnapshot.RedactPoliciesEntry.value:type_name -> csar.v1.RedactConfigProto
-	17,  // 95: csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry.value:type_name -> csar.v1.AuthValidateConfigProto
-	37,  // 96: csar.v1.FullConfigSnapshot.AuthzPoliciesEntry.value:type_name -> csar.v1.AuthzRouteConfigProto
-	8,   // 97: csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry.value:type_name -> csar.v1.BackendTLSConfigProto
-	9,   // 98: csar.v1.FullConfigSnapshot.BackendPoolsEntry.value:type_name -> csar.v1.BackendPoolConfigProto
-	30,  // 99: csar.v1.FullConfigSnapshot.CachePoliciesEntry.value:type_name -> csar.v1.CacheConfigProto
-	31,  // 100: csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry.value:type_name -> csar.v1.CacheInvalidationConfigProto
-	20,  // 101: csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntry.value:type_name -> csar.v1.AuditCaptureConfigProto
-	39,  // 102: csar.v1.QuotaAssignment.QuotasEntry.value:type_name -> csar.v1.RouteQuota
-	0,   // 103: csar.v1.CoordinatorService.Subscribe:input_type -> csar.v1.SubscribeRequest
-	40,  // 104: csar.v1.CoordinatorService.ReportHealth:input_type -> csar.v1.HealthReport
-	1,   // 105: csar.v1.CoordinatorService.Subscribe:output_type -> csar.v1.ConfigUpdate
-	41,  // 106: csar.v1.CoordinatorService.ReportHealth:output_type -> csar.v1.HealthAck
-	105, // [105:107] is the sub-list for method output_type
-	103, // [103:105] is the sub-list for method input_type
-	103, // [103:103] is the sub-list for extension type_name
-	103, // [103:103] is the sub-list for extension extendee
-	0,   // [0:103] is the sub-list for field type_name
+	42,  // 22: csar.v1.FullConfigSnapshot.ssrf_protection:type_name -> csar.v1.SSRFProtectionProto
+	5,   // 23: csar.v1.RouteSnapshot.routes:type_name -> csar.v1.RouteConfig
+	10,  // 24: csar.v1.RouteConfig.security:type_name -> csar.v1.SecurityConfigProto
+	12,  // 25: csar.v1.RouteConfig.traffic:type_name -> csar.v1.TrafficConfigProto
+	6,   // 26: csar.v1.RouteConfig.backend:type_name -> csar.v1.BackendConfigProto
+	10,  // 27: csar.v1.RouteConfig.securities:type_name -> csar.v1.SecurityConfigProto
+	12,  // 28: csar.v1.RouteConfig.traffic_config:type_name -> csar.v1.TrafficConfigProto
+	18,  // 29: csar.v1.RouteConfig.retry:type_name -> csar.v1.RetryConfigProto
+	19,  // 30: csar.v1.RouteConfig.redact:type_name -> csar.v1.RedactConfigProto
+	21,  // 31: csar.v1.RouteConfig.cors:type_name -> csar.v1.CORSConfigProto
+	22,  // 32: csar.v1.RouteConfig.tenant:type_name -> csar.v1.TenantConfigProto
+	30,  // 33: csar.v1.RouteConfig.cache:type_name -> csar.v1.CacheConfigProto
+	17,  // 34: csar.v1.RouteConfig.auth_validate:type_name -> csar.v1.AuthValidateConfigProto
+	32,  // 35: csar.v1.RouteConfig.access:type_name -> csar.v1.AccessControlProto
+	33,  // 36: csar.v1.RouteConfig.resilience:type_name -> csar.v1.ResilienceConfigProto
+	57,  // 37: csar.v1.RouteConfig.headers:type_name -> csar.v1.RouteConfig.HeadersEntry
+	35,  // 38: csar.v1.RouteConfig.protocol:type_name -> csar.v1.ProtocolPolicyProto
+	37,  // 39: csar.v1.RouteConfig.authz:type_name -> csar.v1.AuthzRouteConfigProto
+	31,  // 40: csar.v1.RouteConfig.cache_invalidate:type_name -> csar.v1.CacheInvalidationConfigProto
+	20,  // 41: csar.v1.RouteConfig.audit_capture:type_name -> csar.v1.AuditCaptureConfigProto
+	7,   // 42: csar.v1.BackendConfigProto.health_check:type_name -> csar.v1.HealthCheckConfigProto
+	8,   // 43: csar.v1.BackendConfigProto.tls:type_name -> csar.v1.BackendTLSConfigProto
+	65,  // 44: csar.v1.BackendConfigProto.timeout:type_name -> google.protobuf.Duration
+	65,  // 45: csar.v1.HealthCheckConfigProto.interval:type_name -> google.protobuf.Duration
+	65,  // 46: csar.v1.HealthCheckConfigProto.timeout:type_name -> google.protobuf.Duration
+	65,  // 47: csar.v1.BackendPoolConfigProto.dial_timeout:type_name -> google.protobuf.Duration
+	65,  // 48: csar.v1.BackendPoolConfigProto.tls_handshake_timeout:type_name -> google.protobuf.Duration
+	65,  // 49: csar.v1.BackendPoolConfigProto.response_header_timeout:type_name -> google.protobuf.Duration
+	65,  // 50: csar.v1.BackendPoolConfigProto.idle_conn_timeout:type_name -> google.protobuf.Duration
+	65,  // 51: csar.v1.BackendPoolConfigProto.expect_continue_timeout:type_name -> google.protobuf.Duration
+	65,  // 52: csar.v1.TrafficConfigProto.max_wait:type_name -> google.protobuf.Duration
+	13,  // 53: csar.v1.TrafficConfigProto.vip_overrides:type_name -> csar.v1.VIPOverrideProto
+	14,  // 54: csar.v1.TrafficConfigProto.adaptive_backpressure:type_name -> csar.v1.AdaptiveBackpressureProto
+	58,  // 55: csar.v1.VIPOverrideProto.values:type_name -> csar.v1.VIPOverrideProto.ValuesEntry
+	65,  // 56: csar.v1.ThrottlingPolicyProto.max_wait:type_name -> google.protobuf.Duration
+	13,  // 57: csar.v1.ThrottlingPolicyProto.vip_overrides:type_name -> csar.v1.VIPOverrideProto
+	65,  // 58: csar.v1.GlobalThrottleProto.max_wait:type_name -> google.protobuf.Duration
+	65,  // 59: csar.v1.AuthValidateConfigProto.cache_ttl:type_name -> google.protobuf.Duration
+	59,  // 60: csar.v1.AuthValidateConfigProto.required_claims:type_name -> csar.v1.AuthValidateConfigProto.RequiredClaimsEntry
+	60,  // 61: csar.v1.AuthValidateConfigProto.forward_claims:type_name -> csar.v1.AuthValidateConfigProto.ForwardClaimsEntry
+	11,  // 62: csar.v1.AuthValidateConfigProto.issue_tokens:type_name -> csar.v1.IssueTokenConfigProto
+	17,  // 63: csar.v1.AuthValidateConfigProto.methods:type_name -> csar.v1.AuthValidateConfigProto
+	65,  // 64: csar.v1.RetryConfigProto.backoff:type_name -> google.protobuf.Duration
+	65,  // 65: csar.v1.RetryConfigProto.max_backoff:type_name -> google.protobuf.Duration
+	65,  // 66: csar.v1.RetryConfigProto.max_internal_wait:type_name -> google.protobuf.Duration
+	61,  // 67: csar.v1.TenantConfigProto.backends:type_name -> csar.v1.TenantConfigProto.BackendsEntry
+	65,  // 68: csar.v1.CacheTTLRuleProto.ttl:type_name -> google.protobuf.Duration
+	65,  // 69: csar.v1.CacheResponseTTLRuleProto.ttl:type_name -> google.protobuf.Duration
+	27,  // 70: csar.v1.CacheBypassConfigProto.headers:type_name -> csar.v1.CacheBypassHeaderProto
+	65,  // 71: csar.v1.CacheCoalesceConfigProto.wait:type_name -> google.protobuf.Duration
+	65,  // 72: csar.v1.CacheConfigProto.ttl:type_name -> google.protobuf.Duration
+	65,  // 73: csar.v1.CacheConfigProto.operation_timeout:type_name -> google.protobuf.Duration
+	23,  // 74: csar.v1.CacheConfigProto.ttl_rules:type_name -> csar.v1.CacheTTLRuleProto
+	24,  // 75: csar.v1.CacheConfigProto.key_query:type_name -> csar.v1.CacheKeyQueryConfigProto
+	65,  // 76: csar.v1.CacheConfigProto.stale_if_error:type_name -> google.protobuf.Duration
+	65,  // 77: csar.v1.CacheConfigProto.stale_while_revalidate:type_name -> google.protobuf.Duration
+	25,  // 78: csar.v1.CacheConfigProto.response_ttl_rules:type_name -> csar.v1.CacheResponseTTLRuleProto
+	26,  // 79: csar.v1.CacheConfigProto.response_tags:type_name -> csar.v1.CacheResponseTagProto
+	28,  // 80: csar.v1.CacheConfigProto.bypass:type_name -> csar.v1.CacheBypassConfigProto
+	29,  // 81: csar.v1.CacheConfigProto.coalesce:type_name -> csar.v1.CacheCoalesceConfigProto
+	65,  // 82: csar.v1.CacheInvalidationConfigProto.operation_timeout:type_name -> google.protobuf.Duration
+	65,  // 83: csar.v1.CacheInvalidationConfigProto.debounce:type_name -> google.protobuf.Duration
+	65,  // 84: csar.v1.CircuitBreakerProfileProto.interval:type_name -> google.protobuf.Duration
+	65,  // 85: csar.v1.CircuitBreakerProfileProto.timeout:type_name -> google.protobuf.Duration
+	37,  // 86: csar.v1.AuthzRouteConfigProto.any_of:type_name -> csar.v1.AuthzRouteConfigProto
+	62,  // 87: csar.v1.QuotaAssignment.quotas:type_name -> csar.v1.QuotaAssignment.QuotasEntry
+	63,  // 88: csar.v1.HealthReport.queue_depths:type_name -> csar.v1.HealthReport.QueueDepthsEntry
+	64,  // 89: csar.v1.HealthReport.metadata:type_name -> csar.v1.HealthReport.MetadataEntry
+	34,  // 90: csar.v1.FullConfigSnapshot.CircuitBreakersEntry.value:type_name -> csar.v1.CircuitBreakerProfileProto
+	10,  // 91: csar.v1.FullConfigSnapshot.SecurityProfilesEntry.value:type_name -> csar.v1.SecurityConfigProto
+	15,  // 92: csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry.value:type_name -> csar.v1.ThrottlingPolicyProto
+	21,  // 93: csar.v1.FullConfigSnapshot.CorsPoliciesEntry.value:type_name -> csar.v1.CORSConfigProto
+	18,  // 94: csar.v1.FullConfigSnapshot.RetryPoliciesEntry.value:type_name -> csar.v1.RetryConfigProto
+	19,  // 95: csar.v1.FullConfigSnapshot.RedactPoliciesEntry.value:type_name -> csar.v1.RedactConfigProto
+	17,  // 96: csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry.value:type_name -> csar.v1.AuthValidateConfigProto
+	37,  // 97: csar.v1.FullConfigSnapshot.AuthzPoliciesEntry.value:type_name -> csar.v1.AuthzRouteConfigProto
+	8,   // 98: csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry.value:type_name -> csar.v1.BackendTLSConfigProto
+	9,   // 99: csar.v1.FullConfigSnapshot.BackendPoolsEntry.value:type_name -> csar.v1.BackendPoolConfigProto
+	30,  // 100: csar.v1.FullConfigSnapshot.CachePoliciesEntry.value:type_name -> csar.v1.CacheConfigProto
+	31,  // 101: csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry.value:type_name -> csar.v1.CacheInvalidationConfigProto
+	20,  // 102: csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntry.value:type_name -> csar.v1.AuditCaptureConfigProto
+	39,  // 103: csar.v1.QuotaAssignment.QuotasEntry.value:type_name -> csar.v1.RouteQuota
+	0,   // 104: csar.v1.CoordinatorService.Subscribe:input_type -> csar.v1.SubscribeRequest
+	40,  // 105: csar.v1.CoordinatorService.ReportHealth:input_type -> csar.v1.HealthReport
+	1,   // 106: csar.v1.CoordinatorService.Subscribe:output_type -> csar.v1.ConfigUpdate
+	41,  // 107: csar.v1.CoordinatorService.ReportHealth:output_type -> csar.v1.HealthAck
+	106, // [106:108] is the sub-list for method output_type
+	104, // [104:106] is the sub-list for method input_type
+	104, // [104:104] is the sub-list for extension type_name
+	104, // [104:104] is the sub-list for extension extendee
+	0,   // [0:104] is the sub-list for field type_name
 }
 
 func init() { file_proto_csar_v1_coordinator_proto_init() }
@@ -4434,13 +4548,15 @@ func file_proto_csar_v1_coordinator_proto_init() {
 		(*ConfigUpdate_TokenInvalidation)(nil),
 		(*ConfigUpdate_FullConfigSnapshot)(nil),
 	}
+	file_proto_csar_v1_coordinator_proto_msgTypes[3].OneofWrappers = []any{}
+	file_proto_csar_v1_coordinator_proto_msgTypes[42].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_csar_v1_coordinator_proto_rawDesc), len(file_proto_csar_v1_coordinator_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   64,
+			NumMessages:   65,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

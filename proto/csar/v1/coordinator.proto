@@ -99,6 +99,16 @@ message FullConfigSnapshot {
   GlobalThrottleProto global_throttle = 9;
   DebugHeadersProto debug_headers = 10;
   AccessControlProto global_access_control = 11;
+
+  // Absent on legacy coordinators: retain the router's current SSRF policy.
+  // New coordinators send this even when YAML omits ssrf_protection, so
+  // removing the block resets the policy to secure defaults.
+  SSRFProtectionProto ssrf_protection = 18;
+
+  // Redis policy key namespace only; connection settings remain router-local.
+  // Absent on legacy coordinators: retain the active prefix. Present but empty
+  // resets to the built-in throttle/cache prefixes.
+  optional string redis_key_prefix = 19;
 }
 
 // RouteSnapshot contains the full set of routes (legacy, kept for backward compat).
@@ -546,4 +556,13 @@ message HealthReport {
 // HealthAck is the coordinator's response to a health report.
 message HealthAck {
   bool acknowledged = 1;
+}
+
+message SSRFProtectionProto {
+  // Omitted switches default to true, matching the YAML configuration.
+  optional bool block_private = 1;
+  optional bool block_loopback = 2;
+  optional bool block_link_local = 3;
+  optional bool block_metadata = 4;
+  repeated string allowed_internal_hosts = 5;
 }

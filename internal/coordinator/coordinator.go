@@ -4,14 +4,17 @@ import (
 	"context"
 	"log/slog"
 	"math"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/ledatu/csar/internal/config"
+	"github.com/ledatu/csar/internal/configsource"
 	"github.com/ledatu/csar/internal/statestore"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -31,8 +34,9 @@ type Coordinator struct {
 	// On router reconnect, missed events (version > last_seen_version) are replayed.
 	invalidationOutbox *InvalidationOutbox
 
-	// topLevelConfig holds top-level policy maps pushed alongside routes.
-	topLevelConfig *config.Config
+	// topLevelConfig is the last complete source config; nil uses store-only mode.
+	topLevelConfig  *config.Config
+	restartSnapshot config.RestartRequiredSnapshot
 
 	snapshotDebounce time.Duration
 }
@@ -97,10 +101,11 @@ func (o *InvalidationOutbox) ReplaySince(sinceVersion uint64) []invalidationEntr
 
 // subscriber tracks a connected router and its gRPC stream.
 type subscriber struct {
-	routerID string
-	address  string
-	stream   csarv1.CoordinatorService_SubscribeServer
-	metadata map[string]string
+	routerID      string
+	address       string
+	stream        csarv1.CoordinatorService_SubscribeServer
+	metadata      map[string]string
+	configChanged chan struct{}
 }
 
 // New creates a new Coordinator with the given state store.
@@ -126,12 +131,23 @@ func (c *Coordinator) SetSnapshotDebounce(d time.Duration) {
 	c.snapshotDebounce = d
 }
 
-// SetTopLevelConfig stores the top-level config (policies, global settings)
-// so they can be included in FullConfigSnapshot messages pushed to routers.
+// SetTopLevelConfig publishes a complete, successfully applied source config.
+// Routes and policies must come from the same commit, even while route-store
+// writes are in progress. The caller must not mutate cfg after publication.
 func (c *Coordinator) SetTopLevelConfig(cfg *config.Config) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	for _, field := range c.restartSnapshot.Changes(cfg) {
+		c.logger.Warn("configuration field changed; restart routers to apply", "field", field)
+	}
+	c.restartSnapshot = config.SnapshotRestartRequired(cfg)
 	c.topLevelConfig = cfg
+	for _, sub := range c.subscribers {
+		select {
+		case sub.configChanged <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // Subscribe implements the gRPC Subscribe stream.
@@ -159,10 +175,11 @@ func (c *Coordinator) Subscribe(req *csarv1.SubscribeRequest, stream csarv1.Coor
 	}
 
 	sub := &subscriber{
-		routerID: req.RouterId,
-		address:  req.RouterAddress,
-		stream:   stream,
-		metadata: req.Metadata,
+		routerID:      req.RouterId,
+		address:       req.RouterAddress,
+		stream:        stream,
+		metadata:      req.Metadata,
+		configChanged: make(chan struct{}, 1),
 	}
 
 	c.mu.Lock()
@@ -176,7 +193,9 @@ func (c *Coordinator) Subscribe(req *csarv1.SubscribeRequest, stream csarv1.Coor
 
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
-		c.store.UnregisterRouter(cleanupCtx, req.RouterId) //nolint:errcheck // best-effort cleanup on disconnect
+		if err := c.store.UnregisterRouter(cleanupCtx, req.RouterId); err != nil {
+			c.logger.Warn("router disconnect cleanup failed", "router_id", req.RouterId, "error", err)
+		}
 		c.logger.Info("router disconnected", "router_id", req.RouterId)
 
 		c.redistributeQuotas()
@@ -238,25 +257,24 @@ func (c *Coordinator) Subscribe(req *csarv1.SubscribeRequest, stream csarv1.Coor
 			if !ok {
 				return nil
 			}
-			if !c.waitForQuietRoutes(stream.Context(), routeCh) {
-				return nil
-			}
-			if err := c.sendFullConfigSnapshot(stream); err != nil {
-				c.logger.Error("failed to send route update",
-					"router_id", req.RouterId,
-					"error", err,
-				)
-				return err
-			}
+		case <-sub.configChanged:
+		}
+		if !c.waitForQuietRoutes(stream.Context(), routeCh, sub.configChanged) {
+			return nil
+		}
+		if err := c.sendFullConfigSnapshot(stream); err != nil {
+			c.logger.Error("failed to send config update",
+				"router_id", req.RouterId,
+				"error", err,
+			)
+			return err
 		}
 	}
 }
 
-// waitForQuietRoutes absorbs further route events until none has arrived for
-// the debounce period, so a publish that writes many routes reaches routers as
-// one snapshot instead of one router rebuild per route. It reports false when
-// the stream or the watch has ended.
-func (c *Coordinator) waitForQuietRoutes(ctx context.Context, routeCh <-chan []statestore.RouteEntry) bool {
+// waitForQuietRoutes coalesces route and top-level policy events into one
+// snapshot per publish. It reports false when the stream or watch has ended.
+func (c *Coordinator) waitForQuietRoutes(ctx context.Context, routeCh <-chan []statestore.RouteEntry, configChanged <-chan struct{}) bool {
 	if c.snapshotDebounce <= 0 {
 		return true
 	}
@@ -272,6 +290,8 @@ func (c *Coordinator) waitForQuietRoutes(ctx context.Context, routeCh <-chan []s
 			if !ok {
 				return false
 			}
+			quiet.Reset(c.snapshotDebounce)
+		case <-configChanged:
 			quiet.Reset(c.snapshotDebounce)
 		case <-quiet.C:
 			return true
@@ -348,7 +368,7 @@ func (c *Coordinator) BroadcastTokenInvalidation(tokenRefs []string) {
 
 // sendFullConfigSnapshot sends routes plus top-level policies to a subscriber.
 func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_SubscribeServer) error {
-	routes, err := c.store.GetRoutes(stream.Context())
+	routes, cfg, err := c.routesAndConfig(stream.Context())
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to get routes: %v", err)
 	}
@@ -360,11 +380,13 @@ func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_Su
 
 	snapshot := &csarv1.FullConfigSnapshot{Routes: protoRoutes}
 
-	c.mu.RLock()
-	cfg := c.topLevelConfig
-	c.mu.RUnlock()
-
 	if cfg != nil {
+		snapshot.SsrfProtection = ssrfProtectionToProto(cfg.SSRF)
+		prefix := ""
+		if cfg.Redis != nil {
+			prefix = cfg.Redis.KeyPrefix
+		}
+		snapshot.RedisKeyPrefix = proto.String(prefix)
 		snapshot.CircuitBreakers = circuitBreakersToProto(cfg.CircuitBreakers)
 		snapshot.SecurityProfiles = securityProfilesToProto(cfg.SecurityProfiles)
 		snapshot.ThrottlingPolicies = throttlingPoliciesToProto(cfg.ThrottlingPolicies)
@@ -407,9 +429,45 @@ func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_Su
 	})
 }
 
+func (c *Coordinator) routesAndConfig(ctx context.Context) ([]statestore.RouteEntry, *config.Config, error) {
+	c.mu.RLock()
+	cfg := c.topLevelConfig
+	c.mu.RUnlock()
+	var routes []statestore.RouteEntry
+	if cfg != nil {
+		entries := configsource.ConfigToRouteEntries(cfg)
+		routes = make([]statestore.RouteEntry, 0, len(entries))
+		for key := range entries {
+			routes = append(routes, entries[key])
+		}
+	} else {
+		var err error
+		routes, err = c.store.GetRoutes(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	// Repeated routes participate in the router's snapshot checksum.
+	sort.Slice(routes, func(i, j int) bool { return routes[i].ID < routes[j].ID })
+	return routes, cfg, nil
+}
+
+func ssrfProtectionToProto(cfg *config.SSRFConfig) *csarv1.SSRFProtectionProto {
+	if cfg == nil {
+		cfg = &config.SSRFConfig{}
+	}
+	return &csarv1.SSRFProtectionProto{
+		BlockPrivate:         proto.Bool(cfg.IsBlockPrivate()),
+		BlockLoopback:        proto.Bool(cfg.IsBlockLoopback()),
+		BlockLinkLocal:       proto.Bool(cfg.IsBlockLinkLocal()),
+		BlockMetadata:        proto.Bool(cfg.IsBlockMetadata()),
+		AllowedInternalHosts: append([]string(nil), cfg.AllowedInternalHosts...),
+	}
+}
+
 // sendQuotaAssignment sends the current quota allocation to a specific router.
 func (c *Coordinator) sendQuotaAssignment(_ string, stream csarv1.CoordinatorService_SubscribeServer) error {
-	routes, err := c.store.GetRoutes(stream.Context())
+	routes, _, err := c.routesAndConfig(stream.Context())
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to get routes: %v", err)
 	}

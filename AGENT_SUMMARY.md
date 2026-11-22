@@ -29,6 +29,11 @@ and internal admin surfaces.
 - Coordinator admin access is mTLS-protected and profile-guarded.
 
 ## Critical Flows
+- Source-config snapshots and quota assignments use the last successful complete
+  config; partial route-store writes never combine new routes with old policies.
+  Store-only mode remains supported. Route ordering is stable for snapshot hashes.
+  Failed router builds discard staged throttle registrations and stop their health
+  checks, preserving the live coordinator quota registry.
 - Opt-in `--stored-token-coherence` uses inspected stored expiry, durable exact-ref
   etcd revisions and trusted upstream-401 reports. Read
   `STORED_CREDENTIAL_LIFETIME.md` for the all-writer activation boundary,
@@ -59,6 +64,23 @@ and internal admin surfaces.
 - Readiness and health sidecars are part of the operational contract.
 
 ## Config And Secrets
+- Optional snapshot `redis_key_prefix` field 19 preserves namespace presence:
+  absent legacy fields retain the last successful prefix; explicit empty and
+  omitted full-YAML Redis blocks restore built-in prefixes. Connection secrets
+  remain local. Upgrade routers, then coordinators before relying on changes.
+- Global throttle is router-owned, so removing its block disables it and a
+  failed rebuild cannot alter the current global limiter. Per-route quota
+  management remains shared with the coordinator client.
+- `config.SnapshotRestartRequired` captures all bootstrap blocks, excluding hot
+  Redis prefix and audit capture. Routers warn on complete YAML reloads;
+  coordinators warn on changes between successful config applies. Diagnostics
+  report field names only, including for secret changes, and never values.
+- SSRF policy is rebuilt on every router reload. Coordinator snapshots carry
+  optional `ssrf_protection` field 18; absent legacy messages retain the last
+  applied policy with a warning, while omitted YAML blocks reset to secure
+  defaults. Policy-only config applies notify active subscriptions through
+  the existing debounce. Upgrade routers, then coordinators; older routers
+  ignore the field. In-flight requests may finish under their previous policy.
 - Explicitly cached POST reads include an exact-body SHA-256 digest, request
   Content-Type and Content-Encoding in a separate versioned key format.
   `max_request_body_size` defaults to 64 KiB, supports named-policy scalar
@@ -124,6 +146,14 @@ and internal admin surfaces.
   in router code.
 
 ## Required Quality Gates
+- Standalone `make lint-security` scans maintained source once, fails on findings
+  and excludes generated protobuf files. Reviewed exceptions use rule-specific
+  `#nosec` reasons; G114 HTTP timeout checking is enabled in strict lint too.
+- Security regressions cover partial request-body failures (400 before upstream),
+  oversized-body closer preservation, root-scoped MCP scaffold collection,
+  config/private-key overwrite permissions, escaped tenant JSON, DSN diagnostics
+  and lease-revocation errors. Scaffold configs use one tracked `.tmpl` source
+  and generated PostgreSQL Compose services require an explicit password.
 - `make lint`
 - `make test`
 - `make test-race`

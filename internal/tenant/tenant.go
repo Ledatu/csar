@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ledatu/csar/internal/apierror"
 	csarproxy "github.com/ledatu/csar/internal/proxy"
 )
 
@@ -109,9 +110,7 @@ func (tr *Router) Proxy(cfg Config, fallbackHandler http.Handler) http.Handler {
 				"header", cfg.Header,
 				"tenant_id", tenantID,
 			)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			fmt.Fprintf(w, `{"code":"tenant_not_found","status":404,"message":"no backend for tenant","detail":%q}`, tenantID) //nolint:gosec // G705: tenantID is sanitized by route matching
+			apierror.New(apierror.CodeTenantNotFound, http.StatusNotFound, "no backend for tenant").WithDetail(tenantID).Write(w)
 			return
 		}
 
@@ -122,9 +121,7 @@ func (tr *Router) Proxy(cfg Config, fallbackHandler http.Handler) http.Handler {
 				"target_url", targetURL,
 				"error", err,
 			)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadGateway)
-			fmt.Fprint(w, `{"error":"tenant backend unavailable"}`)
+			apierror.New(apierror.CodeUpstreamError, http.StatusBadGateway, "tenant backend unavailable").Write(w)
 			return
 		}
 
@@ -167,15 +164,13 @@ func (tr *Router) getOrCreateProxy(targetURL string, transport http.RoundTripper
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			w.Header().Set("Content-Type", "application/json")
+			tr.logger.Warn("tenant upstream request failed", "error", err)
 			var netErr net.Error
 			if r.Context().Err() != nil || (errors.As(err, &netErr) && netErr.Timeout()) {
-				w.WriteHeader(http.StatusGatewayTimeout)
-				fmt.Fprintf(w, `{"code":"upstream_error","status":504,"message":"tenant upstream timeout","detail":%q}`, err.Error())
+				apierror.New(apierror.CodeUpstreamError, http.StatusGatewayTimeout, "tenant upstream timeout").Write(w)
 				return
 			}
-			w.WriteHeader(http.StatusBadGateway)
-			fmt.Fprintf(w, `{"code":"upstream_error","status":502,"message":"tenant upstream error","detail":%q}`, err.Error())
+			apierror.New(apierror.CodeUpstreamError, http.StatusBadGateway, "tenant upstream error").Write(w)
 		},
 		Transport: transport,
 	}

@@ -1,10 +1,13 @@
 package helper
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"text/template"
 )
 
 //go:embed templates/*
@@ -45,30 +48,70 @@ func InitProfile(profile Profile, outputDir string, force bool) error {
 
 	// Map profile -> template files
 	templates := profileTemplates(profile)
+	var files []struct {
+		path string
+		data []byte
+	}
 
 	for srcPath, dstName := range templates {
 		data, err := templateFS.ReadFile(srcPath)
 		if err != nil {
 			return fmt.Errorf("reading embedded template %q: %w", srcPath, err)
 		}
+		if strings.HasSuffix(srcPath, ".tmpl") {
+			tpl, err := template.New(srcPath).Parse(string(data))
+			if err != nil {
+				return fmt.Errorf("parsing embedded template %q: %w", srcPath, err)
+			}
+			var rendered bytes.Buffer
+			if err := tpl.Execute(&rendered, profile); err != nil {
+				return fmt.Errorf("rendering embedded template %q: %w", srcPath, err)
+			}
+			data = rendered.Bytes()
+		}
 
 		dstPath := filepath.Join(outputDir, dstName)
 
-		// Guard against silent overwrite unless --force is given.
-		if !force {
-			if _, statErr := os.Stat(dstPath); statErr == nil {
-				return fmt.Errorf("file %q already exists; use --force to overwrite", dstPath)
+		files = append(files, struct {
+			path string
+			data []byte
+		}{dstPath, data})
+	}
+	if !force {
+		for _, file := range files {
+			if _, err := os.Lstat(file.path); err == nil {
+				return fmt.Errorf("file %q already exists; use --force to overwrite", file.path)
+			} else if !os.IsNotExist(err) {
+				return fmt.Errorf("checking %q: %w", file.path, err)
 			}
 		}
-
-		if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
-			return fmt.Errorf("creating directory for %q: %w", dstPath, err)
+	}
+	if err := os.MkdirAll(outputDir, 0o750); err != nil {
+		return fmt.Errorf("creating output directory: %w", err)
+	}
+	for _, file := range files {
+		dstPath, data := file.path, file.data
+		flags := os.O_WRONLY | os.O_CREATE
+		if !force {
+			flags |= os.O_EXCL
 		}
-
-		if err := os.WriteFile(dstPath, data, 0o644); err != nil { //nolint:gosec // G306: template file is intentionally world-readable
+		out, err := os.OpenFile(dstPath, flags, 0o600) // #nosec G304 -- Operator-selected scaffold output; permissions are restricted before writing.
+		if err != nil {
+			return fmt.Errorf("opening %q: %w", dstPath, err)
+		}
+		defer func() { _ = out.Close() }() // Fallback cleanup; the final close is checked.
+		if err := out.Chmod(0o600); err != nil {
+			return fmt.Errorf("restricting %q: %w", dstPath, err)
+		}
+		if err := out.Truncate(0); err != nil {
+			return fmt.Errorf("truncating %q: %w", dstPath, err)
+		}
+		if _, err := out.Write(data); err != nil {
 			return fmt.Errorf("writing %q: %w", dstPath, err)
 		}
-		fmt.Printf("  created: %s\n", dstPath)
+		if err := out.Close(); err != nil {
+			return fmt.Errorf("closing %q: %w", dstPath, err)
+		}
 	}
 
 	return nil
@@ -80,17 +123,17 @@ func profileTemplates(profile Profile) map[string]string {
 	switch profile {
 	case ProfileDevLocal:
 		return map[string]string{
-			"templates/dev-local/config.yaml": "config.yaml",
+			"templates/config.yaml.tmpl":      "config.yaml",
 			"templates/dev-local/env.example": ".env.example",
 		}
 	case ProfileProdSingle:
 		return map[string]string{
-			"templates/prod-single/config.yaml": "config.yaml",
+			"templates/config.yaml.tmpl":        "config.yaml",
 			"templates/prod-single/env.example": ".env.example",
 		}
 	case ProfileProdDistributed:
 		return map[string]string{
-			"templates/prod-distributed/config.yaml":         "config.yaml",
+			"templates/config.yaml.tmpl":                     "config.yaml",
 			"templates/prod-distributed/env.example":         ".env.example",
 			"templates/prod-distributed/docker-compose.yaml": "docker-compose.yaml",
 		}

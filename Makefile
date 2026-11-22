@@ -71,8 +71,7 @@ lint:
 # Security-focused static analysis (audit §2.2: SAST).
 lint-security:
 	@echo "==> Running gosec (SAST)..."
-	gosec -fmt=json -out=gosec-report.json ./... || true
-	gosec ./...
+	gosec -exclude-generated -fmt=json -out=gosec-report.json ./...
 
 # Run golangci-lint with strict config (.golangci.yml).
 lint-strict:

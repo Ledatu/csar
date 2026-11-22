@@ -228,7 +228,7 @@ func (m AppModel) pushConfig() tea.Cmd {
 			return ConfigPushedMsg{Success: false, Message: fmt.Sprintf("marshal error: %v", err)}
 		}
 
-		if err := writeConfigFile(m.cfgPath, data); err != nil {
+		if err := writeConfigFile(m.cfgPath, data, false); err != nil {
 			return ConfigPushedMsg{Success: false, Message: fmt.Sprintf("write error: %v", err)}
 		}
 
@@ -280,6 +280,24 @@ func (m AppModel) View() string {
 }
 
 // writeConfigFile writes data to a config file.
-func writeConfigFile(path string, data []byte) error {
-	return os.WriteFile(path, data, 0o644) //nolint:gosec // G306: config file is intentionally world-readable
+func writeConfigFile(path string, data []byte, exclusive bool) error {
+	flags := os.O_WRONLY | os.O_CREATE
+	if exclusive {
+		flags |= os.O_EXCL
+	}
+	f, err := os.OpenFile(path, flags, 0o600) // #nosec G304 -- Operator-selected local config; permissions are tightened before writing secrets.
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }() // Fallback cleanup; the final close is checked.
+	if err := f.Chmod(0o600); err != nil {
+		return err
+	}
+	if err := f.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	return f.Close()
 }

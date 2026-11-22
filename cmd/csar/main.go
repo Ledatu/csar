@@ -26,7 +26,6 @@ import (
 	"github.com/ledatu/csar/internal/kms"
 	"github.com/ledatu/csar/internal/logging"
 	"github.com/ledatu/csar/internal/metrics"
-	"github.com/ledatu/csar/internal/proxy"
 	"github.com/ledatu/csar/internal/redisx"
 	"github.com/ledatu/csar/internal/router"
 	"github.com/ledatu/csar/internal/telemetry"
@@ -145,16 +144,7 @@ func run() error {
 
 	// --- SSRF Protection (audit §2.3.2) ---
 	// Build SSRF protection from config or use secure defaults.
-	ssrfP := proxy.DefaultSSRFProtection()
-	if cfg.SSRF != nil {
-		ssrfP.BlockPrivate = cfg.SSRF.IsBlockPrivate()
-		ssrfP.BlockLoopback = cfg.SSRF.IsBlockLoopback()
-		ssrfP.BlockLinkLocal = cfg.SSRF.IsBlockLinkLocal()
-		ssrfP.BlockMetadata = cfg.SSRF.IsBlockMetadata()
-		for _, host := range cfg.SSRF.AllowedInternalHosts {
-			ssrfP.AllowedHosts[host] = true
-		}
-	}
+	ssrfP := buildSSRFProtection(cfg.SSRF)
 	logger.Info("SSRF protection enabled",
 		"block_private", ssrfP.BlockPrivate,
 		"block_loopback", ssrfP.BlockLoopback,
@@ -171,7 +161,7 @@ func run() error {
 
 	// --- Auth Injection (KMS + Token Fetcher) ---
 	routerOpts := []router.Option{router.WithCredentialRejectionRoutes(rejectionRoutes...)}
-	routerOpts = append(routerOpts, router.WithMetrics(m), router.WithTelemetry(tp), router.WithSSRFProtection(ssrfP), router.WithThrottleManager(sharedTM))
+	routerOpts = append(routerOpts, router.WithMetrics(m), router.WithTelemetry(tp), router.WithThrottleManager(sharedTM))
 
 	// --- Redis client for distributed router policies (throttling/cache) ---
 	if cfg.Redis != nil && cfg.Redis.Address != "" {
@@ -295,7 +285,8 @@ func run() error {
 	}
 
 	// Create the router with metrics, telemetry, and optional auth injector
-	r, err := router.New(cfg, logger, routerOpts...)
+	initialRouterOpts := append([]router.Option{router.WithSSRFProtection(ssrfP)}, routerOpts...)
+	r, err := router.New(cfg, logger, initialRouterOpts...)
 	if err != nil {
 		return fmt.Errorf("creating router: %w", err)
 	}
@@ -382,12 +373,17 @@ func run() error {
 
 	// Shared reloader used by both SIGHUP and coordinator-driven reload paths.
 	reloader := &routerReloader{
-		logger:        logger,
-		routerOpts:    routerOpts,
-		reloadHandler: rh,
-		tp:            tp,
-		sharedTM:      sharedTM,
-		currentRouter: r,
+		logger:          logger,
+		routerOpts:      routerOpts,
+		reloadHandler:   rh,
+		tp:              tp,
+		sharedTM:        sharedTM,
+		currentRouter:   r,
+		ssrfProtection:  ssrfP,
+		restartSnapshot: config.SnapshotRestartRequired(cfg),
+	}
+	if cfg.Redis != nil {
+		reloader.redisKeyPrefix = cfg.Redis.KeyPrefix
 	}
 
 	// --- Coordinator subscription (distributed quota + token invalidation + full config) ---
@@ -423,9 +419,6 @@ func run() error {
 			)
 		}
 	}
-
-	// Snapshot restart-required fields for reload-awareness.
-	restartSnapshot := snapshotRestartRequiredFields(cfg)
 
 	// Log startup summary.
 	logStartupSummary(logger, cfg, r)
@@ -463,9 +456,7 @@ func run() error {
 				logger.Warn("(reload) " + w)
 			}
 
-			checkRestartRequiredChanges(logger, restartSnapshot, newCfg)
-
-			if err := reloader.Apply(newCfg); err != nil {
+			if err := reloader.Reload(newCfg); err != nil {
 				logger.Error("router rebuild failed — keeping current router", "error", err)
 				continue
 			}
@@ -480,8 +471,7 @@ func run() error {
 				if err != nil {
 					return false, fmt.Errorf("parsing refreshed config: %w", err)
 				}
-				checkRestartRequiredChanges(logger, restartSnapshot, newCfg)
-				if err := reloader.Apply(newCfg); err != nil {
+				if err := reloader.Reload(newCfg); err != nil {
 					return false, fmt.Errorf("applying refreshed config: %w", err)
 				}
 				return true, nil

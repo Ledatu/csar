@@ -52,7 +52,7 @@ The generated client includes:
 		}
 
 		if clientGenOutput != "" {
-			if err := os.WriteFile(clientGenOutput, []byte(code), 0o644); err != nil { //nolint:gosec // G306: generated client file is intentionally world-readable
+			if err := os.WriteFile(clientGenOutput, []byte(code), 0o644); err != nil { // #nosec G306 -- Public TypeScript client source contains endpoint bindings, not credentials.
 				return fmt.Errorf("writing output: %w", err)
 			}
 			fmt.Printf("TypeScript client written to %s\n", clientGenOutput)

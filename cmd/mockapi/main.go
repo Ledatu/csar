@@ -25,6 +25,10 @@ func main() {
 	if port == "" {
 		port = "9999"
 	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		log.Fatal("PORT must be an integer between 1 and 65535")
+	}
 
 	mux := http.NewServeMux()
 
@@ -58,9 +62,14 @@ func main() {
 	// Catch-all
 	mux.HandleFunc("/", handleCatchAll)
 
-	addr := ":" + port
-	log.Printf("mockapi starting on %s", addr) //nolint:gosec // G706: addr is from controlled environment
-	if err := http.ListenAndServe(addr, countMiddleware(mux)); err != nil {
+	addr := ":" + strconv.Itoa(portNumber)
+	log.Printf("mockapi starting on %q", addr)
+	server := &http.Server{
+		Addr: addr, Handler: countMiddleware(mux),
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
+		WriteTimeout: 60 * time.Second, IdleTimeout: 120 * time.Second,
+	}
+	if err := server.ListenAndServe(); err != nil {
 		log.Fatalf("mockapi: %v", err)
 	}
 }

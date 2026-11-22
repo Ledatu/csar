@@ -19,6 +19,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"time"
+
+	"github.com/ledatu/csar/internal/apierror"
 )
 
 // Config configures the retry behavior.
@@ -111,10 +113,12 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Body != nil {
 		var err error
 		bodyBytes, err = io.ReadAll(r.Body)
-		r.Body.Close()
+		if closeErr := r.Body.Close(); closeErr != nil {
+			m.logger.Debug("retry: closing request body", "error", closeErr)
+		}
 		if err != nil {
 			m.logger.Error("retry: failed to buffer request body", "error", err)
-			m.next.ServeHTTP(w, r)
+			apierror.New("bad_request", http.StatusBadRequest, "failed to read request body").Write(w)
 			return
 		}
 	}
@@ -208,7 +212,7 @@ func (m *Middleware) backoffDelay(attempt int) time.Duration {
 	}
 	// Full jitter: uniform random in [0, delay]
 	if delay > 0 {
-		delay = time.Duration(rand.Int64N(int64(delay))) //nolint:gosec // G404: non-cryptographic use for retry jitter
+		delay = time.Duration(rand.Int64N(int64(delay))) // #nosec G404 -- Retry jitter is scheduling randomness, not a secret or security identifier.
 	}
 	return delay
 }

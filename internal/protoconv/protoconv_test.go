@@ -21,6 +21,17 @@ func TestProtoToAuthValidateConfig_PreservesJWKSTLS(t *testing.T) {
 	}
 }
 
+func TestSSRFMessagePresenceAndDefaults(t *testing.T) {
+	if cfg := FullSnapshotToConfig(&csarv1.FullConfigSnapshot{}); cfg.SSRF != nil {
+		t.Fatal("legacy snapshot must retain absent SSRF policy")
+	}
+	cfg := FullSnapshotToConfig(&csarv1.FullConfigSnapshot{SsrfProtection: &csarv1.SSRFProtectionProto{}})
+	if cfg.SSRF == nil || !cfg.SSRF.IsBlockPrivate() || !cfg.SSRF.IsBlockLoopback() ||
+		!cfg.SSRF.IsBlockLinkLocal() || !cfg.SSRF.IsBlockMetadata() {
+		t.Fatal("present empty message must use secure defaults")
+	}
+}
+
 func TestProtoToAuthValidateConfig_PreservesIssueTokens(t *testing.T) {
 	cfg := protoToAuthValidateConfig(&csarv1.AuthValidateConfigProto{
 		Mode: "session",

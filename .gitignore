@@ -19,6 +19,9 @@
 # Output of go coverage
 *.out
 
+# Local security scan output
+/gosec-report.json
+
 # Go workspace file
 go.work
 go.work.sum

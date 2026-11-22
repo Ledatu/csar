@@ -56,7 +56,7 @@ func DefaultStorePath() string {
 // Load reads the context store from disk. Returns an empty store if the file
 // doesn't exist.
 func Load(path string) (*Store, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- Local CLI context store selected by the operator, not by a network request.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &Store{}, nil

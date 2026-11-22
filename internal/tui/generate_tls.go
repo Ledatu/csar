@@ -204,11 +204,20 @@ func writePEM(path, blockType string, data []byte) error {
 		perm = 0o600 // private keys: owner-only
 	}
 
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, perm) // #nosec G304 -- Operator-selected certificate output path; private-key permissions are enforced on the opened file.
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // Fallback cleanup; the final close is checked.
+	if err := f.Chmod(perm); err != nil {
+		return fmt.Errorf("setting permissions on %s: %w", path, err)
+	}
+	if err := f.Truncate(0); err != nil {
+		return fmt.Errorf("truncating %s: %w", path, err)
+	}
 
-	return pem.Encode(f, &pem.Block{Type: blockType, Bytes: data})
+	if err := pem.Encode(f, &pem.Block{Type: blockType, Bytes: data}); err != nil {
+		return err
+	}
+	return f.Close()
 }

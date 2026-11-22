@@ -36,6 +36,14 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 	for _, opt := range opts {
 		opt(r)
 	}
+	sharedTM := r.throttleManager
+	r.throttleManager = throttle.NewManager()
+	built := false
+	defer func() {
+		if !built {
+			r.Close()
+		}
+	}()
 	flatRoutes := cfg.FlatRoutes()
 	selections, selectionErr := credentialRejectionSelections(r.credentialRejectionRoutes, flatRoutes)
 	if selectionErr != nil {
@@ -53,14 +61,9 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 		r.reqIDHeader = cfg.DebugHeaders.RequestIDHeader
 	}
 
-	// Create a ThrottleManager if one was not injected via WithThrottleManager.
-	if r.throttleManager == nil {
-		r.throttleManager = throttle.NewManager()
-	}
-
 	// Set up global throttle if configured.
 	if cfg.GlobalThrottle != nil {
-		r.throttleManager.SetGlobal(
+		r.globalThrottle = throttle.New(
 			cfg.GlobalThrottle.RPS,
 			cfg.GlobalThrottle.Burst,
 			cfg.GlobalThrottle.MaxWait.Duration,
@@ -119,6 +122,11 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 	sort.Slice(r.regexRoutes, func(i, j int) bool {
 		return r.regexRoutes[i].specificity.MorePreciseThan(r.regexRoutes[j].specificity)
 	})
+	if sharedTM != nil {
+		sharedTM.ReplaceFrom(r.throttleManager)
+		r.throttleManager = sharedTM
+	}
+	built = true
 
 	return r, nil
 }

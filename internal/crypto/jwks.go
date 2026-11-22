@@ -19,7 +19,7 @@ type JWKS = jwtx.JWKS
 
 // PublicKeyToJWKS reads a PEM-encoded public key file and returns a JWKS JSON document.
 func PublicKeyToJWKS(pubKeyPath string) ([]byte, error) {
-	data, err := os.ReadFile(pubKeyPath)
+	data, err := os.ReadFile(pubKeyPath) // #nosec G304 -- Operator-selected key files for local JWKS/export tooling.
 	if err != nil {
 		return nil, fmt.Errorf("reading public key file: %w", err)
 	}
@@ -48,12 +48,12 @@ func PublicKeyToJWKS(pubKeyPath string) ([]byte, error) {
 // PublicKeyToEnvVars reads private and public key PEM files and returns
 // a map of environment variable names to base64-encoded values.
 func PublicKeyToEnvVars(privKeyPath, pubKeyPath string) (map[string]string, error) {
-	privData, err := os.ReadFile(privKeyPath)
+	privData, err := os.ReadFile(privKeyPath) // #nosec G304 -- Operator-selected key files for local JWKS/export tooling.
 	if err != nil {
 		return nil, fmt.Errorf("reading private key: %w", err)
 	}
 
-	pubData, err := os.ReadFile(pubKeyPath)
+	pubData, err := os.ReadFile(pubKeyPath) // #nosec G304 -- Operator-selected key files for local JWKS/export tooling.
 	if err != nil {
 		return nil, fmt.Errorf("reading public key: %w", err)
 	}

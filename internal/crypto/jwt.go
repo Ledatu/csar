@@ -76,7 +76,7 @@ func IssueToken(opts IssueTokenOptions) (string, error) {
 // loadKeyPairPrivOnly loads a key pair from a private key PEM only,
 // deriving the public key and KID from the private key's public component.
 func loadKeyPairPrivOnly(privPath string) (*jwtx.KeyPair, error) {
-	privData, err := os.ReadFile(privPath)
+	privData, err := os.ReadFile(privPath) // #nosec G304 -- Operator-selected private key for the local token-issuing CLI.
 	if err != nil {
 		return nil, fmt.Errorf("reading private key: %w", err)
 	}

@@ -995,8 +995,52 @@ kill -HUP $(pidof csar)
 - Circuit breaker profiles
 - Named policies (throttling, CORS, retry, redact, auth-validate, security)
 - Access control rules
+- SSRF blocking switches and the exact `allowed_internal_hosts` allowlist
+- Redis `key_prefix` for throttling and response caching
+- Global throttle settings, including removal of the entire block
 
-Root-only fields (`listen_addr`, TLS, coordinator address) log a warning if changed — a full restart is required for those.
+SSRF policy is rebuilt with each router, including coordinator snapshots and
+periodic source refreshes. Removing a host revokes it for new requests; requests
+already using the previous router may finish. Removing the YAML block restores
+secure defaults (all four IP classes blocked, empty allowlist).
+
+Coordinator `FullConfigSnapshot.ssrf_protection` (field 18) carries this policy.
+Policy-only publishes also notify connected routers without requiring route
+changes. With a source config loaded, snapshots and quotas use its last successful
+complete apply; partial route-store writes are not published. Without a source
+config, coordinator snapshots continue to read the route store. Routes are sorted
+before serialization so reconnects do not rebuild identical configurations merely
+because map iteration order changed. Upgrade routers first, then coordinators
+before relying on this behavior.
+Old routers ignore the new field. New routers retain their last applied SSRF
+policy and log a warning when an old coordinator omits it; complete YAML reloads
+still apply locally. Reverting to an older binary restores its startup-only SSRF
+behavior, so restart routers against the intended configuration when rolling back.
+
+`FullConfigSnapshot.redis_key_prefix` (optional field 19) carries only the Redis
+namespace, without connection credentials. A legacy snapshot omitting the field
+retains the last successfully applied prefix. An explicit empty prefix, or a
+complete YAML reload omitting `redis`, restores the built-in throttle/cache
+prefixes. Changing a prefix selects another Redis namespace; existing keys stay
+in the previous one until their normal expiry. Upgrade all routers and then
+coordinators before relying on prefix updates.
+
+The global limiter belongs to each router instance. Removing `global_throttle`
+disables it for new requests; an unsuccessful rebuild cannot replace the active
+global limiter. Requests already executing the previous router retain its limiter.
+As before, a successful rebuild creates a fresh global token bucket.
+Per-route throttle registrations are staged until the complete router build
+succeeds, preserving live quota updates when a later route fails validation.
+
+Startup settings require a process restart: `listen_addr`, inbound `tls`,
+`profile`, `security_policy`, `kms`, `coordinator`, Redis connection settings
+(`address`, `password`, `db`), `readiness`, `authz`, and audit connection settings.
+Full YAML reloads warn against the router's startup snapshot. Coordinator
+publishes warn when these fields change from the previous successfully applied
+config, including fields that are intentionally absent from gRPC snapshots.
+Warnings contain only field names, never previous/new values, credentials or
+key-map entries. Hot `redis.key_prefix` and `audit.capture` changes do not require
+restart warnings; audit capture defaults are compiled into routes.
 
 ## Testing
 
@@ -1006,7 +1050,19 @@ make test-unit         # unit tests only
 make test-integration  # integration tests only
 make test-race         # all tests with race detector
 make test-e2e          # Docker-based end-to-end tests
+make lint-strict      # quality and security linters
+make lint-security    # standalone gosec; writes gosec-report.json
 ```
+
+The standalone security scan excludes generated protobuf code. Reviewed source
+exceptions use rule-specific `#nosec` comments with a reason; HTTP timeout checks
+remain enabled. Config/scaffold output and private keys are written with owner-only
+permissions, including overwrites. Generated PostgreSQL Compose services require
+`POSTGRES_PASSWORD` instead of supplying a known default. Install certificates
+and configure the generated profile's upstream before starting it. Scaffold
+generation checks every destination before writing and creates files exclusively
+unless force was requested. The scaffold library does not write progress to
+stdout, preserving the MCP server's stdio protocol.
 
 ### Test Coverage
 

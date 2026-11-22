@@ -1,0 +1,27 @@
+# Configure upstream URLs and install certificates before starting the router.
+profile: {{ . }}
+listen_addr: ":8080"
+{{ if ne . "dev-local" }}
+tls:
+  cert_file: /etc/csar/tls/server-cert.pem
+  key_file: /etc/csar/tls/server-key.pem
+  min_version: "1.3"
+security_policy:
+  environment: prod
+  forbid_insecure_in_prod: true
+  require_mtls_for_coordinator: true
+  redact_sensitive_logs: true
+{{ end }}
+{{ if eq . "prod-distributed" }}
+coordinator:
+  enabled: true
+  address: coordinator:9090
+  ca_file: /etc/csar/tls/coordinator-ca.pem
+  cert_file: /etc/csar/tls/router-client-cert.pem
+  key_file: /etc/csar/tls/router-client-key.pem
+{{ end }}
+paths:
+  /example:
+    get:
+      x-csar-backend:
+        target_url: https://example.com

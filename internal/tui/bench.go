@@ -354,7 +354,10 @@ func runBenchmark(ctx context.Context, cfg BenchConfig, state *benchState) *Benc
 				if err != nil {
 					errorCnt.Add(1)
 				} else {
-					resp.Body.Close()
+					if err := resp.Body.Close(); err != nil {
+						errorCnt.Add(1)
+						continue
+					}
 					successCnt.Add(1)
 					mu.Lock()
 					latencies = append(latencies, lat)

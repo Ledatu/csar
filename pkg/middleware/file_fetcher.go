@@ -34,7 +34,7 @@ type TokenFile map[string]TokenFileEntry
 //	  plaintext: "another-key"
 //	  kms_key_id: "key-2"
 func LoadTokenFile(path string, provider kms.Provider) (*StaticTokenFetcher, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- Operator-selected local token file; this path is not derived from a proxy request.
 	if err != nil {
 		return nil, fmt.Errorf("reading token file %s: %w", path, err)
 	}

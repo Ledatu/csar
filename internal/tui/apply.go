@@ -16,12 +16,12 @@ type generatedFile struct {
 // ApplyGenerateResult writes the generated config.yaml and (optionally)
 // docker-compose.yaml to disk, then prints a summary.
 //
-// The write is atomic: all files are rendered and pre-flight checked for
-// existing-file conflicts *before* any bytes are written. This prevents
-// partial output where some files are written but others fail.
+// All files are rendered and checked for conflicts before any bytes are written.
+// Exclusive creation prevents concurrent writers from being overwritten without
+// force; filesystem failures during writing can still leave partial output.
 func ApplyGenerateResult(r *GenerateResult) error {
 	outDir := r.OutputDir
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
+	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return fmt.Errorf("creating output directory: %w", err)
 	}
 
@@ -41,8 +41,10 @@ func ApplyGenerateResult(r *GenerateResult) error {
 	if !r.Force {
 		var conflicts []string
 		for _, f := range files {
-			if _, err := os.Stat(f.path); err == nil {
+			if _, err := os.Lstat(f.path); err == nil {
 				conflicts = append(conflicts, f.path)
+			} else if !os.IsNotExist(err) {
+				return fmt.Errorf("checking %s: %w", f.path, err)
 			}
 		}
 		if len(conflicts) > 0 {
@@ -53,10 +55,9 @@ func ApplyGenerateResult(r *GenerateResult) error {
 		}
 	}
 
-	// Phase 3: Write all files — no conflict check remains so partial
-	// failure here is an OS-level I/O error, not a user-input issue.
+	// Phase 3: Create exclusively unless overwriting was requested.
 	for _, f := range files {
-		if err := os.WriteFile(f.path, []byte(f.content), 0o644); err != nil { //nolint:gosec // G306: generated file is intentionally world-readable
+		if err := writeConfigFile(f.path, []byte(f.content), !r.Force); err != nil {
 			return fmt.Errorf("writing %s: %w", f.path, err)
 		}
 		fmt.Printf("  %s created: %s\n", IconCheck, f.path)
