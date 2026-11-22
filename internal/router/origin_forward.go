@@ -119,6 +119,7 @@ func (r *Router) forwardOrigin(rt *route, next http.Handler) http.Handler {
 		defer cancel()
 		req = req.WithContext(origincontext.WithVerifiedProof(ctx, proof))
 		auditAuthorizedContext(req)
+		defer stripOriginResponseHeaders(w.Header())
 		next.ServeHTTP(&originResponseWriter{ResponseWriter: w}, req)
 	})
 }
@@ -128,14 +129,40 @@ type originResponseWriter struct{ http.ResponseWriter }
 
 func (w *originResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 func (w *originResponseWriter) WriteHeader(status int) {
-	gatewayctx.StripTrusted(w.Header())
-	w.Header().Del(origincontext.HeaderAuthorization)
+	stripOriginResponseHeaders(w.Header())
 	w.ResponseWriter.WriteHeader(status)
 }
 func (w *originResponseWriter) Write(body []byte) (int, error) {
-	gatewayctx.StripTrusted(w.Header())
-	w.Header().Del(origincontext.HeaderAuthorization)
+	stripOriginResponseHeaders(w.Header())
 	return w.ResponseWriter.Write(body)
+}
+
+func stripOriginResponseHeaders(h http.Header) {
+	reserved := func(name string) bool {
+		name = strings.ToLower(strings.TrimSpace(name))
+		return strings.HasPrefix(name, "x-gateway-") || name == strings.ToLower(origincontext.HeaderAuthorization)
+	}
+	for name := range h {
+		candidate := name
+		if strings.HasPrefix(strings.ToLower(candidate), strings.ToLower(http.TrailerPrefix)) {
+			candidate = candidate[len(http.TrailerPrefix):]
+		}
+		if reserved(candidate) {
+			delete(h, name)
+		}
+	}
+	var keep []string
+	for _, value := range h.Values("Trailer") {
+		for _, name := range strings.Split(value, ",") {
+			if name = strings.TrimSpace(name); name != "" && !reserved(name) {
+				keep = append(keep, name)
+			}
+		}
+	}
+	h.Del("Trailer")
+	if len(keep) > 0 {
+		h.Set("Trailer", strings.Join(keep, ", "))
+	}
 }
 
 func (r *Router) validateOriginSelections(routes []config.FlatRoute) error {

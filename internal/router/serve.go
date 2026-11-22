@@ -572,10 +572,12 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 
 func (r *Router) serveUpstream(w http.ResponseWriter, req *http.Request, rt *route) {
 	if r.originReceivers[rt.routeKey] != "" {
-		if _, _, err := r.originSource(req); err != nil || isStreamingRequest(req) {
+		_, resource, err := r.originSource(req)
+		if err != nil || isStreamingRequest(req) {
 			apierror.New(apierror.CodeAuthFailed, http.StatusUnauthorized, "verified origin source expired or unsupported").Write(w)
 			return
 		}
+		req.Header.Set(gatewayctx.HeaderTenant, resource)
 	}
 	// A throttle wait may outlive a proof that was valid at ingress.
 	if validateOriginResource(req) != nil {

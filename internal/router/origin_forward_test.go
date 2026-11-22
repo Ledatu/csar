@@ -161,12 +161,16 @@ func TestRootAndServiceOriginForwardingDoesNotMintOnCacheHit(t *testing.T) {
 		}
 		observations <- observation{id: id, token: strings.TrimPrefix(r.Header.Get(origincontext.HeaderForwardedAuthorization), "Bearer ")}
 		w.Header().Set(origincontext.HeaderForwardedAuthorization, r.Header.Get(origincontext.HeaderForwardedAuthorization))
+		w.Header().Set("Trailer", origincontext.HeaderForwardedAuthorization+", "+origincontext.HeaderAuthorization+", X-Checksum")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{}`))
+		w.Header().Set(origincontext.HeaderForwardedAuthorization, r.Header.Get(origincontext.HeaderForwardedAuthorization))
+		w.Header().Set(http.TrailerPrefix+origincontext.HeaderAuthorization, "private-proof")
+		w.Header().Set("X-Checksum", "ok")
 	}))
 	cfg := newTestConfig(map[string]config.PathConfig{"/report/{seller_id}": {"get": {
 		Backend: config.BackendConfig{TargetURL: backend.URL, TLS: backendTLS}, AuthValidate: &config.AuthValidateConfig{Mode: "select", Methods: []config.AuthValidateConfig{{Mode: "session", SessionEndpoint: identity.URL + "/session", CookieName: "session"}, {Mode: "jwt", JWKSURL: identity.URL + "/jwks", Issuer: "issuer", Audiences: []string{"analytics-access"}}}},
-		Authz: &config.AuthzRouteConfig{Subject: "{header.X-Gateway-Subject}", ScopeType: "tenant", ScopeID: "wildberries:{path.seller_id}", Resource: "report", Action: "read"}, Cache: &config.CacheConfig{Key: "report:{path.seller_id}", TTL: config.Duration{Duration: time.Minute}},
+		Authz: &config.AuthzRouteConfig{Subject: "{header.X-Gateway-Subject}", ScopeType: "tenant", ScopeID: "wildberries:{path.seller_id}", Resource: "report", Action: "read"}, Cache: &config.CacheConfig{Key: "report:{tenant}", TTL: config.Duration{Duration: time.Minute}},
 	}}})
 	router, err := New(cfg, newTestLogger(), WithAuthzClient(authzClient), WithOriginForwarding(issuer, map[string]string{"GET:/report/{seller_id}": "svc:analytics"}))
 	if err != nil {
@@ -196,6 +200,11 @@ func TestRootAndServiceOriginForwardingDoesNotMintOnCacheHit(t *testing.T) {
 		}
 		if w.Header().Get(origincontext.HeaderForwardedAuthorization) != "" {
 			t.Fatal("forwarding credential reached public/cache response")
+		}
+		result := w.Result()
+		defer result.Body.Close()
+		if result.Trailer.Get(origincontext.HeaderForwardedAuthorization) != "" || result.Trailer.Get(origincontext.HeaderAuthorization) != "" {
+			t.Fatal("origin credential leaked in response trailers")
 		}
 	}
 	send("one", "/report/cabinet", "", "", 200)
