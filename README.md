@@ -1286,3 +1286,19 @@ Issuer URLs, expected issuer and TLS settings require a process restart; reload
 reports changed field names and keeps the startup client. Coordinator snapshots
 carry receiver policies, never these local issuer settings. This adds source
 support only; issuer ingress, trust roots and production rollout remain separate.
+
+Protected read routes can opt into `x-csar-audit-release: true` together with
+`x-csar-audit: all`, authentication and authorization. Before cache or backend
+dispatch the router waits at most one second (also bounded by request/transport
+timeouts) for synchronous ingest acceptance, which upgraded audit instances issue
+only after persistent broker confirmation. A failed or uncertain receipt returns
+retryable `503 audit_unavailable`; HIT requires its own current-caller receipt.
+Streaming requests are unsupported under this policy.
+
+The compact `read.release_authorized` event records permission to attempt release,
+not payload existence, receipt by the client or PG persistence. A separate final
+event includes `release_event_id` and cache outcome. No receipt/identity enters
+the reusable response. Source/proof expiry is checked again after waiting.
+Coordinator capability metadata preserves the policy and explicit removal;
+unsupported routers/snapshots cannot silently drop an active barrier. Upgrade
+broker-confirming ingest and the entire router/coordinator fleet before enabling.

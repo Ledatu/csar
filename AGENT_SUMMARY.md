@@ -1,5 +1,13 @@
 # csar Agent Summary
 
+Opt-in `x-csar-audit-release` requires authn/authz, audit all and a synchronous
+receipt client. Every authorized MISS/HIT waits for broker-confirmed release
+authorization before cache/backend dispatch; uncertain receipts return retryable
+503. Final outcome separately links the release event and cache status. Source
+freshness is rechecked after the wait; streaming is rejected. A versioned policy
+capability registry preserves this and future opt-in route semantics, including
+explicit removal. No production policy or Redis limit is changed.
+
 Route `x-csar-origin-receiver` is preserved in route-store JSON and the existing
 coordinator wire contract. Versioned full snapshots preserve explicit removal;
 routers reject legacy snapshots while receiver policies are active. Subscribers

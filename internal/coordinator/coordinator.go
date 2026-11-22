@@ -375,13 +375,16 @@ func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_Su
 
 	protoRoutes := make([]*csarv1.RouteConfig, 0, len(routes))
 	for i := range routes {
+		if routes[i].Route.AuditRelease && metadata[config.AuditReleaseCapability] != "1" {
+			return status.Error(codes.FailedPrecondition, "router does not support audit release policies")
+		}
 		if routes[i].Route.OriginReceiver != "" && metadata[config.OriginPolicyCapability] != "1" {
 			return status.Error(codes.FailedPrecondition, "router does not support origin receiver policies")
 		}
 		protoRoutes = append(protoRoutes, routeEntryToProto(&routes[i]))
 	}
 
-	snapshot := &csarv1.FullConfigSnapshot{Routes: protoRoutes, OriginPolicyVersion: config.OriginPolicyVersion}
+	snapshot := &csarv1.FullConfigSnapshot{Routes: protoRoutes, OriginPolicyVersion: config.OriginPolicyVersion, PolicyVersions: config.PolicyCapabilities()}
 
 	if cfg != nil {
 		snapshot.SsrfProtection = ssrfProtectionToProto(cfg.SSRF)
@@ -570,6 +573,7 @@ func routeEntryToProto(r *statestore.RouteEntry) *csarv1.RouteConfig {
 		Method:         r.Method,
 		TargetUrl:      r.Route.Backend.TargetURL,
 		OriginReceiver: r.Route.OriginReceiver,
+		AuditRelease:   r.Route.AuditRelease,
 	}
 
 	if r.Route.Resilience != nil {

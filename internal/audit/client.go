@@ -66,6 +66,15 @@ func (c *Client) Record(_ context.Context, ev *auditcore.Event) {
 	c.core.Record(context.Background(), ev)
 }
 
+// RecordSync returns only after the upgraded ingest's broker-confirmed receipt.
+// Failure remains uncertain; it must never authorize protected data release.
+func (c *Client) RecordSync(ctx context.Context, ev *auditcore.Event) error {
+	if c == nil || c.core == nil {
+		return errors.New("audit receipt client unavailable")
+	}
+	return c.core.RecordSync(ctx, ev)
+}
+
 // Close drains queued events, then closes the gRPC connection.
 func (c *Client) Close() error {
 	var errs []error

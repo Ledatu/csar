@@ -50,6 +50,7 @@ const actorEmailHeader = "X-User-Email"
 
 type auditRequestKey struct{}
 type auditRequestState struct {
+	releaseEventID    string
 	operationID       string
 	parentOperationID string
 	originCaller      *caller.Identity
@@ -220,6 +221,12 @@ func (r *Router) wrapUpstreamWithAudit(rt *route, next http.Handler) http.Handle
 			"http_status": rec.statusCode,
 			"route":       rt.routeKey,
 			"audit_mode":  string(rt.auditMode),
+		}
+		if state.releaseEventID != "" {
+			metaMap["release_event_id"] = state.releaseEventID
+		}
+		if value := rec.Header().Get("X-CSAR-Cache"); value != "" {
+			metaMap["cache_status"] = value
 		}
 		if email := strings.TrimSpace(state.email); email != "" {
 			metaMap["actor_email"] = email

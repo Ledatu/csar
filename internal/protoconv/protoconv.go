@@ -20,6 +20,7 @@ func FullSnapshotToConfig(snap *csarv1.FullConfigSnapshot) *config.Config {
 	cfg := &config.Config{
 		Paths:               make(map[string]config.PathConfig),
 		OriginPolicyVersion: snap.GetOriginPolicyVersion(),
+		PolicyVersions:      snap.GetPolicyVersions(),
 	}
 
 	for _, r := range snap.GetRoutes() {
@@ -79,7 +80,7 @@ func FullSnapshotToConfig(snap *csarv1.FullConfigSnapshot) *config.Config {
 }
 
 func protoToRouteConfig(r *csarv1.RouteConfig) config.RouteConfig {
-	rc := config.RouteConfig{OriginReceiver: r.GetOriginReceiver()}
+	rc := config.RouteConfig{OriginReceiver: r.GetOriginReceiver(), AuditRelease: r.GetAuditRelease()}
 
 	// Use full backend if available, else fall back to legacy target_url.
 	if b := r.GetBackend(); b != nil {

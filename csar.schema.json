@@ -1863,6 +1863,7 @@
           "additionalProperties": { "type": "string" }
         },
         "x-csar-authn-validate": { "$ref": "#/$defs/AuthValidateConfig" },
+        "x-csar-audit-release": { "type": "boolean", "default": false, "description": "Require a broker-confirmed release authorization before cache/backend dispatch. Requires authn, authz, audit all and synchronous ingest. Final delivery outcome is separate." },
         "x-csar-origin-receiver": {
           "type": "string", "minLength": 1, "maxLength": 256,
           "description": "Backend service principal for opt-in signed-origin forwarding, independent of the access-token audience. Requires a router-local root issuer and verified backend mTLS."

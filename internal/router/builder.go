@@ -318,6 +318,11 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 		}
 		rt.auditCapture = capture
 	}
+	if fr.Route.AuditRelease {
+		if _, ok := r.auditClient.(receiptRecorder); !ok || rt.auditMode != config.AuditModeAll || rt.authentication == nil || rt.authzConfig == nil {
+			return fmt.Errorf("route %s: audit release requires authenticated authorization, audit all and synchronous receipt client", key)
+		}
+	}
 
 	if rt.auditMode.IsActive() && fr.Route.Audit != nil {
 		logger.Info("route audit enabled (explicit x-csar-audit)", "route", key, "mode", rt.auditMode)

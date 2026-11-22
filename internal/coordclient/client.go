@@ -9,6 +9,7 @@ package coordclient
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -137,11 +138,15 @@ func waitOrDone(ctx context.Context, d time.Duration) bool {
 // subscribe opens a single subscription stream and processes messages until
 // error. It reports whether the stream delivered at least one message.
 func (c *Client) subscribe(ctx context.Context) (bool, error) {
+	capabilities := map[string]string{config.OriginPolicyCapability: "1"}
+	for name, version := range config.PolicyCapabilities() {
+		capabilities[name] = fmt.Sprint(version)
+	}
 	stream, err := c.coordClient.Subscribe(ctx, &csarv1.SubscribeRequest{
 		RouterId:        c.routerID,
 		RouterAddress:   c.routerAddr,
 		LastSeenVersion: c.lastSeenVersion,
-		Metadata:        map[string]string{config.OriginPolicyCapability: "1"},
+		Metadata:        capabilities,
 	})
 	if err != nil {
 		return false, err
