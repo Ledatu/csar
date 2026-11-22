@@ -27,7 +27,7 @@ jobs:
           repository: ${{ github.repository_owner }}/csar-proto
           path: csar-proto
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.26.11"
           cache-dependency-path: csar/go.sum
@@ -60,7 +60,7 @@ jobs:
           repository: ${{ github.repository_owner }}/csar-proto
           path: csar-proto
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.26.11"
           cache-dependency-path: csar/go.sum
@@ -97,7 +97,7 @@ jobs:
           repository: ${{ github.repository_owner }}/csar-proto
           path: csar-proto
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.26.11"
           cache-dependency-path: csar/go.sum
