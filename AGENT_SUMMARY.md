@@ -41,7 +41,7 @@ are opt-in; production activation remains disabled.
 Root issuance prerequisites use private authn.Source context with owned caller
 metadata and an absolute validation deadline. API-key/session cache hits preserve
 the original freshness lease instead of renewing it per request. Missing legacy
-metadata/expiry provides no source. No root issuance or forwarding is activated.
+metadata/expiry provides no source. Production activation remains separate.
 
 W2 final audit events include the verified immediate Caller, authorized signed
 OriginCaller and operation/parent/trace correlation. Ordinary operation IDs are
@@ -49,30 +49,33 @@ server-generated independently of client request IDs. Actor retains immediate-ho
 semantics; successful tenant authz supplies the cabinet scope. Every cold/cache
 hit/denial emits its own event under the route's existing audit mode. Rejected
 proofs are not promoted to authorized origins; no credential bytes are persisted.
-This retains the existing asynchronous recorder, not a confirmed release barrier.
+Final outcomes retain the asynchronous recorder; opt-in release authorization is
+separately broker-confirmed before dispatch.
 Upgraded audit receivers are a rollout dependency; no production change is made.
 
 Separate signed-origin credentials are consumed only alongside verified service
-STS JWTs, using the existing issuer/JWKS and exactly one configured route audience
-as receiver. Sender and original request digest are checked; actual successful
+STS JWTs, using the existing issuer/JWKS and explicit service receiver. Legacy
+proof-only routes retain single-audience fallback. Sender and original request
+digest are checked; actual successful
 tenant authz scope and subject must match the resource and signed sender. Validity
 is checked again after throttle waits before cache/backend access. Proofs
 on unsupported auth modes, platform-only/no tenant scopes or ambiguous audiences
-fail closed. Proof bytes never reach upstream. Root-client/typed backend forwarding
-and activation remain separate work; STS authority is never replaced by origin.
+fail closed. Incoming proof headers are consumed; opt-in forwarding supplies the
+verified opaque parent only to trusted mTLS backends. STS authority is never
+replaced by origin.
 
 JWT and GET/POST session validators now adopt optional verified caller metadata,
 reject envelope conflicts and origin-as-access JWTs, and clear forged gateway
 headers. Session caches are capped by issuer expiry and the current route TTL.
-Missing legacy metadata stays absent. Signed-origin adapters and audit receipts
-are separate W2 slices; nothing here activates production configuration.
+Missing legacy metadata stays absent. Signed-origin and receipt behavior remains
+opt-in; production configuration is not activated here.
 
 W2 opaque API-key/MCP and universal grant validation preserve optional issuer
 caller metadata after subject/credential binding checks. Malformed present
 metadata fails closed and is not cached; legacy absence remains compatible.
 The reserved gateway namespace is stripped before validation. Backend parsing
-requires upgraded Core readers. Receipt barriers remain later W2 work; no
-production configuration is changed.
+requires upgraded Core readers. Release confirmation requires upgraded ingest;
+no production configuration is changed.
 
 ## Hosted seller authentication
 
