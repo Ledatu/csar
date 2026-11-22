@@ -161,6 +161,14 @@ func run() error {
 
 	// --- Auth Injection (KMS + Token Fetcher) ---
 	routerOpts := []router.Option{router.WithCredentialRejectionRoutes(rejectionRoutes...)}
+	rootIssuer, closeRootIssuer, err := buildRootIssuer(cfg.OriginIssuer, logger)
+	if err != nil {
+		return err
+	}
+	defer closeRootIssuer()
+	if rootIssuer != nil {
+		routerOpts = append(routerOpts, router.WithRootIssuer(rootIssuer))
+	}
 	routerOpts = append(routerOpts, router.WithMetrics(m), router.WithTelemetry(tp), router.WithThrottleManager(sharedTM))
 
 	// --- Redis client for distributed router policies (throttling/cache) ---

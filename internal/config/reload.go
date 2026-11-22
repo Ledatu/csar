@@ -25,7 +25,7 @@ func SnapshotRestartRequired(cfg *Config) RestartRequiredSnapshot {
 		name := strings.Split(v.Type().Field(i).Tag.Get("yaml"), ",")[0]
 		switch name {
 		case "profile", "listen_addr", "tls", "security_policy", "kms",
-			"coordinator", "redis", "readiness", "authz", "audit":
+			"coordinator", "redis", "readiness", "authz", "audit", "origin_issuer":
 			s.capture(name, v.Field(i))
 		}
 	}
