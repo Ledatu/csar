@@ -1847,6 +1847,10 @@
           "additionalProperties": { "type": "string" }
         },
         "x-csar-authn-validate": { "$ref": "#/$defs/AuthValidateConfig" },
+        "x-csar-origin-receiver": {
+          "type": "string", "minLength": 1, "maxLength": 256,
+          "description": "Backend service principal for opt-in signed-origin forwarding, independent of the access-token audience. Requires a router-local root issuer and verified backend mTLS."
+        },
         "x-csar-access": { "$ref": "#/$defs/AccessControlConfig" },
         "x-csar-traffic": { "$ref": "#/$defs/TrafficConfig" },
         "x-csar-resilience": { "$ref": "#/$defs/ResilienceConfig" },

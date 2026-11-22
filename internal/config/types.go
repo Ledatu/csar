@@ -75,6 +75,9 @@ func (sc *SecurityConfigs) UnmarshalYAML(value *yaml.Node) error {
 
 // Config holds the top-level CSAR configuration.
 type Config struct {
+	// OriginPolicyVersion is snapshot provenance, never a YAML override.
+	// Zero identifies legacy coordinators that cannot preserve receiver policies.
+	OriginPolicyVersion uint32 `yaml:"-" json:"-"`
 	// Include is a list of file paths or glob patterns to merge into this config.
 	// Paths are resolved relative to the directory of the file containing the include.
 	// Processed before YAML unmarshaling of the main config body.
@@ -281,6 +284,10 @@ type RouteConfig struct {
 	// AuthValidate configures inbound identity validation (JWT/JWKS).
 	// Requests are rejected if the token is missing, expired, or signature-invalid.
 	AuthValidate *AuthValidateConfig `yaml:"x-csar-authn-validate,omitempty" json:"x-csar-authn-validate,omitempty"`
+
+	// OriginReceiver binds this route to a backend service principal, independently
+	// of its access-token audience. Empty disables origin forwarding.
+	OriginReceiver string `yaml:"x-csar-origin-receiver,omitempty" json:"x-csar-origin-receiver,omitempty"`
 
 	// Access control — per-route IP allowlist (optional).
 	// If set, overrides the global access_control for this route.

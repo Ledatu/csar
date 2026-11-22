@@ -317,8 +317,11 @@ type FullConfigSnapshot struct {
 	// Absent on legacy coordinators: retain the active prefix. Present but empty
 	// resets to the built-in throttle/cache prefixes.
 	RedisKeyPrefix *string `protobuf:"bytes,19,opt,name=redis_key_prefix,json=redisKeyPrefix,proto3,oneof" json:"redis_key_prefix,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Version 1 preserves origin_receiver, including explicit removal. Zero is
+	// legacy; routers with active receiver policies must reject legacy snapshots.
+	OriginPolicyVersion uint32 `protobuf:"varint,20,opt,name=origin_policy_version,json=originPolicyVersion,proto3" json:"origin_policy_version,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *FullConfigSnapshot) Reset() {
@@ -484,6 +487,13 @@ func (x *FullConfigSnapshot) GetRedisKeyPrefix() string {
 	return ""
 }
 
+func (x *FullConfigSnapshot) GetOriginPolicyVersion() uint32 {
+	if x != nil {
+		return x.OriginPolicyVersion
+	}
+	return 0
+}
+
 // RouteSnapshot contains the full set of routes (legacy, kept for backward compat).
 type RouteSnapshot struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -562,10 +572,12 @@ type RouteConfig struct {
 	AuditSet        bool                          `protobuf:"varint,26,opt,name=audit_set,json=auditSet,proto3" json:"audit_set,omitempty"`
 	CacheInvalidate *CacheInvalidationConfigProto `protobuf:"bytes,27,opt,name=cache_invalidate,json=cacheInvalidate,proto3" json:"cache_invalidate,omitempty"`
 	// Audit mode: "off", "all", or "errors". Preferred over audit bool when set.
-	AuditMode     string                   `protobuf:"bytes,28,opt,name=audit_mode,json=auditMode,proto3" json:"audit_mode,omitempty"`
-	AuditCapture  *AuditCaptureConfigProto `protobuf:"bytes,29,opt,name=audit_capture,json=auditCapture,proto3" json:"audit_capture,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	AuditMode    string                   `protobuf:"bytes,28,opt,name=audit_mode,json=auditMode,proto3" json:"audit_mode,omitempty"`
+	AuditCapture *AuditCaptureConfigProto `protobuf:"bytes,29,opt,name=audit_capture,json=auditCapture,proto3" json:"audit_capture,omitempty"`
+	// Backend service principal, independent of access-token audiences.
+	OriginReceiver string `protobuf:"bytes,30,opt,name=origin_receiver,json=originReceiver,proto3" json:"origin_receiver,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *RouteConfig) Reset() {
@@ -785,6 +797,13 @@ func (x *RouteConfig) GetAuditCapture() *AuditCaptureConfigProto {
 		return x.AuditCapture
 	}
 	return nil
+}
+
+func (x *RouteConfig) GetOriginReceiver() string {
+	if x != nil {
+		return x.OriginReceiver
+	}
+	return ""
 }
 
 type BackendConfigProto struct {
@@ -3923,7 +3942,7 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x11TokenInvalidation\x12\x1d\n" +
 	"\n" +
 	"token_refs\x18\x01 \x03(\tR\ttokenRefs\x121\n" +
-	"\x14invalidation_version\x18\x02 \x01(\x04R\x13invalidationVersion\"\xaa\x17\n" +
+	"\x14invalidation_version\x18\x02 \x01(\x04R\x13invalidationVersion\"\xde\x17\n" +
 	"\x12FullConfigSnapshot\x12,\n" +
 	"\x06routes\x18\x01 \x03(\v2\x14.csar.v1.RouteConfigR\x06routes\x12[\n" +
 	"\x10circuit_breakers\x18\x02 \x03(\v20.csar.v1.FullConfigSnapshot.CircuitBreakersEntryR\x0fcircuitBreakers\x12^\n" +
@@ -3944,7 +3963,8 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	" \x01(\v2\x1a.csar.v1.DebugHeadersProtoR\fdebugHeaders\x12O\n" +
 	"\x15global_access_control\x18\v \x01(\v2\x1b.csar.v1.AccessControlProtoR\x13globalAccessControl\x12E\n" +
 	"\x0fssrf_protection\x18\x12 \x01(\v2\x1c.csar.v1.SSRFProtectionProtoR\x0essrfProtection\x12-\n" +
-	"\x10redis_key_prefix\x18\x13 \x01(\tH\x00R\x0eredisKeyPrefix\x88\x01\x01\x1ag\n" +
+	"\x10redis_key_prefix\x18\x13 \x01(\tH\x00R\x0eredisKeyPrefix\x88\x01\x01\x122\n" +
+	"\x15origin_policy_version\x18\x14 \x01(\rR\x13originPolicyVersion\x1ag\n" +
 	"\x14CircuitBreakersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x129\n" +
 	"\x05value\x18\x02 \x01(\v2#.csar.v1.CircuitBreakerProfileProtoR\x05value:\x028\x01\x1aa\n" +
@@ -3986,7 +4006,7 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\v2 .csar.v1.AuditCaptureConfigProtoR\x05value:\x028\x01B\x13\n" +
 	"\x11_redis_key_prefix\"=\n" +
 	"\rRouteSnapshot\x12,\n" +
-	"\x06routes\x18\x01 \x03(\v2\x14.csar.v1.RouteConfigR\x06routes\"\x80\v\n" +
+	"\x06routes\x18\x01 \x03(\v2\x14.csar.v1.RouteConfigR\x06routes\"\xa9\v\n" +
 	"\vRouteConfig\x12\x19\n" +
 	"\broute_id\x18\x01 \x01(\tR\arouteId\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x16\n" +
@@ -4021,7 +4041,8 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x10cache_invalidate\x18\x1b \x01(\v2%.csar.v1.CacheInvalidationConfigProtoR\x0fcacheInvalidate\x12\x1d\n" +
 	"\n" +
 	"audit_mode\x18\x1c \x01(\tR\tauditMode\x12E\n" +
-	"\raudit_capture\x18\x1d \x01(\v2 .csar.v1.AuditCaptureConfigProtoR\fauditCapture\x1a:\n" +
+	"\raudit_capture\x18\x1d \x01(\v2 .csar.v1.AuditCaptureConfigProtoR\fauditCapture\x12'\n" +
+	"\x0forigin_receiver\x18\x1e \x01(\tR\x0eoriginReceiver\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf1\x02\n" +

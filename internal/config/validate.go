@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ledatu/csar-core/authntokens"
+	"github.com/ledatu/csar-core/caller"
 )
 
 // Validate checks the configuration for required fields and consistency.
@@ -191,6 +192,9 @@ func (c *Config) Validate() error {
 	for path, methods := range c.Paths {
 		for method := range methods {
 			route := methods[method]
+			if route.OriginReceiver != "" && !caller.ValidReference(route.OriginReceiver) {
+				return fmt.Errorf("path %s method %s: invalid x-csar-origin-receiver", path, method)
+			}
 			if route.Backend.TargetURL == "" {
 				return fmt.Errorf("path %s method %s: x-csar-backend.target_url is required", path, method)
 			}

@@ -1252,3 +1252,14 @@ Configure three named authentication policies with a versioned HTTPS introspecti
 For example, a documents service can configure `audiences: ["https://documents.example"]`, `required_scope: documents:read`, and `resource_path_param: project_id` on `/projects/{project_id}/files`. Set the route Authz policy to the required action and tenant. A platform-scoped policy can authorize a resource without a tenant. The issuer independently checks the credential, audience, purpose, scope and requested resource. It issues and consumes short-lived one-time proofs. The gateway checks the returned bindings on each request. Discovery and resource routes consume the credential before proxying. Exchange and discovery routes always reach the backend, so the catalog owner can evaluate current access on each call. Response caching is available on authorized resource routes.
 
 Install compatible routers, coordinators and an issuer before distributing the new modes. Existing seller routes continue to use their original protocol until migrated.
+
+Signed-origin forwarding is opt-in per route with `x-csar-origin-receiver:
+"svc:reports"` (the backend service principal, independently of the access-token
+audience). It requires a router-local root issuer, verified HTTPS/mTLS backend,
+authentication and tenant authorization. Receiver policies survive route-store
+JSON and coordinator snapshots, including explicit removal. New routers advertise
+`csar.origin_policy_version=1`; coordinators refuse enabled receiver policies for
+unsupported subscribers. A router with active policies rejects legacy snapshots
+and retains its last successful configuration. Upgrade the entire router fleet
+and coordinator before distributing policies; disconnected older routers can
+still serve their previous configuration. No production routes are enabled here.

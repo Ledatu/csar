@@ -1,5 +1,13 @@
 # csar Agent Summary
 
+Route `x-csar-origin-receiver` is preserved in route-store JSON and the existing
+coordinator wire contract. Versioned full snapshots preserve explicit removal;
+routers reject legacy snapshots while receiver policies are active. Subscribers
+advertise preservation capability; coordinators refuse to send enabled policies
+to unsupported routers. Router rebuilds bind configured receivers to a local
+RootIssuer and fail if it or verified backend mTLS/authn/tenant authz is missing.
+No production policy is enabled; binary issuer construction is a separate slice.
+
 The opt-in WithOriginForwarding adapter binds exact route keys to backend service
 principals independently of access-token audiences. It requires verified backend
 mTLS, static HTTPS targets and tenant authz. Root issuance runs only on actual

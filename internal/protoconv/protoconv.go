@@ -18,7 +18,8 @@ import (
 // a config.Config suitable for building a router.Router.
 func FullSnapshotToConfig(snap *csarv1.FullConfigSnapshot) *config.Config {
 	cfg := &config.Config{
-		Paths: make(map[string]config.PathConfig),
+		Paths:               make(map[string]config.PathConfig),
+		OriginPolicyVersion: snap.GetOriginPolicyVersion(),
 	}
 
 	for _, r := range snap.GetRoutes() {
@@ -78,7 +79,7 @@ func FullSnapshotToConfig(snap *csarv1.FullConfigSnapshot) *config.Config {
 }
 
 func protoToRouteConfig(r *csarv1.RouteConfig) config.RouteConfig {
-	rc := config.RouteConfig{}
+	rc := config.RouteConfig{OriginReceiver: r.GetOriginReceiver()}
 
 	// Use full backend if available, else fall back to legacy target_url.
 	if b := r.GetBackend(); b != nil {

@@ -37,7 +37,7 @@ func TestSnapshotsAndQuotasUseCommittedSourceConfig(t *testing.T) {
 	old, next := makeConfig("old.example"), makeConfig("next.example")
 	coord.SetTopLevelConfig(old)
 	stream := &snapshotRecorder{}
-	if err := coord.sendFullConfigSnapshot(stream); err != nil {
+	if err := coord.sendFullConfigSnapshot(stream, nil); err != nil {
 		t.Fatal(err)
 	}
 	first := stream.last.GetFullConfigSnapshot()
@@ -49,7 +49,7 @@ func TestSnapshotsAndQuotasUseCommittedSourceConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 20 {
-		if err := coord.sendFullConfigSnapshot(stream); err != nil {
+		if err := coord.sendFullConfigSnapshot(stream, nil); err != nil {
 			t.Fatal(err)
 		}
 		if !proto.Equal(first, stream.last.GetFullConfigSnapshot()) {
@@ -63,7 +63,7 @@ func TestSnapshotsAndQuotasUseCommittedSourceConfig(t *testing.T) {
 		t.Fatal("quota assignment did not use committed routes")
 	}
 	coord.SetTopLevelConfig(next)
-	if err := coord.sendFullConfigSnapshot(stream); err != nil {
+	if err := coord.sendFullConfigSnapshot(stream, nil); err != nil {
 		t.Fatal(err)
 	}
 	got := stream.last.GetFullConfigSnapshot()

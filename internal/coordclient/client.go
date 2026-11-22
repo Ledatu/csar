@@ -141,6 +141,7 @@ func (c *Client) subscribe(ctx context.Context) (bool, error) {
 		RouterId:        c.routerID,
 		RouterAddress:   c.routerAddr,
 		LastSeenVersion: c.lastSeenVersion,
+		Metadata:        map[string]string{config.OriginPolicyCapability: "1"},
 	})
 	if err != nil {
 		return false, err

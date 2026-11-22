@@ -169,14 +169,21 @@ func TestRootAndServiceOriginForwardingDoesNotMintOnCacheHit(t *testing.T) {
 		w.Header().Set("X-Checksum", "ok")
 	}))
 	cfg := newTestConfig(map[string]config.PathConfig{"/report/{seller_id}": {"get": {
-		Backend: config.BackendConfig{TargetURL: backend.URL, TLS: backendTLS}, AuthValidate: &config.AuthValidateConfig{Mode: "select", Methods: []config.AuthValidateConfig{{Mode: "session", SessionEndpoint: identity.URL + "/session", CookieName: "session"}, {Mode: "jwt", JWKSURL: identity.URL + "/jwks", Issuer: "issuer", Audiences: []string{"analytics-access"}}}},
+		OriginReceiver: "svc:analytics",
+		Backend:        config.BackendConfig{TargetURL: backend.URL, TLS: backendTLS}, AuthValidate: &config.AuthValidateConfig{Mode: "select", Methods: []config.AuthValidateConfig{{Mode: "session", SessionEndpoint: identity.URL + "/session", CookieName: "session"}, {Mode: "jwt", JWKSURL: identity.URL + "/jwks", Issuer: "issuer", Audiences: []string{"analytics-access"}}}},
 		Authz: &config.AuthzRouteConfig{Subject: "{header.X-Gateway-Subject}", ScopeType: "tenant", ScopeID: "wildberries:{path.seller_id}", Resource: "report", Action: "read"}, Cache: &config.CacheConfig{Key: "report:{tenant}", TTL: config.Duration{Duration: time.Minute}},
 	}}})
-	router, err := New(cfg, newTestLogger(), WithAuthzClient(authzClient), WithOriginForwarding(issuer, map[string]string{"GET:/report/{seller_id}": "svc:analytics"}))
+	router, err := New(cfg, newTestLogger(), WithAuthzClient(authzClient), WithRootIssuer(issuer))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer router.Close()
+	if _, err := New(cfg, newTestLogger(), WithAuthzClient(authzClient)); err == nil {
+		t.Fatal("configured receiver without an issuer was silently ignored")
+	}
+	if _, err := New(cfg, newTestLogger(), WithAuthzClient(authzClient), WithOriginForwarding(issuer, map[string]string{"GET:/report/{seller_id}": "different"})); err == nil {
+		t.Fatal("conflicting programmatic receiver was accepted")
+	}
 	recorder := &stubAuditRecorder{}
 	router.auditClient = recorder
 	rt, _ := router.matchRoute("GET", "/report/cabinet")
