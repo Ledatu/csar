@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+
 	"github.com/ledatu/csar-core/apierror"
 	"github.com/ledatu/csar-core/caller"
 	"github.com/ledatu/csar-core/gatewayctx"
@@ -242,6 +244,9 @@ func (v *JWTValidator) Wrap(cfg Config, next http.Handler) http.Handler {
 			}
 		}
 
+		if expiry, expiryErr := jwt.MapClaims(vt.Claims).GetExpirationTime(); expiryErr == nil && expiry != nil {
+			r = withSource(r, principal, expiry.Time)
+		}
 		r, err = v.verifyOrigin(r, cfg, keyFunc)
 		if err != nil {
 			v.reject(w, http.StatusUnauthorized, "invalid origin context")

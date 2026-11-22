@@ -131,7 +131,11 @@ func (v *SessionValidator) Wrap(cfg SessionConfig, next http.Handler) http.Handl
 			}
 		}
 
-		next.ServeHTTP(w, r)
+		until := entry.expiresAt
+		if current := entry.fetchedAt.Add(cfg.CacheTTL); current.Before(until) {
+			until = current
+		}
+		next.ServeHTTP(w, withSource(r, entry.identity, until))
 	})
 }
 

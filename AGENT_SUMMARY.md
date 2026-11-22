@@ -1,5 +1,10 @@
 # csar Agent Summary
 
+Root issuance prerequisites use private authn.Source context with owned caller
+metadata and an absolute validation deadline. API-key/session cache hits preserve
+the original freshness lease instead of renewing it per request. Missing legacy
+metadata/expiry provides no source. No root issuance or forwarding is activated.
+
 W2 final audit events include the verified immediate Caller, authorized signed
 OriginCaller and operation/parent/trace correlation. Ordinary operation IDs are
 server-generated independently of client request IDs. Actor retains immediate-hop

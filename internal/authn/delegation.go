@@ -96,7 +96,7 @@ func (v *TokenValidator) wrapGrant(cfg TokenConfig, next http.Handler) http.Hand
 			apierror.New(apierror.CodeUpstreamError, http.StatusBadGateway, "authentication service unavailable").Write(w)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, withSource(r, result.Identity, result.ExpiresAt))
 	})
 }
 
