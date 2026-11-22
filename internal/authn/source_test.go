@@ -8,8 +8,34 @@ import (
 	"time"
 
 	"github.com/ledatu/csar-core/caller"
+	"github.com/ledatu/csar-core/gatewayctx"
 	"github.com/ledatu/csar/pkg/middleware/authzmw"
 )
+
+func TestLegacySessionWithoutIssuerExpiryCannotMintRoot(t *testing.T) {
+	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(gatewayctx.HeaderSubject, "owner")
+		id := &caller.Identity{Version: 1, CallerKind: caller.Human, CallerID: "owner", OwnerSubject: "owner", EffectiveSubject: "owner", CredentialKind: caller.Session, Assurance: caller.Verified}
+		if err := gatewayctx.SetCaller(w.Header(), id); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer issuer.Close()
+	v := NewSessionValidator(newTestLogger(), nil)
+	h := v.Wrap(SessionConfig{Endpoint: issuer.URL, CookieName: "session"}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := SourceFromContext(r.Context()); ok {
+			t.Fatal("unknown issuer expiry became root authority")
+		}
+		w.WriteHeader(204)
+	}))
+	r := httptest.NewRequest("GET", "/", nil)
+	r.AddCookie(&http.Cookie{Name: "session", Value: "fake"})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != 204 {
+		t.Fatal("legacy auth compatibility lost", w.Code)
+	}
+}
 
 func TestSourceOwnershipAndLegacyAbsence(t *testing.T) {
 	id := tokenCaller(caller.APIKey)

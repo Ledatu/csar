@@ -52,13 +52,14 @@ type SessionValidator struct {
 }
 
 type sessionCacheEntry struct {
-	identity  *caller.Identity
-	headers   http.Header
-	tokens    []authntokens.IssuedToken
-	errors    []authntokens.IssueTokenError
-	status    int
-	fetchedAt time.Time
-	expiresAt time.Time
+	sourceExpiresAt time.Time
+	identity        *caller.Identity
+	headers         http.Header
+	tokens          []authntokens.IssuedToken
+	errors          []authntokens.IssueTokenError
+	status          int
+	fetchedAt       time.Time
+	expiresAt       time.Time
 }
 
 // NewSessionValidator creates a new SessionValidator.
@@ -132,6 +133,9 @@ func (v *SessionValidator) Wrap(cfg SessionConfig, next http.Handler) http.Handl
 		}
 
 		until := entry.expiresAt
+		if entry.sourceExpiresAt.IsZero() {
+			until = time.Time{}
+		}
 		if current := entry.fetchedAt.Add(cfg.CacheTTL); current.Before(until) {
 			until = current
 		}
@@ -300,6 +304,7 @@ func buildSessionCacheEntry(cfg SessionConfig, resp *http.Response) (*sessionCac
 			entry.expiresAt = expiry
 		}
 	}
+	entry.sourceExpiresAt = expiry
 	return entry, nil
 }
 
