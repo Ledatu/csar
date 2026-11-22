@@ -1,6 +1,21 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+func TestIncludedOriginIssuerCannotReplaceLocalTrust(t *testing.T) {
+	local := &OriginIssuerConfig{Issuer: "local"}
+	base := &Config{OriginIssuer: local}
+	overlay := &Config{OriginIssuer: &OriginIssuerConfig{Issuer: "other"}}
+	if err := mergeConfigs(base, overlay, "routes.yaml"); err != nil {
+		t.Fatal(err)
+	}
+	if base.OriginIssuer != local || len(base.Warnings) != 1 || !strings.Contains(base.Warnings[0], "origin_issuer is a root-only field") {
+		t.Fatal("included trust settings were silently accepted or ignored")
+	}
+}
 
 func TestOriginIssuerValidation(t *testing.T) {
 	base := OriginIssuerConfig{Endpoint: "https://authn/root", Issuer: "authn", JWKSURL: "https://authn/jwks", TLS: BackendTLSPolicy{CertFile: "router.pem", KeyFile: "router.key"}}

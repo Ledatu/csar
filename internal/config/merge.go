@@ -42,6 +42,10 @@ func mergeConfigs(base, overlay *Config, overlayFile string) error {
 		base.Warnings = append(base.Warnings,
 			fmt.Sprintf("include %s: redis is a root-only field — ignored", overlayFile))
 	}
+	if overlay.OriginIssuer != nil {
+		base.Warnings = append(base.Warnings,
+			fmt.Sprintf("include %s: origin_issuer is a root-only field — ignored", overlayFile))
+	}
 	if overlay.GlobalThrottle != nil {
 		base.Warnings = append(base.Warnings,
 			fmt.Sprintf("include %s: global_throttle is a root-only field — ignored", overlayFile))
