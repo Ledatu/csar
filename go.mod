@@ -13,7 +13,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0 // indirect
-	github.com/ledatu/csar-core v0.1.48-0.20261122150851-5a3be5ec1b41
+	github.com/ledatu/csar-core v0.1.48-0.20261122151748-5d1334f965d1
 	github.com/ledatu/csar-proto v0.1.6-0.20261122144432-05946ddf33f1
 	github.com/lib/pq v1.12.3
 	github.com/modelcontextprotocol/go-sdk v1.6.0
