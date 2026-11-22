@@ -1,5 +1,14 @@
 # csar Agent Summary
 
+W2 final audit events include the verified immediate Caller, authorized signed
+OriginCaller and operation/parent/trace correlation. Ordinary operation IDs are
+server-generated independently of client request IDs. Actor retains immediate-hop
+semantics; successful tenant authz supplies the cabinet scope. Every cold/cache
+hit/denial emits its own event under the route's existing audit mode. Rejected
+proofs are not promoted to authorized origins; no credential bytes are persisted.
+This retains the existing asynchronous recorder, not a confirmed release barrier.
+Upgraded audit receivers are a rollout dependency; no production change is made.
+
 Separate signed-origin credentials are consumed only alongside verified service
 STS JWTs, using the existing issuer/JWKS and exactly one configured route audience
 as receiver. Sender and original request digest are checked; actual successful
@@ -19,8 +28,8 @@ W2 opaque API-key/MCP and universal grant validation preserve optional issuer
 caller metadata after subject/credential binding checks. Malformed present
 metadata fails closed and is not cached; legacy absence remains compatible.
 The reserved gateway namespace is stripped before validation. Backend parsing
-requires upgraded Core readers. JWT/session adoption, signed origin and audit
-receipt barriers remain later W2 work; no production configuration is changed.
+requires upgraded Core readers. Receipt barriers remain later W2 work; no
+production configuration is changed.
 
 ## Hosted seller authentication
 

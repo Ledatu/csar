@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -111,6 +112,10 @@ func TestOriginRequiresServiceRequestAndAuthorizedResourceBeforeCache(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	recorder := &stubAuditRecorder{}
+	router.auditClient = recorder
+	rt, _ := router.matchRoute("GET", "/report/cabinet")
+	rt.auditMode = config.AuditModeAll
 	service := &caller.Identity{Version: 1, CallerKind: caller.Service, CallerID: "reporting", EffectiveSubject: "reporting", CredentialKind: caller.STS, Assurance: caller.Verified}
 	access, err := jwtx.Sign(keys, jwt.MapClaims{"sub": "reporting", "caller": service, "iss": "issuer", "aud": "analytics", "exp": time.Now().Add(time.Minute).Unix()})
 	if err != nil {
@@ -143,6 +148,18 @@ func TestOriginRequiresServiceRequestAndAuthorizedResourceBeforeCache(t *testing
 		router.ServeHTTP(w, r)
 		if w.Code != want {
 			t.Fatalf("got=%d want=%d: %s", w.Code, want, w.Body.String())
+		}
+		event := recorder.events[len(recorder.events)-1]
+		if want == 200 {
+			if event.Caller == nil || event.Caller.CallerKind != caller.Service || event.Actor != "reporting" || event.OriginCaller == nil || event.OriginCaller.CallerID != "agent" || event.OperationID == "" || event.ParentOperationID == "" || event.ScopeID != "wildberries:cabinet" {
+				t.Fatal("service/origin attribution lost")
+			}
+		} else if event.OriginCaller != nil {
+			t.Fatal("rejected proof recorded as authorized origin")
+		}
+		body, err := json.Marshal(event)
+		if err != nil || strings.Contains(string(body), proof) {
+			t.Fatal("audit persisted raw origin credential", err)
 		}
 	}
 	send(proof, 200)

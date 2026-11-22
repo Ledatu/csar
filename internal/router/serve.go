@@ -59,7 +59,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	state := &auditRequestState{stage: "authentication"}
+	state := &auditRequestState{stage: "authentication", operationID: uuid.NewString()}
 	req = req.WithContext(context.WithValue(req.Context(), auditRequestKey{}, state))
 	gatewayctx.StripTrusted(req.Header)
 	r.wrapUpstreamWithAudit(rt, http.HandlerFunc(func(aw http.ResponseWriter, ar *http.Request) {
@@ -209,6 +209,7 @@ func (r *Router) serveAfterAuth(w http.ResponseWriter, req *http.Request, rt *ro
 		apierror.New(apierror.CodeAccessDenied, http.StatusForbidden, "origin resource mismatch").Write(w)
 		return
 	}
+	auditAuthorizedContext(req)
 	auditStage(req, "security")
 	// Step 0b-0: Inject static headers from x-csar-headers.
 	// These are fixed per-route headers like User-Agent or x-client-secret
