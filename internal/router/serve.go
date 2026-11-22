@@ -570,6 +570,11 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 }
 
 func (r *Router) serveUpstream(w http.ResponseWriter, req *http.Request, rt *route) {
+	// A throttle wait may outlive a proof that was valid at ingress.
+	if validateOriginResource(req) != nil {
+		apierror.New(apierror.CodeAccessDenied, http.StatusForbidden, "origin context expired or mismatched").Write(w)
+		return
+	}
 	if state := auditState(req); state != nil {
 		state.upstream = true
 		state.stage = "upstream"

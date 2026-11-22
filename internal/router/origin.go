@@ -2,6 +2,7 @@ package router
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/ledatu/csar-core/gatewayctx"
 	"github.com/ledatu/csar-core/origincontext"
@@ -14,6 +15,9 @@ func validateOriginResource(req *http.Request) error {
 	proof, present := origincontext.FromContext(req.Context())
 	if !present {
 		return nil
+	}
+	if proof.ExpiresAt == nil || !time.Now().Before(proof.ExpiresAt.Time) {
+		return origincontext.ErrInvalid
 	}
 	scope, ok := authzmw.ScopeFromContext(req.Context())
 	if !ok || scope.Type != "tenant" || scope.ID == "" || scope.ID != proof.Resource || scope.Subject != proof.Sender || scope.Subject != req.Header.Get(gatewayctx.HeaderSubject) {

@@ -18,8 +18,40 @@ import (
 	pb "github.com/ledatu/csar-proto/csar/authz/v1"
 	"github.com/ledatu/csar/internal/authz"
 	"github.com/ledatu/csar/internal/config"
+	"github.com/ledatu/csar/pkg/middleware/authzmw"
 	"google.golang.org/grpc"
 )
+
+type allowedOriginScope struct{}
+
+func (allowedOriginScope) CheckAccess(context.Context, *pb.CheckAccessRequest) (*authz.CheckAccessResult, error) {
+	return &authz.CheckAccessResult{Allowed: true}, nil
+}
+
+func TestOriginExpiresBetweenAuthorizationAndDispatch(t *testing.T) {
+	router := &Router{}
+	r := httptest.NewRequest(http.MethodGet, "/report", nil)
+	r.Header.Set(gatewayctx.HeaderSubject, "reporting")
+	proof := &origincontext.Claims{Sender: "reporting", Resource: "wildberries:cabinet", RegisteredClaims: jwt.RegisteredClaims{ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute))}}
+	r = r.WithContext(origincontext.WithVerified(r.Context(), proof))
+	mw := authzmw.New(allowedOriginScope{}, func(*http.Request) string { return "test" })
+	h := mw.Wrap(authzmw.Config{RouteConfig: &config.AuthzRouteConfig{Subject: "reporting", Resource: "report", Action: "read", ScopeType: "tenant", ScopeID: "wildberries:cabinet"}}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := validateOriginResource(r); err != nil {
+			t.Fatal("initial proof was not valid", err)
+		}
+		// Model a completed wait without sleeping or a timing-sensitive TTL test.
+		expired, _ := origincontext.FromContext(r.Context())
+		expired.ExpiresAt = jwt.NewNumericDate(time.Now().Add(-time.Second))
+		r = r.WithContext(origincontext.WithVerified(r.Context(), expired))
+		// No upstream exists: dispatch must fail before touching cache/proxy.
+		router.serveUpstream(w, r, &route{})
+	}))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatal("expired origin reached dispatch", w.Code)
+	}
+}
 
 type originPermission struct {
 	pb.UnimplementedAuthzServiceServer
