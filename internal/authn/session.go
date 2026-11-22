@@ -15,6 +15,8 @@ import (
 
 	"github.com/ledatu/csar-core/apierror"
 	"github.com/ledatu/csar-core/authntokens"
+	"github.com/ledatu/csar-core/caller"
+	"github.com/ledatu/csar-core/gatewayctx"
 	"github.com/ledatu/csar/pkg/middleware"
 )
 
@@ -50,6 +52,7 @@ type SessionValidator struct {
 }
 
 type sessionCacheEntry struct {
+	identity  *caller.Identity
 	headers   http.Header
 	tokens    []authntokens.IssuedToken
 	errors    []authntokens.IssueTokenError
@@ -77,6 +80,7 @@ func (v *SessionValidator) Wrap(cfg SessionConfig, next http.Handler) http.Handl
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gatewayctx.StripTrusted(r.Header)
 		cookie, err := r.Cookie(cfg.CookieName)
 		if err != nil {
 			v.reject(w, http.StatusUnauthorized, "missing session cookie")
@@ -114,6 +118,18 @@ func (v *SessionValidator) Wrap(cfg SessionConfig, next http.Handler) http.Handl
 		if !v.injectIssuedTokens(w, r, cfg, entry) {
 			return
 		}
+		if entry.identity != nil {
+			if subject := r.Header.Get(gatewayctx.HeaderSubject); subject != "" && subject != entry.identity.EffectiveSubject {
+				v.reject(w, http.StatusBadGateway, "invalid session subject")
+				return
+			}
+			r.Header.Set(gatewayctx.HeaderSubject, entry.identity.EffectiveSubject)
+			r.Header.Set(gatewayctx.HeaderCredentialID, entry.identity.CredentialID)
+			if gatewayctx.SetCaller(r.Header, entry.identity) != nil {
+				v.reject(w, http.StatusBadGateway, "invalid session caller")
+				return
+			}
+		}
 
 		next.ServeHTTP(w, r)
 	})
@@ -124,7 +140,7 @@ func (v *SessionValidator) validate(cfg SessionConfig, cookie *http.Cookie) (*se
 	now := time.Now()
 
 	v.mu.RLock()
-	if e, ok := v.cache[cacheKey]; ok && now.Before(e.expiresAt) {
+	if e, ok := v.cache[cacheKey]; ok && now.Before(e.expiresAt) && now.Sub(e.fetchedAt) < cfg.CacheTTL {
 		v.mu.RUnlock()
 		return e, nil
 	}
@@ -224,27 +240,54 @@ func buildSessionCacheEntry(cfg SessionConfig, resp *http.Response) (*sessionCac
 		fetchedAt: now,
 		expiresAt: now.Add(cfg.CacheTTL),
 	}
-	if len(cfg.IssueTokens) == 0 || resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK {
 		return entry, nil
 	}
+	var expiry time.Time
+	if len(cfg.IssueTokens) == 0 {
+		var err error
+		entry.identity, err = gatewayctx.CallerFromHeaders(entry.headers)
+		if err != nil {
+			return nil, fmt.Errorf("invalid session caller")
+		}
+		if value := entry.headers.Get(authntokens.HeaderSessionExpiresAt); value != "" {
+			expiry, err = time.Parse(time.RFC3339Nano, value)
+			if err != nil {
+				return nil, fmt.Errorf("invalid session expiry")
+			}
+		}
+	} else {
 
-	var body authntokens.ValidateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, fmt.Errorf("decoding validate response: %w", err)
-	}
-	for k, v := range body.Headers {
-		if v != "" {
-			entry.headers.Set(k, v)
+		var body authntokens.ValidateResponse
+		if err := decodeTokenResponse(resp.Body, &body); err != nil {
+			return nil, fmt.Errorf("decoding validate response: %w", err)
+		}
+		for k, v := range body.Headers {
+			if v != "" {
+				entry.headers.Set(k, v)
+			}
+		}
+		entry.tokens = body.Tokens
+		entry.errors = body.Errors
+		entry.identity, expiry = body.Identity, body.ExpiresAt
+		if tokenExpiry, ok := earliestTokenExpiry(body.Tokens); ok {
+			capped := tokenExpiry.Add(-tokenCacheSafetyMargin)
+			if capped.Before(now) {
+				entry.expiresAt = now
+			} else if capped.Before(entry.expiresAt) {
+				entry.expiresAt = capped
+			}
 		}
 	}
-	entry.tokens = body.Tokens
-	entry.errors = body.Errors
-	if tokenExpiry, ok := earliestTokenExpiry(body.Tokens); ok {
-		capped := tokenExpiry.Add(-tokenCacheSafetyMargin)
-		if capped.Before(now) {
-			entry.expiresAt = now
-		} else if capped.Before(entry.expiresAt) {
-			entry.expiresAt = capped
+	if validateIssuerCaller(entry.identity, entry.headers.Get(gatewayctx.HeaderSubject), entry.headers.Get(gatewayctx.HeaderCredentialID), caller.Session) != nil {
+		return nil, fmt.Errorf("invalid session caller binding")
+	}
+	if !expiry.IsZero() {
+		if !now.Before(expiry) {
+			return nil, fmt.Errorf("expired session response")
+		}
+		if expiry.Before(entry.expiresAt) {
+			entry.expiresAt = expiry
 		}
 	}
 	return entry, nil

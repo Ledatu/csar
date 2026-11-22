@@ -22,8 +22,10 @@ import (
 	"time"
 
 	"github.com/ledatu/csar-core/apierror"
+	"github.com/ledatu/csar-core/caller"
 	"github.com/ledatu/csar-core/gatewayctx"
 	"github.com/ledatu/csar-core/jwtx"
+	"github.com/ledatu/csar-core/origincontext"
 )
 
 // Config configures JWT validation for a route.
@@ -121,6 +123,7 @@ func (v *JWTValidator) Wrap(cfg Config, next http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gatewayctx.StripTrusted(r.Header)
 		var tokenStr string
 
 		if cfg.CookieName != "" {
@@ -197,6 +200,24 @@ func (v *JWTValidator) Wrap(cfg Config, next http.Handler) http.Handler {
 		}
 
 		// Forward claims to request headers.
+		if vt.Claims["token_use"] == origincontext.TokenUse {
+			v.reject(w, http.StatusUnauthorized, "origin proof is not an access token")
+			return
+		}
+		var principal *caller.Identity
+		if raw, present := vt.Claims["caller"]; present {
+			body, marshalErr := json.Marshal(raw)
+			principal = new(caller.Identity)
+			subject, _ := vt.Claims["sub"].(string)
+			if marshalErr != nil || len(body) > gatewayctx.MaxCallerHeaderBytes || json.Unmarshal(body, principal) != nil || principal.Validate() != nil || principal.EffectiveSubject != subject {
+				v.reject(w, http.StatusUnauthorized, "invalid token caller binding")
+				return
+			}
+			if credential, present := vt.Claims["credential_id"]; present && credential != principal.CredentialID {
+				v.reject(w, http.StatusUnauthorized, "invalid token credential binding")
+				return
+			}
+		}
 		// Always clear target headers first to prevent spoofing: if a client
 		// sends X-User-Id and the JWT lacks the "sub" claim, the client-supplied
 		// value must not survive into downstream middleware (e.g. authzmw).
@@ -206,6 +227,18 @@ func (v *JWTValidator) Wrap(cfg Config, next http.Handler) http.Handler {
 		for claimName, headerName := range cfg.ForwardClaims {
 			if val, ok := vt.Claims[claimName]; ok {
 				r.Header.Set(headerName, claimToString(val))
+			}
+		}
+		if principal != nil {
+			if subject := r.Header.Get(gatewayctx.HeaderSubject); subject != "" && subject != principal.EffectiveSubject {
+				v.reject(w, http.StatusUnauthorized, "invalid forwarded subject")
+				return
+			}
+			r.Header.Set(gatewayctx.HeaderSubject, principal.EffectiveSubject)
+			r.Header.Set(gatewayctx.HeaderCredentialID, principal.CredentialID)
+			if gatewayctx.SetCaller(r.Header, principal) != nil {
+				v.reject(w, http.StatusUnauthorized, "invalid token caller")
+				return
 			}
 		}
 
