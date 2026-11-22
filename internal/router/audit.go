@@ -10,12 +10,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	auditcore "github.com/ledatu/csar-core/audit"
+	"github.com/ledatu/csar-core/caller"
 	"github.com/ledatu/csar-core/gatewayctx"
 	"github.com/ledatu/csar-core/jsonredact"
 	"github.com/ledatu/csar-core/logutil"
+	"github.com/ledatu/csar-core/origincontext"
 	"github.com/ledatu/csar/internal/config"
 	"github.com/ledatu/csar/internal/proxy"
+	"github.com/ledatu/csar/pkg/middleware/authzmw"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func defaultAuditForMutatingMethod(method string) bool {
@@ -44,14 +50,31 @@ const actorEmailHeader = "X-User-Email"
 
 type auditRequestKey struct{}
 type auditRequestState struct {
-	identity         gatewayctx.Identity
-	email            string
-	verified         bool
-	stage            string
-	upstream         bool
-	upstreamStatus   int
-	transportFailure bool
-	secrets          []string
+	operationID       string
+	parentOperationID string
+	originCaller      *caller.Identity
+	identity          gatewayctx.Identity
+	email             string
+	verified          bool
+	stage             string
+	upstream          bool
+	upstreamStatus    int
+	transportFailure  bool
+	secrets           []string
+}
+
+// Called only after the signed proof and the actual authorized resource match.
+func auditAuthorizedContext(req *http.Request) {
+	if state := auditState(req); state != nil {
+		if scope, ok := authzmw.ScopeFromContext(req.Context()); ok && scope.Type == "tenant" {
+			state.identity.Tenant = scope.ID
+		}
+		if proof, ok := origincontext.FromContext(req.Context()); ok {
+			state.originCaller = proof.Origin
+			state.operationID = proof.OperationID
+			state.parentOperationID = proof.ParentOperationID
+		}
+	}
 }
 
 func auditState(req *http.Request) *auditRequestState {
@@ -139,7 +162,7 @@ func (r *Router) wrapUpstreamWithAudit(rt *route, next http.Handler) http.Handle
 		start := time.Now()
 		state := auditState(req)
 		if state == nil {
-			state = &auditRequestState{verified: true, identity: gatewayctx.FromRequest(req)}
+			state = &auditRequestState{verified: true, identity: gatewayctx.FromRequest(req), operationID: uuid.NewString()}
 			req = req.WithContext(context.WithValue(req.Context(), auditRequestKey{}, state))
 		}
 		req = req.WithContext(proxy.WithResponseObserver(req.Context(), func(status int) {
@@ -242,18 +265,25 @@ func (r *Router) wrapUpstreamWithAudit(rt *route, next http.Handler) http.Handle
 		meta := auditcore.EncodeHTTPMetadata(metaMap, response)
 
 		ev := &auditcore.Event{
-			Service:     routerAuditServiceName,
-			Actor:       actor,
-			Action:      req.Method + " " + rt.originalPath,
-			TargetType:  "path",
-			TargetID:    req.URL.Path,
-			ScopeType:   scopeType,
-			ScopeID:     scopeID,
-			BeforeState: beforeState,
-			Metadata:    meta,
-			RequestID:   r.requestID(req),
-			ClientIP:    clientIP,
-			CreatedAt:   time.Now().UTC(),
+			Caller:            gw.Caller,
+			OriginCaller:      state.originCaller,
+			OperationID:       state.operationID,
+			ParentOperationID: state.parentOperationID,
+			Service:           routerAuditServiceName,
+			Actor:             actor,
+			Action:            req.Method + " " + rt.originalPath,
+			TargetType:        "path",
+			TargetID:          req.URL.Path,
+			ScopeType:         scopeType,
+			ScopeID:           scopeID,
+			BeforeState:       beforeState,
+			Metadata:          meta,
+			RequestID:         r.requestID(req),
+			ClientIP:          clientIP,
+			CreatedAt:         time.Now().UTC(),
+		}
+		if span := trace.SpanContextFromContext(req.Context()); span.IsValid() {
+			ev.TraceID = span.TraceID().String()
 		}
 		r.auditClient.Record(req.Context(), ev)
 	})
