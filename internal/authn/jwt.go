@@ -242,6 +242,11 @@ func (v *JWTValidator) Wrap(cfg Config, next http.Handler) http.Handler {
 			}
 		}
 
+		r, err = v.verifyOrigin(r, cfg, keyFunc)
+		if err != nil {
+			v.reject(w, http.StatusUnauthorized, "invalid origin context")
+			return
+		}
 		v.logger.Debug("JWT validated successfully",
 			"kid", vt.Header["kid"],
 			"alg", vt.Header["alg"],

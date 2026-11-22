@@ -15,6 +15,7 @@ import (
 	"github.com/ledatu/csar-core/gatewayctx"
 	"github.com/ledatu/csar-core/httpmiddleware"
 	"github.com/ledatu/csar/internal/apierror"
+	"github.com/ledatu/csar/internal/authn"
 	"github.com/ledatu/csar/internal/proxy"
 	"github.com/ledatu/csar/internal/resilience"
 	"github.com/ledatu/csar/internal/throttle"
@@ -175,6 +176,10 @@ func (r *Router) serveWithIPCheck(w http.ResponseWriter, req *http.Request, rt *
 // here before any backend dispatch, which makes it the one place guaranteed to
 // run on every proxied request.
 func (r *Router) serveAfterJWT(w http.ResponseWriter, req *http.Request, rt *route) {
+	if authn.RejectUnconsumedOrigin(req) != nil {
+		apierror.New(apierror.CodeAuthFailed, http.StatusUnauthorized, "unsupported origin context").Write(w)
+		return
+	}
 	auditIdentity(req, rt)
 	auditStage(req, "authorization")
 	// The gateway credential is hop-by-hop: inbound auth has already consumed
@@ -200,6 +205,10 @@ func (r *Router) serveAfterJWT(w http.ResponseWriter, req *http.Request, rt *rou
 // serveAfterAuth runs the pipeline after inbound JWT validation.
 // Pipeline continues: static headers -> security inject -> throttle -> circuit breaker -> proxy.
 func (r *Router) serveAfterAuth(w http.ResponseWriter, req *http.Request, rt *route) {
+	if validateOriginResource(req) != nil {
+		apierror.New(apierror.CodeAccessDenied, http.StatusForbidden, "origin resource mismatch").Write(w)
+		return
+	}
 	auditStage(req, "security")
 	// Step 0b-0: Inject static headers from x-csar-headers.
 	// These are fixed per-route headers like User-Agent or x-client-secret
@@ -561,6 +570,11 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 }
 
 func (r *Router) serveUpstream(w http.ResponseWriter, req *http.Request, rt *route) {
+	// A throttle wait may outlive a proof that was valid at ingress.
+	if validateOriginResource(req) != nil {
+		apierror.New(apierror.CodeAccessDenied, http.StatusForbidden, "origin context expired or mismatched").Write(w)
+		return
+	}
 	if state := auditState(req); state != nil {
 		state.upstream = true
 		state.stage = "upstream"

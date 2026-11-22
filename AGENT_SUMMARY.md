@@ -1,5 +1,14 @@
 # csar Agent Summary
 
+Separate signed-origin credentials are consumed only alongside verified service
+STS JWTs, using the existing issuer/JWKS and exactly one configured route audience
+as receiver. Sender and original request digest are checked; actual successful
+tenant authz scope and subject must match the resource and signed sender. Validity
+is checked again after throttle waits before cache/backend access. Proofs
+on unsupported auth modes, platform-only/no tenant scopes or ambiguous audiences
+fail closed. Proof bytes never reach upstream. Root-client/typed backend forwarding
+and activation remain separate work; STS authority is never replaced by origin.
+
 JWT and GET/POST session validators now adopt optional verified caller metadata,
 reject envelope conflicts and origin-as-access JWTs, and clear forged gateway
 headers. Session caches are capped by issuer expiry and the current route TTL.
