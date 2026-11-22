@@ -48,9 +48,10 @@ func newTestReloader(t *testing.T, cfg *config.Config, extraOpts ...router.Optio
 	rl := &routerReloader{
 		logger: logger, routerOpts: opts, tp: tp, sharedTM: tm,
 		currentRouter: r, ssrfProtection: ssrf,
-		originReceivers: cfg.HasOriginReceivers(),
-		restartSnapshot: config.SnapshotRestartRequired(cfg),
-		reloadHandler:   newReloadableHandler(tp.HTTPMiddleware("csar", r)),
+		originReceivers:    cfg.HasOriginReceivers(),
+		policyCapabilities: cfg.RequiredCapabilities(),
+		restartSnapshot:    config.SnapshotRestartRequired(cfg),
+		reloadHandler:      newReloadableHandler(tp.HTTPMiddleware("csar", r)),
 	}
 	if cfg.Redis != nil {
 		rl.redisKeyPrefix = cfg.Redis.KeyPrefix
@@ -90,6 +91,20 @@ func TestReloadRejectsIncompatibleOriginPolicySnapshot(t *testing.T) {
 	cfg.OriginPolicyVersion = 0
 	if err := rl.Apply(cfg); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReloadRejectsLostReleasePolicy(t *testing.T) {
+	rl := newTestReloader(t, reloadTestConfig("http://example.com", nil))
+	rl.policyCapabilities = map[string]uint32{config.AuditReleaseCapability: 1}
+	prior := rl.currentRouter
+	cfg := reloadTestConfig("http://other.example", nil)
+	if err := rl.Apply(cfg); err == nil || rl.currentRouter != prior {
+		t.Fatal("legacy snapshot removed release barrier")
+	}
+	cfg.PolicyVersions = config.PolicyCapabilities()
+	if err := rl.Apply(cfg); err != nil || len(rl.policyCapabilities) != 0 {
+		t.Fatal("explicit policy removal failed", err)
 	}
 }
 

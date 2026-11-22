@@ -77,7 +77,8 @@ func (sc *SecurityConfigs) UnmarshalYAML(value *yaml.Node) error {
 type Config struct {
 	// OriginPolicyVersion is snapshot provenance, never a YAML override.
 	// Zero identifies legacy coordinators that cannot preserve receiver policies.
-	OriginPolicyVersion uint32 `yaml:"-" json:"-"`
+	OriginPolicyVersion uint32            `yaml:"-" json:"-"`
+	PolicyVersions      map[string]uint32 `yaml:"-" json:"-"`
 	// Include is a list of file paths or glob patterns to merge into this config.
 	// Paths are resolved relative to the directory of the file containing the include.
 	// Processed before YAML unmarshaling of the main config body.
@@ -342,6 +343,10 @@ type RouteConfig struct {
 	// or "off", "all", "errors". When nil, POST/PUT/PATCH/DELETE default to all
 	// and GET/HEAD/OPTIONS default to off.
 	Audit *AuditMode `yaml:"x-csar-audit,omitempty" json:"x-csar-audit,omitempty"`
+
+	// AuditRelease requires a broker-confirmed authorization record before cache
+	// or backend dispatch. Network outcome remains a separate audit event.
+	AuditRelease bool `yaml:"x-csar-audit-release,omitempty" json:"x-csar-audit-release,omitempty"`
 
 	// AuditCapture configures optional redacted request-body capture for audit events.
 	AuditCapture *AuditCaptureConfig `yaml:"x-csar-audit-capture,omitempty" json:"x-csar-audit-capture,omitempty"`

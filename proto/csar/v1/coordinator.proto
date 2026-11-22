@@ -113,6 +113,9 @@ message FullConfigSnapshot {
   // Version 1 preserves origin_receiver, including explicit removal. Zero is
   // legacy; routers with active receiver policies must reject legacy snapshots.
   uint32 origin_policy_version = 20;
+
+  // Versioned opt-in route semantics, including explicit policy removal.
+  map<string, uint32> policy_versions = 21;
 }
 
 // RouteSnapshot contains the full set of routes (legacy, kept for backward compat).
@@ -160,6 +163,8 @@ message RouteConfig {
 
   // Backend service principal, independent of access-token audiences.
   string origin_receiver = 30;
+
+  bool audit_release = 31;
 }
 
 // ---------------------------------------------------------------------------

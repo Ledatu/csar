@@ -113,17 +113,18 @@ func logStartupSummary(logger *slog.Logger, cfg *config.Config, r *router.Router
 // routerReloader implements coordclient.ConfigApplier by rebuilding the router
 // from a new config and atomically swapping the HTTP handler.
 type routerReloader struct {
-	mu              sync.Mutex
-	logger          *slog.Logger
-	routerOpts      []router.Option
-	reloadHandler   *reloadableHandler
-	tp              *telemetry.Provider
-	sharedTM        *throttle.ThrottleManager
-	currentRouter   *router.Router
-	ssrfProtection  *proxy.SSRFProtection
-	redisKeyPrefix  string
-	restartSnapshot config.RestartRequiredSnapshot
-	originReceivers bool
+	mu                 sync.Mutex
+	logger             *slog.Logger
+	routerOpts         []router.Option
+	reloadHandler      *reloadableHandler
+	tp                 *telemetry.Provider
+	sharedTM           *throttle.ThrottleManager
+	currentRouter      *router.Router
+	ssrfProtection     *proxy.SSRFProtection
+	redisKeyPrefix     string
+	restartSnapshot    config.RestartRequiredSnapshot
+	originReceivers    bool
+	policyCapabilities map[string]uint32
 }
 
 var _ coordclient.ConfigApplier = (*routerReloader)(nil)
@@ -143,6 +144,11 @@ func (rl *routerReloader) Reload(cfg *config.Config) error {
 func (rl *routerReloader) apply(cfg *config.Config, coordinatorSnapshot bool) error {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
+	if coordinatorSnapshot {
+		if err := cfg.CheckPolicySnapshot(rl.policyCapabilities); err != nil {
+			return err
+		}
+	}
 	if coordinatorSnapshot && (cfg.OriginPolicyVersion > config.OriginPolicyVersion ||
 		cfg.OriginPolicyVersion == 0 && (rl.originReceivers || cfg.HasOriginReceivers())) {
 		return fmt.Errorf("coordinator snapshot cannot preserve active origin receiver policies")
@@ -190,6 +196,7 @@ func (rl *routerReloader) apply(cfg *config.Config, coordinatorSnapshot bool) er
 		rl.currentRouter.Close()
 	}
 	rl.currentRouter = newRouter
+	rl.policyCapabilities = cfg.RequiredCapabilities()
 	rl.originReceivers = cfg.HasOriginReceivers()
 	rl.ssrfProtection = ssrfP
 	rl.redisKeyPrefix = prefix

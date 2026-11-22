@@ -381,15 +381,16 @@ func run() error {
 
 	// Shared reloader used by both SIGHUP and coordinator-driven reload paths.
 	reloader := &routerReloader{
-		logger:          logger,
-		routerOpts:      routerOpts,
-		reloadHandler:   rh,
-		tp:              tp,
-		sharedTM:        sharedTM,
-		currentRouter:   r,
-		originReceivers: cfg.HasOriginReceivers(),
-		ssrfProtection:  ssrfP,
-		restartSnapshot: config.SnapshotRestartRequired(cfg),
+		logger:             logger,
+		routerOpts:         routerOpts,
+		reloadHandler:      rh,
+		tp:                 tp,
+		sharedTM:           sharedTM,
+		currentRouter:      r,
+		originReceivers:    cfg.HasOriginReceivers(),
+		policyCapabilities: cfg.RequiredCapabilities(),
+		ssrfProtection:     ssrfP,
+		restartSnapshot:    config.SnapshotRestartRequired(cfg),
 	}
 	if cfg.Redis != nil {
 		reloader.redisKeyPrefix = cfg.Redis.KeyPrefix
