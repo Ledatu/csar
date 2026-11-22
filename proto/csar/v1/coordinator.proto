@@ -165,6 +165,13 @@ message RouteConfig {
   string origin_receiver = 30;
 
   bool audit_release = 31;
+
+  string usage_budget_name = 32;
+  google.protobuf.Duration usage_budget_window = 33;
+  uint32 usage_budget_caller = 34;
+  uint32 usage_budget_owner = 35;
+  uint32 usage_budget_owner_seller = 36;
+  uint32 usage_budget_fleet = 37;
 }
 
 // ---------------------------------------------------------------------------

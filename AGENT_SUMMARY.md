@@ -1,5 +1,14 @@
 # csar Agent Summary
 
+Opt-in x-csar-usage-budget atomically charges caller/owner/owner+tenant/fleet
+ingress across compatible routes and credentials before KMS/cache/receipts.
+Verified origin supplies attribution on service hops; unknown/platform-only
+contexts fail closed. Policies survive store/coordinator/reload and reject
+conflicting limits under one name. A separate bounded pool reuses the existing
+Redis endpoint with deadlines/retries-off and independently owned push state.
+Quota denial is typed 429; Redis failure is 503 without cache fallback. This is
+ingress protection, not reporting compute/byte reservations or production rollout.
+
 Opt-in `x-csar-audit-release` requires authn/authz, audit all and a synchronous
 receipt client. Every authorized MISS/HIT waits for broker-confirmed release
 authorization before cache/backend dispatch; uncertain receipts return retryable

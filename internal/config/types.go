@@ -346,7 +346,8 @@ type RouteConfig struct {
 
 	// AuditRelease requires a broker-confirmed authorization record before cache
 	// or backend dispatch. Network outcome remains a separate audit event.
-	AuditRelease bool `yaml:"x-csar-audit-release,omitempty" json:"x-csar-audit-release,omitempty"`
+	AuditRelease bool               `yaml:"x-csar-audit-release,omitempty" json:"x-csar-audit-release,omitempty"`
+	UsageBudget  *UsageBudgetConfig `yaml:"x-csar-usage-budget,omitempty" json:"x-csar-usage-budget,omitempty"`
 
 	// AuditCapture configures optional redacted request-body capture for audit events.
 	AuditCapture *AuditCaptureConfig `yaml:"x-csar-audit-capture,omitempty" json:"x-csar-audit-capture,omitempty"`

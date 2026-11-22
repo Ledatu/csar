@@ -1302,3 +1302,25 @@ the reusable response. Source/proof expiry is checked again after waiting.
 Coordinator capability metadata preserves the policy and explicit removal;
 unsupported routers/snapshots cannot silently drop an active barrier. Upgrade
 broker-confirming ingest and the entire router/coordinator fleet before enabling.
+
+`x-csar-usage-budget` opts a tenant route into shared ingress admission with
+`name`, `window`, `caller`, `owner`, `owner_seller` and `fleet` capacities. Routes
+sharing a policy name must use identical limits, including compatible API/MCP
+paths. Every accepted request costs one unit before KMS, cache or receipt work;
+HIT, polling and pages are charged too. Credentials, RPC IDs and body/query
+variation do not create new budgets, and caller kind grants no quota exemption.
+
+Admission uses registered, verified caller metadata and the actual tenant authz
+scope. Service hops charge the verified origin when present; a standalone service
+uses its own identity. Legacy unknown and platform-only contexts are unsupported
+under this initial opt-in policy. Missing Redis/configuration fails startup;
+runtime quota exhaustion returns `429 usage_exceeded` with dimension/retry timing,
+and unavailable Redis returns `503 usage_unavailable` without cache fallback.
+
+The existing Redis endpoint supplies a separate admission pool capped at eight
+connections and 250ms operations, with context deadlines and driver retries off.
+Counters use fixed windows from first acceptance; uncertain outcomes may consume
+usage and are not refunded. Versioned coordinator capabilities preserve policy
+limits and explicit removal. This supplies ingress protection; owner compute,
+unique-work, concurrency and byte reservations remain separate W3 work. Capacity,
+HA failure and fairness acceptance remain gates before production activation.
