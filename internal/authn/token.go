@@ -36,6 +36,7 @@ type TokenConfig struct {
 }
 
 type tokenResult struct {
+	validUntil     time.Time
 	Identity       *caller.Identity `json:"identity,omitempty"`
 	AccountGrant   bool             `json:"account_grant"`
 	Discovery      bool             `json:"discovery"`
@@ -157,7 +158,7 @@ func (v *TokenValidator) Wrap(cfg TokenConfig, next http.Handler) http.Handler {
 			apierror.New(apierror.CodeUpstreamError, http.StatusBadGateway, "authentication service unavailable").Write(w)
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, withSource(r, result.Identity, result.validUntil))
 	})
 }
 
@@ -172,6 +173,10 @@ func (v *TokenValidator) introspect(r *http.Request, cfg TokenConfig, raw string
 		entry, ok := v.cache[cacheKey]
 		v.mu.RUnlock()
 		if ok && now.Before(entry.expiresAt) && now.Before(entry.fetchedAt.Add(cfg.CacheTTL)) {
+			entry.result.validUntil = entry.expiresAt
+			if current := entry.fetchedAt.Add(cfg.CacheTTL); current.Before(entry.result.validUntil) {
+				entry.result.validUntil = current
+			}
 			return entry.result, nil
 		}
 	}
@@ -198,6 +203,7 @@ func (v *TokenValidator) introspect(r *http.Request, cfg TokenConfig, raw string
 		if err := validateIssuerCaller(result.Identity, result.Subject, result.CredentialID, kind); err != nil {
 			return tokenResult{}, err // Never cache inconsistent issuer metadata.
 		}
+		result.validUntil = result.ExpiresAt
 	}
 	if cacheable && !result.Active {
 		v.mu.Lock()
@@ -209,6 +215,7 @@ func (v *TokenValidator) introspect(r *http.Request, cfg TokenConfig, raw string
 		if result.ExpiresAt.Before(expires) {
 			expires = result.ExpiresAt
 		}
+		result.validUntil = expires
 		v.mu.Lock()
 		if len(v.cache) >= maxTokenCacheEntries {
 			for key := range v.cache {
