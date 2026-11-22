@@ -6,7 +6,11 @@ routers reject legacy snapshots while receiver policies are active. Subscribers
 advertise preservation capability; coordinators refuse to send enabled policies
 to unsupported routers. Router rebuilds bind configured receivers to a local
 RootIssuer and fail if it or verified backend mTLS/authn/tenant authz is missing.
-No production policy is enabled; binary issuer construction is a separate slice.
+The optional router-local `origin_issuer` startup block constructs one Core root
+client with verified mTLS and context-aware bounded JWKS resolution. Issuer/TLS
+settings require restart and never enter coordinator snapshots. The issuer and
+its JWKS cache survive all router rebuilds; owned transports close at process
+shutdown. No production policy, certificate or Redis limit is changed.
 
 The opt-in WithOriginForwarding adapter binds exact route keys to backend service
 principals independently of access-token audiences. It requires verified backend
@@ -14,8 +18,8 @@ mTLS, static HTTPS targets and tenant authz. Root issuance runs only on actual
 upstream dispatch after cache lookup; existing signed service proofs are forwarded
 without reminting. Source freshness/tenant binding and proof expiry bound dispatch.
 Original caller/operation metadata is typed; opaque proof headers are stripped
-from public/cache responses. Binary/coordinator configuration and distributed
-policy persistence are not wired here; all runtime activation remains disabled.
+from public/cache responses, including trailers. Startup and coordinator support
+are opt-in; production activation remains disabled.
 
 Root issuance prerequisites use private authn.Source context with owned caller
 metadata and an absolute validation deadline. API-key/session cache hits preserve

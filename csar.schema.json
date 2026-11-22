@@ -30,6 +30,22 @@
     "kms": { "$ref": "#/$defs/KMSConfig" },
     "coordinator": { "$ref": "#/$defs/CoordinatorConfig" },
     "redis": { "$ref": "#/$defs/RedisConfig" },
+    "origin_issuer": {
+      "type": "object", "additionalProperties": false,
+      "description": "Router-local, restart-required root issuer. Never distributed by coordinator snapshots.",
+      "required": ["endpoint", "issuer", "jwks_url", "tls"],
+      "properties": {
+        "endpoint": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "issuer": { "type": "string", "minLength": 1 },
+        "jwks_url": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "tls": {
+          "allOf": [
+            { "$ref": "#/$defs/BackendTLSPolicy" },
+            { "required": ["cert_file", "key_file"], "properties": { "insecure_skip_verify": { "const": false } } }
+          ]
+        }
+      }
+    },
     "security_profiles": {
       "type": "object",
       "description": "Named reusable security configurations. Routes reference them via x-csar-security: \"profile_name\".",

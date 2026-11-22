@@ -116,6 +116,10 @@ type Config struct {
 	// for globally coordinated state across all CSAR pods.
 	Redis *RedisConfig `yaml:"redis,omitempty" json:"redis,omitempty"`
 
+	// OriginIssuer is router-local startup configuration, never distributed by
+	// the coordinator. Only certificate/key paths are stored in configuration.
+	OriginIssuer *OriginIssuerConfig `yaml:"origin_issuer,omitempty" json:"origin_issuer,omitempty"`
+
 	// SecurityProfiles defines named, reusable security configurations.
 	// Routes reference them via x-csar-security: "profile_name".
 	SecurityProfiles map[string]SecurityConfig `yaml:"security_profiles,omitempty" json:"security_profiles,omitempty"`

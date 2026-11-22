@@ -1263,3 +1263,26 @@ unsupported subscribers. A router with active policies rejects legacy snapshots
 and retains its last successful configuration. Upgrade the entire router fleet
 and coordinator before distributing policies; disconnected older routers can
 still serve their previous configuration. No production routes are enabled here.
+
+The router constructs a shared root client only when the local `origin_issuer`
+startup block is present. Example (paths reference mounted files):
+
+```yaml
+origin_issuer:
+  endpoint: https://authn-router/internal/origin-context/root
+  issuer: https://id.example
+  jwks_url: https://authn-router/.well-known/jwks.json
+  tls:
+    ca_file: /etc/csar/authn-ca.pem
+    cert_file: /etc/csar/root-client.pem
+    key_file: /etc/csar/root-client-key.pem
+```
+
+Both URLs require verified HTTPS; the root ingress must trust only the dedicated
+router identity. Core bounds root issuance and JWKS verification to the source
+deadline and five seconds, with no redirects or automatic root retries. The
+client and JWKS cache survive SIGHUP, source-watcher and coordinator rebuilds.
+Issuer URLs, expected issuer and TLS settings require a process restart; reload
+reports changed field names and keeps the startup client. Coordinator snapshots
+carry receiver policies, never these local issuer settings. This adds source
+support only; issuer ingress, trust roots and production rollout remain separate.

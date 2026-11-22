@@ -38,6 +38,13 @@ func TestRestartRequiredSettings(t *testing.T) {
 		{"audit.address", "audit:9092"}, {"audit.ca_file", "ca.pem"},
 		{"audit.cert_file", "client.pem"}, {"audit.key_file", "client.key"},
 		{"audit.allow_insecure", "true"}, {"audit.timeout", "1s"},
+		{"origin_issuer.endpoint", "https://issuer.example/root"},
+		{"origin_issuer.issuer", "https://issuer.example"},
+		{"origin_issuer.jwks_url", "https://issuer.example/jwks"},
+		{"origin_issuer.tls.ca_file", "issuer-ca.pem"},
+		{"origin_issuer.tls.cert_file", "router.pem"},
+		{"origin_issuer.tls.key_file", "router.key"},
+		{"origin_issuer.tls.insecure_skip_verify", "true"},
 	} {
 		t.Run(tc.field, func(t *testing.T) {
 			var data strings.Builder
