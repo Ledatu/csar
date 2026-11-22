@@ -1,5 +1,11 @@
 # csar Agent Summary
 
+JWT and GET/POST session validators now adopt optional verified caller metadata,
+reject envelope conflicts and origin-as-access JWTs, and clear forged gateway
+headers. Session caches are capped by issuer expiry and the current route TTL.
+Missing legacy metadata stays absent. Signed-origin adapters and audit receipts
+are separate W2 slices; nothing here activates production configuration.
+
 W2 opaque API-key/MCP and universal grant validation preserve optional issuer
 caller metadata after subject/credential binding checks. Malformed present
 metadata fails closed and is not cached; legacy absence remains compatible.
