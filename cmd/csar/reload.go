@@ -123,6 +123,7 @@ type routerReloader struct {
 	ssrfProtection  *proxy.SSRFProtection
 	redisKeyPrefix  string
 	restartSnapshot config.RestartRequiredSnapshot
+	originReceivers bool
 }
 
 var _ coordclient.ConfigApplier = (*routerReloader)(nil)
@@ -142,6 +143,10 @@ func (rl *routerReloader) Reload(cfg *config.Config) error {
 func (rl *routerReloader) apply(cfg *config.Config, coordinatorSnapshot bool) error {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
+	if coordinatorSnapshot && (cfg.OriginPolicyVersion > config.OriginPolicyVersion ||
+		cfg.OriginPolicyVersion == 0 && (rl.originReceivers || cfg.HasOriginReceivers())) {
+		return fmt.Errorf("coordinator snapshot cannot preserve active origin receiver policies")
+	}
 
 	for _, w := range cfg.Warnings {
 		rl.logger.Warn("(reload) " + w)
@@ -185,6 +190,7 @@ func (rl *routerReloader) apply(cfg *config.Config, coordinatorSnapshot bool) er
 		rl.currentRouter.Close()
 	}
 	rl.currentRouter = newRouter
+	rl.originReceivers = cfg.HasOriginReceivers()
 	rl.ssrfProtection = ssrfP
 	rl.redisKeyPrefix = prefix
 

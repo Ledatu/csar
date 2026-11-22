@@ -109,6 +109,10 @@ message FullConfigSnapshot {
   // Absent on legacy coordinators: retain the active prefix. Present but empty
   // resets to the built-in throttle/cache prefixes.
   optional string redis_key_prefix = 19;
+
+  // Version 1 preserves origin_receiver, including explicit removal. Zero is
+  // legacy; routers with active receiver policies must reject legacy snapshots.
+  uint32 origin_policy_version = 20;
 }
 
 // RouteSnapshot contains the full set of routes (legacy, kept for backward compat).
@@ -153,6 +157,9 @@ message RouteConfig {
   // Audit mode: "off", "all", or "errors". Preferred over audit bool when set.
   string audit_mode = 28;
   AuditCaptureConfigProto audit_capture = 29;
+
+  // Backend service principal, independent of access-token audiences.
+  string origin_receiver = 30;
 }
 
 // ---------------------------------------------------------------------------

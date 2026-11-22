@@ -379,6 +379,7 @@ func run() error {
 		tp:              tp,
 		sharedTM:        sharedTM,
 		currentRouter:   r,
+		originReceivers: cfg.HasOriginReceivers(),
 		ssrfProtection:  ssrfP,
 		restartSnapshot: config.SnapshotRestartRequired(cfg),
 	}

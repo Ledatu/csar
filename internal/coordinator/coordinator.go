@@ -201,7 +201,7 @@ func (c *Coordinator) Subscribe(req *csarv1.SubscribeRequest, stream csarv1.Coor
 		c.redistributeQuotas()
 	}()
 
-	if err := c.sendFullConfigSnapshot(stream); err != nil {
+	if err := c.sendFullConfigSnapshot(stream, req.Metadata); err != nil {
 		return err
 	}
 
@@ -262,7 +262,7 @@ func (c *Coordinator) Subscribe(req *csarv1.SubscribeRequest, stream csarv1.Coor
 		if !c.waitForQuietRoutes(stream.Context(), routeCh, sub.configChanged) {
 			return nil
 		}
-		if err := c.sendFullConfigSnapshot(stream); err != nil {
+		if err := c.sendFullConfigSnapshot(stream, req.Metadata); err != nil {
 			c.logger.Error("failed to send config update",
 				"router_id", req.RouterId,
 				"error", err,
@@ -367,7 +367,7 @@ func (c *Coordinator) BroadcastTokenInvalidation(tokenRefs []string) {
 }
 
 // sendFullConfigSnapshot sends routes plus top-level policies to a subscriber.
-func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_SubscribeServer) error {
+func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_SubscribeServer, metadata map[string]string) error {
 	routes, cfg, err := c.routesAndConfig(stream.Context())
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to get routes: %v", err)
@@ -375,10 +375,13 @@ func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_Su
 
 	protoRoutes := make([]*csarv1.RouteConfig, 0, len(routes))
 	for i := range routes {
+		if routes[i].Route.OriginReceiver != "" && metadata[config.OriginPolicyCapability] != "1" {
+			return status.Error(codes.FailedPrecondition, "router does not support origin receiver policies")
+		}
 		protoRoutes = append(protoRoutes, routeEntryToProto(&routes[i]))
 	}
 
-	snapshot := &csarv1.FullConfigSnapshot{Routes: protoRoutes}
+	snapshot := &csarv1.FullConfigSnapshot{Routes: protoRoutes, OriginPolicyVersion: config.OriginPolicyVersion}
 
 	if cfg != nil {
 		snapshot.SsrfProtection = ssrfProtectionToProto(cfg.SSRF)
@@ -562,10 +565,11 @@ func safeInt32(v int) int32 {
 
 func routeEntryToProto(r *statestore.RouteEntry) *csarv1.RouteConfig {
 	rc := &csarv1.RouteConfig{
-		RouteId:   r.ID,
-		Path:      r.Path,
-		Method:    r.Method,
-		TargetUrl: r.Route.Backend.TargetURL,
+		RouteId:        r.ID,
+		Path:           r.Path,
+		Method:         r.Method,
+		TargetUrl:      r.Route.Backend.TargetURL,
+		OriginReceiver: r.Route.OriginReceiver,
 	}
 
 	if r.Route.Resilience != nil {

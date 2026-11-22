@@ -48,6 +48,7 @@ func newTestReloader(t *testing.T, cfg *config.Config, extraOpts ...router.Optio
 	rl := &routerReloader{
 		logger: logger, routerOpts: opts, tp: tp, sharedTM: tm,
 		currentRouter: r, ssrfProtection: ssrf,
+		originReceivers: cfg.HasOriginReceivers(),
 		restartSnapshot: config.SnapshotRestartRequired(cfg),
 		reloadHandler:   newReloadableHandler(tp.HTTPMiddleware("csar", r)),
 	}
@@ -66,6 +67,29 @@ func checkReloadStatus(t *testing.T, handler http.Handler, want int) {
 	handler.ServeHTTP(rr, httptest.NewRequestWithContext(ctx, http.MethodGet, "/preferences", nil))
 	if rr.Code != want {
 		t.Fatalf("status = %d, want %d; body: %s", rr.Code, want, rr.Body.String())
+	}
+}
+
+func TestReloadRejectsIncompatibleOriginPolicySnapshot(t *testing.T) {
+	rl := newTestReloader(t, reloadTestConfig("http://example.com", nil))
+	prior := rl.currentRouter
+	rl.originReceivers = true
+	cfg := reloadTestConfig("http://other.example", nil)
+	if err := rl.Apply(cfg); err == nil || rl.currentRouter != prior || !rl.originReceivers {
+		t.Fatal("legacy snapshot replaced an active origin policy")
+	}
+	cfg.OriginPolicyVersion = config.OriginPolicyVersion + 1
+	if err := rl.Apply(cfg); err == nil || rl.currentRouter != prior {
+		t.Fatal("unknown policy version replaced the live router")
+	}
+	cfg.OriginPolicyVersion = config.OriginPolicyVersion
+	if err := rl.Apply(cfg); err != nil || rl.originReceivers {
+		t.Fatal("explicit current-version policy removal failed", err)
+	}
+	// Legacy snapshots remain compatible after a deliberate removal.
+	cfg.OriginPolicyVersion = 0
+	if err := rl.Apply(cfg); err != nil {
+		t.Fatal(err)
 	}
 }
 

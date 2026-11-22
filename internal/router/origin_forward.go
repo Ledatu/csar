@@ -22,6 +22,12 @@ type RootIssuer interface {
 	Issue(context.Context, *origincontext.RootRequest) (*origincontext.Proof, error)
 }
 
+// WithRootIssuer supplies a router-local issuer reused across router rebuilds.
+// Receiver bindings come from route configuration and remain independently reloadable.
+func WithRootIssuer(issuer RootIssuer) Option {
+	return func(r *Router) { r.originIssuer = issuer }
+}
+
 // WithOriginForwarding supplies explicit METHOD:/path -> service-principal
 // bindings. Startup/config distribution must preserve these bindings before this
 // opt-in adapter is activated; absence keeps existing routing behavior.
@@ -166,9 +172,19 @@ func stripOriginResponseHeaders(h http.Header) {
 }
 
 func (r *Router) validateOriginSelections(routes []config.FlatRoute) error {
+	if r.originReceivers == nil {
+		r.originReceivers = make(map[string]string)
+	}
 	known := make(map[string]bool, len(routes))
 	for i := range routes {
-		known[throttle.RouteKey(strings.ToUpper(routes[i].Method), routes[i].Path)] = true
+		key := throttle.RouteKey(strings.ToUpper(routes[i].Method), routes[i].Path)
+		known[key] = true
+		if receiver := routes[i].Route.OriginReceiver; receiver != "" {
+			if prior, exists := r.originReceivers[key]; exists && prior != receiver {
+				return fmt.Errorf("conflicting origin receiver for route %s", key)
+			}
+			r.originReceivers[key] = receiver
+		}
 	}
 	for key := range r.originReceivers {
 		if !known[key] {
