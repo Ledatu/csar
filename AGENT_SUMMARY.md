@@ -1,5 +1,11 @@
 # csar Agent Summary
 
+Coordinator SIGTERM drains long-lived Subscribe streams before bounded gRPC
+shutdown via csar-core/grpcserver. New subscriptions receive Unavailable; routers
+retain the last snapshot and reconnect to healthy peers. Main waits for shutdown
+cleanup before returning; token/state stores close after RPC drain. No runtime
+route, TLS, credential, Redis or feature-policy change is activated by this fix.
+
 Opt-in x-csar-usage-budget atomically charges caller/owner/owner+tenant/fleet
 ingress across compatible routes and credentials before KMS/cache/receipts.
 Verified origin supplies attribution on service hops; unknown/platform-only
