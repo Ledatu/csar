@@ -1,3 +1,10 @@
+## Manifest compiler schema compatibility
+
+Pins Core1c1da5d9 so the canonical helper validates the explicit Authn
+`origin_router_ca_file` opt-in. It also includes the reviewed audit context
+helper; no router policy, protocol or startup default changes. Standalone
+build/full tests/lint pass. Issuer and receiver activation remain explicit.
+
 # csar Agent Summary
 
 Coordinator SIGTERM drains long-lived Subscribe streams before bounded gRPC
