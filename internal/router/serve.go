@@ -86,11 +86,10 @@ func (r *Router) serveMatchedRoute(w http.ResponseWriter, req *http.Request, rt 
 		}
 	}
 
-	// Apply path rewriting for regex routes (audit §3.2).
-	if rt.pathRewrite != "" && len(captures) > 0 {
-		rewritten := rt.pathPattern.ReplaceAllString(req.URL.Path, rt.pathRewrite)
-		req.URL.Path = rewritten
-		req.URL.RawPath = "" // reset encoded path
+	// Origin proofs bind the incoming path. Defer its backend rewrite until
+	// after verification/forwarding; legacy routes retain their existing order.
+	if r.originReceivers[rt.routeKey] == "" {
+		rt.rewriteRequestPath(req)
 	}
 
 	// Step -2: CORS preflight handling (checked before IP access control).
@@ -639,6 +638,15 @@ func (r *Router) upstreamHandler(rt *route) http.Handler {
 			handler = r.dlpRedactor.Wrap(*rt.dlpConfig, handler)
 		}
 
+		if r.originReceivers[rt.routeKey] != "" && rt.pathRewrite != "" {
+			next := handler
+			handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				out := req.Clone(req.Context())
+				rt.rewriteRequestPath(out)
+				next.ServeHTTP(w, out)
+			})
+		}
+
 		// Wrap with response caching (audit §3.3).
 		handler = r.forwardOrigin(rt, handler)
 		if rt.cacheConfig != nil && r.responseCache != nil {
@@ -689,4 +697,14 @@ type statusCapture struct {
 func (s *statusCapture) WriteHeader(code int) {
 	s.statusCode = code
 	s.ResponseWriter.WriteHeader(code)
+}
+
+// Origin routes call this only on a backend-dispatch clone. Legacy routes
+// retain their existing ingress rewrite behavior.
+func (rt *route) rewriteRequestPath(req *http.Request) {
+	if rt.pathRewrite == "" || rt.pathPattern == nil {
+		return
+	}
+	req.URL.Path = rt.pathPattern.ReplaceAllString(req.URL.Path, rt.pathRewrite)
+	req.URL.RawPath = ""
 }

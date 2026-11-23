@@ -153,6 +153,9 @@ func TestRootAndServiceOriginForwardingDoesNotMintOnCacheHit(t *testing.T) {
 	observations := make(chan observation, 4)
 	backend, backendTLS := forwardingTLSFixture(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		backendCalls.Add(1)
+		if !strings.HasPrefix(r.URL.Path, "/owner/") {
+			t.Error("protected route did not rewrite the backend path", r.URL.Path)
+		}
 		id, err := gatewayctx.FromRequestChecked(r)
 		if err != nil || id.Origin == nil || len(r.TLS.VerifiedChains) == 0 {
 			t.Error("origin or trusted ingress missing", err)
@@ -170,7 +173,7 @@ func TestRootAndServiceOriginForwardingDoesNotMintOnCacheHit(t *testing.T) {
 	}))
 	cfg := newTestConfig(map[string]config.PathConfig{"/report/{seller_id}": {"get": {
 		OriginReceiver: "svc:analytics",
-		Backend:        config.BackendConfig{TargetURL: backend.URL, TLS: backendTLS}, AuthValidate: &config.AuthValidateConfig{Mode: "select", Methods: []config.AuthValidateConfig{{Mode: "session", SessionEndpoint: identity.URL + "/session", CookieName: "session"}, {Mode: "jwt", JWKSURL: identity.URL + "/jwks", Issuer: "issuer", Audiences: []string{"analytics-access"}}}},
+		Backend:        config.BackendConfig{TargetURL: backend.URL, TLS: backendTLS, PathRewrite: "/owner/$1", PathMode: "append"}, AuthValidate: &config.AuthValidateConfig{Mode: "select", Methods: []config.AuthValidateConfig{{Mode: "session", SessionEndpoint: identity.URL + "/session", CookieName: "session"}, {Mode: "jwt", JWKSURL: identity.URL + "/jwks", Issuer: "issuer", Audiences: []string{"analytics-access"}}}},
 		Authz: &config.AuthzRouteConfig{Subject: "{header.X-Gateway-Subject}", ScopeType: "tenant", ScopeID: "wildberries:{path.seller_id}", Resource: "report", Action: "read"}, Cache: &config.CacheConfig{Key: "report:{tenant}", TTL: config.Duration{Duration: time.Minute}},
 	}}})
 	router, err := New(cfg, newTestLogger(), WithAuthzClient(authzClient), WithRootIssuer(issuer))
@@ -220,6 +223,14 @@ func TestRootAndServiceOriginForwardingDoesNotMintOnCacheHit(t *testing.T) {
 	if issuer.calls.Load() != 1 || backendCalls.Load() != 1 || first.id.Origin.Caller.CallerID != "one" || recorder.events[1].Caller.CallerID != "two" || recorder.events[1].OriginCaller != nil {
 		t.Fatal("cache reused origin or minted another root")
 	}
+	rootClaims, err := origincontext.Verify(first.token, func(_, _ string) (crypto.PublicKey, error) { return keys.PublicKey, nil }, "issuer", "svc:analytics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ingressHash, err := origincontext.RequestHash(httptest.NewRequest("GET", "/report/cabinet", nil))
+	if err != nil || rootClaims.RequestHash != ingressHash {
+		t.Fatal("root proof did not bind the original ingress path", err)
+	}
 	service := &caller.Identity{Version: 1, CallerKind: caller.Service, CallerID: "svc:reporting", EffectiveSubject: "svc:reporting", CredentialKind: caller.STS, Assurance: caller.Verified}
 	access, err := jwtx.Sign(keys, jwt.MapClaims{"caller": service, "sub": "svc:reporting", "iss": "issuer", "aud": "analytics-access", "exp": time.Now().Add(time.Minute).Unix()})
 	if err != nil {
@@ -239,6 +250,17 @@ func TestRootAndServiceOriginForwardingDoesNotMintOnCacheHit(t *testing.T) {
 	}
 	send("", "/report/other", access, child.Token, 200)
 	second := <-observations
+	// A proof for a backend path must not authorize the incoming alias, even
+	// if both requests would eventually be rewritten to the same owner path.
+	backendHash, err := origincontext.RequestHash(httptest.NewRequest("GET", "/owner/other", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongPath, err := origincontext.Delegate(keys, "issuer", "svc:reporting", &origincontext.DelegateRequest{ParentToken: root.Token, Receiver: "svc:analytics", Resource: "wildberries:other", RequestHash: backendHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	send("", "/report/other", access, wrongPath.Token, 401)
 	if issuer.calls.Load() != 1 || backendCalls.Load() != 2 || second.token != child.Token || second.id.Subject != "svc:reporting" || second.id.Origin.Caller.CallerID != "agent" {
 		t.Fatal("service origin was reminted, misaddressed or lost")
 	}
