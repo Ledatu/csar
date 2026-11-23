@@ -1,3 +1,11 @@
+## Signed-origin aliases and backend rewrites
+
+Receiver-enabled routes authenticate and hash the original ingress path, then
+rewrite a cloned request only for backend dispatch. Cache keys, audit and proofs
+retain the alias; existing routes without origin receivers keep their previous
+rewrite order. Native TLS/JWT/session forwarding tests cover both root and child
+proofs, backend path mapping, cache-hit behavior and mismatched path rejection.
+
 ## Manifest compiler schema compatibility
 
 Pins Core1c1da5d9 so the canonical helper validates the explicit Authn

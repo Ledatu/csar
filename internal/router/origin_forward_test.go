@@ -153,6 +153,9 @@ func TestRootAndServiceOriginForwardingDoesNotMintOnCacheHit(t *testing.T) {
 	observations := make(chan observation, 4)
 	backend, backendTLS := forwardingTLSFixture(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		backendCalls.Add(1)
+		if !strings.HasPrefix(r.URL.Path, "/owner/") {
+			t.Error("protected route did not rewrite the backend path", r.URL.Path)
+		}
 		id, err := gatewayctx.FromRequestChecked(r)
 		if err != nil || id.Origin == nil || len(r.TLS.VerifiedChains) == 0 {
 			t.Error("origin or trusted ingress missing", err)
@@ -170,7 +173,7 @@ func TestRootAndServiceOriginForwardingDoesNotMintOnCacheHit(t *testing.T) {
 	}))
 	cfg := newTestConfig(map[string]config.PathConfig{"/report/{seller_id}": {"get": {
 		OriginReceiver: "svc:analytics",
-		Backend:        config.BackendConfig{TargetURL: backend.URL, TLS: backendTLS}, AuthValidate: &config.AuthValidateConfig{Mode: "select", Methods: []config.AuthValidateConfig{{Mode: "session", SessionEndpoint: identity.URL + "/session", CookieName: "session"}, {Mode: "jwt", JWKSURL: identity.URL + "/jwks", Issuer: "issuer", Audiences: []string{"analytics-access"}}}},
+		Backend:        config.BackendConfig{TargetURL: backend.URL, TLS: backendTLS, PathRewrite: "/owner/$1", PathMode: "append"}, AuthValidate: &config.AuthValidateConfig{Mode: "select", Methods: []config.AuthValidateConfig{{Mode: "session", SessionEndpoint: identity.URL + "/session", CookieName: "session"}, {Mode: "jwt", JWKSURL: identity.URL + "/jwks", Issuer: "issuer", Audiences: []string{"analytics-access"}}}},
 		Authz: &config.AuthzRouteConfig{Subject: "{header.X-Gateway-Subject}", ScopeType: "tenant", ScopeID: "wildberries:{path.seller_id}", Resource: "report", Action: "read"}, Cache: &config.CacheConfig{Key: "report:{tenant}", TTL: config.Duration{Duration: time.Minute}},
 	}}})
 	router, err := New(cfg, newTestLogger(), WithAuthzClient(authzClient), WithRootIssuer(issuer))
@@ -239,6 +242,17 @@ func TestRootAndServiceOriginForwardingDoesNotMintOnCacheHit(t *testing.T) {
 	}
 	send("", "/report/other", access, child.Token, 200)
 	second := <-observations
+	// A proof for a backend path must not authorize the incoming alias, even
+	// if both requests would eventually be rewritten to the same owner path.
+	backendHash, err := origincontext.RequestHash(httptest.NewRequest("GET", "/owner/third", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongPath, err := origincontext.Delegate(keys, "issuer", "svc:reporting", &origincontext.DelegateRequest{ParentToken: root.Token, Receiver: "svc:analytics", Resource: "wildberries:other", RequestHash: backendHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	send("", "/report/third", access, wrongPath.Token, 401)
 	if issuer.calls.Load() != 1 || backendCalls.Load() != 2 || second.token != child.Token || second.id.Subject != "svc:reporting" || second.id.Origin.Caller.CallerID != "agent" {
 		t.Fatal("service origin was reminted, misaddressed or lost")
 	}
