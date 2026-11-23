@@ -223,6 +223,14 @@ func TestRootAndServiceOriginForwardingDoesNotMintOnCacheHit(t *testing.T) {
 	if issuer.calls.Load() != 1 || backendCalls.Load() != 1 || first.id.Origin.Caller.CallerID != "one" || recorder.events[1].Caller.CallerID != "two" || recorder.events[1].OriginCaller != nil {
 		t.Fatal("cache reused origin or minted another root")
 	}
+	rootClaims, err := origincontext.Verify(first.token, func(_, _ string) (crypto.PublicKey, error) { return keys.PublicKey, nil }, "issuer", "svc:analytics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ingressHash, err := origincontext.RequestHash(httptest.NewRequest("GET", "/report/cabinet", nil))
+	if err != nil || rootClaims.RequestHash != ingressHash {
+		t.Fatal("root proof did not bind the original ingress path", err)
+	}
 	service := &caller.Identity{Version: 1, CallerKind: caller.Service, CallerID: "svc:reporting", EffectiveSubject: "svc:reporting", CredentialKind: caller.STS, Assurance: caller.Verified}
 	access, err := jwtx.Sign(keys, jwt.MapClaims{"caller": service, "sub": "svc:reporting", "iss": "issuer", "aud": "analytics-access", "exp": time.Now().Add(time.Minute).Unix()})
 	if err != nil {
@@ -244,7 +252,7 @@ func TestRootAndServiceOriginForwardingDoesNotMintOnCacheHit(t *testing.T) {
 	second := <-observations
 	// A proof for a backend path must not authorize the incoming alias, even
 	// if both requests would eventually be rewritten to the same owner path.
-	backendHash, err := origincontext.RequestHash(httptest.NewRequest("GET", "/owner/third", nil))
+	backendHash, err := origincontext.RequestHash(httptest.NewRequest("GET", "/owner/other", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +260,7 @@ func TestRootAndServiceOriginForwardingDoesNotMintOnCacheHit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	send("", "/report/third", access, wrongPath.Token, 401)
+	send("", "/report/other", access, wrongPath.Token, 401)
 	if issuer.calls.Load() != 1 || backendCalls.Load() != 2 || second.token != child.Token || second.id.Subject != "svc:reporting" || second.id.Origin.Caller.CallerID != "agent" {
 		t.Fatal("service origin was reminted, misaddressed or lost")
 	}
