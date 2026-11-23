@@ -1,3 +1,12 @@
+## Fresh personal-key validation for signed-origin reports
+
+Origin receiver routes renew personal-key validation before minting a proof,
+including select-mode branches. The source lease remains capped by the existing
+validation TTL and credential expiry; refreshing cannot extend a revoked key or
+fall back on issuer failure. This avoids inheriting a nearly expired cached lease.
+Ordinary routes retain their current authentication cache, and Redis report caches
+remain enabled after authentication/authorization/receipt checks.
+
 ## Signed-origin aliases and backend rewrites
 
 Receiver-enabled routes authenticate and hash the original ingress path, then

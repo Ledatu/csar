@@ -794,6 +794,7 @@ func (r *Router) setupToken(rt *route, fr config.FlatRoute, cfg *config.Config, 
 	}
 	rt.tokenValidator = validator
 	rt.tokenConfig = &authn.TokenConfig{
+		FreshValidation:   r.originReceivers[key] != "",
 		Mode:              fr.Route.AuthValidate.Mode,
 		Endpoint:          fr.Route.AuthValidate.IntrospectionEndpoint,
 		RequiredScope:     fr.Route.AuthValidate.RequiredScope,
