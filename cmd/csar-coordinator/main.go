@@ -29,6 +29,7 @@ import (
 
 	"github.com/ledatu/csar-core/configload"
 	"github.com/ledatu/csar-core/configsource"
+	"github.com/ledatu/csar-core/grpcserver"
 	"github.com/ledatu/csar-core/health"
 	"github.com/ledatu/csar-core/s3store"
 	"github.com/ledatu/csar-core/tokenmint"
@@ -748,13 +749,19 @@ func main() {
 	}
 
 	// Graceful shutdown
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		defer signal.Stop(sigCh)
 		sig := <-sigCh
 
 		logger.Info("received signal, shutting down", "signal", sig)
 		ctxCancel() // stop refresh loop
+		coord.Drain()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer shutdownCancel()
 		if healthSidecar != nil {
 			hctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			if err := healthSidecar.Shutdown(hctx); err != nil {
@@ -767,12 +774,14 @@ func main() {
 				logger.Error("admin server shutdown error", "error", err)
 			}
 		}
+		if err := grpcserver.Shutdown(shutdownCtx, srv); err != nil {
+			logger.Warn("gRPC shutdown forced at deadline", "error", err)
+		}
 		if tokenStore != nil {
 			if err := tokenStore.Close(); err != nil {
 				logger.Error("token store shutdown error", "error", err)
 			}
 		}
-		srv.GracefulStop()
 	}()
 
 	logger.Info(fmt.Sprintf("coordinator listening on %s", *listenAddr))
@@ -781,6 +790,9 @@ func main() {
 		closeStore()
 		os.Exit(1)
 	}
+	// Serve can return while forced-stop handlers/cleanup are still unwinding.
+	// Keep token/state stores and the process alive until shutdown finishes.
+	<-shutdownDone
 }
 
 // buildTLSConfig creates a TLS configuration for the gRPC server.

@@ -39,6 +39,8 @@ type Coordinator struct {
 	restartSnapshot config.RestartRequiredSnapshot
 
 	snapshotDebounce time.Duration
+	drainOnce        sync.Once
+	draining         chan struct{}
 }
 
 // DefaultSnapshotDebounce is how long the coordinator waits for route changes
@@ -115,7 +117,15 @@ func New(store statestore.StateStore, logger *slog.Logger) *Coordinator {
 		logger:             logger,
 		subscribers:        make(map[string]*subscriber),
 		invalidationOutbox: NewInvalidationOutbox(1000),
+		draining:           make(chan struct{}),
 	}
+}
+
+// Drain ends long-lived subscriptions before the gRPC server is stopped.
+// New subscriptions fail with Unavailable so routers reconnect to a healthy peer.
+// It is safe to call more than once. Other RPCs are drained by the gRPC server.
+func (c *Coordinator) Drain() {
+	c.drainOnce.Do(func() { close(c.draining) })
 }
 
 // SetInvalidationBufferSize replaces the outbox with a new one of the given size.
@@ -154,6 +164,11 @@ func (c *Coordinator) SetTopLevelConfig(cfg *config.Config) {
 // When a router connects, it registers, receives the current config snapshot,
 // and then receives updates as they occur.
 func (c *Coordinator) Subscribe(req *csarv1.SubscribeRequest, stream csarv1.CoordinatorService_SubscribeServer) error {
+	select {
+	case <-c.draining:
+		return status.Error(codes.Unavailable, "coordinator is draining")
+	default:
+	}
 	if req.RouterId == "" {
 		return status.Error(codes.InvalidArgument, "router_id is required")
 	}
@@ -251,6 +266,8 @@ func (c *Coordinator) Subscribe(req *csarv1.SubscribeRequest, stream csarv1.Coor
 
 	for {
 		select {
+		case <-c.draining:
+			return nil
 		case <-stream.Context().Done():
 			return nil
 		case _, ok := <-routeCh:
@@ -284,6 +301,8 @@ func (c *Coordinator) waitForQuietRoutes(ctx context.Context, routeCh <-chan []s
 	defer limit.Stop()
 	for {
 		select {
+		case <-c.draining:
+			return false
 		case <-ctx.Done():
 			return false
 		case _, ok := <-routeCh:
