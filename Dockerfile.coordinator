@@ -9,8 +9,8 @@ COPY . .
 RUN CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${VERSION}" -o /csar-coordinator ./cmd/csar-coordinator
 
 # ---
-FROM alpine:3.21
-RUN apk add --no-cache ca-certificates
+FROM alpine:3.24.4
+RUN apk add --no-cache --upgrade ca-certificates zlib
 RUN adduser -D -u 10001 csar
 COPY --from=builder /csar-coordinator /usr/local/bin/csar-coordinator
 USER csar
