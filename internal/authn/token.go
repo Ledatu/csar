@@ -33,6 +33,8 @@ type TokenConfig struct {
 	Audiences         []string
 	SellerPathParam   string
 	CacheTTL          time.Duration
+	// FreshValidation renews the issuer lease before a signed-origin operation.
+	FreshValidation bool
 }
 
 type tokenResult struct {
@@ -172,7 +174,7 @@ func (v *TokenValidator) introspect(r *http.Request, cfg TokenConfig, raw string
 		v.mu.RLock()
 		entry, ok := v.cache[cacheKey]
 		v.mu.RUnlock()
-		if ok && now.Before(entry.expiresAt) && now.Before(entry.fetchedAt.Add(cfg.CacheTTL)) {
+		if !cfg.FreshValidation && ok && now.Before(entry.expiresAt) && now.Before(entry.fetchedAt.Add(cfg.CacheTTL)) {
 			entry.result.validUntil = entry.expiresAt
 			if current := entry.fetchedAt.Add(cfg.CacheTTL); current.Before(entry.result.validUntil) {
 				entry.result.validUntil = current

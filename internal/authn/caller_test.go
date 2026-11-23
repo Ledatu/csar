@@ -181,3 +181,69 @@ func TestUniversalGrantPreservesIssuerCredentialVocabulary(t *testing.T) {
 		}
 	}
 }
+
+func TestFreshTokenValidationRenewsLeaseAndHonorsRevocation(t *testing.T) {
+	var calls atomic.Int32
+	var revoked, unavailable atomic.Bool
+	issuer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		if unavailable.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		result := tokenResult{Active: !revoked.Load(), Subject: "user:1", CredentialID: "key:1", SellerID: "123",
+			Scopes: []string{"analytics:read"}, ExpiresAt: time.Now().Add(time.Hour), Identity: tokenCaller(caller.APIKey)}
+		if err := json.NewEncoder(w).Encode(result); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer issuer.Close()
+	v := NewTokenValidator(slog.New(slog.NewTextHandler(io.Discard, nil)), issuer.Client())
+	send := func(fresh bool) (int, time.Duration) {
+		var lease time.Duration
+		h := v.Wrap(TokenConfig{Mode: "token", Endpoint: issuer.URL, RequiredScope: "analytics:read", CacheTTL: 15 * time.Second, FreshValidation: fresh},
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				source, ok := SourceFromContext(r.Context())
+				if !ok {
+					t.Error("missing verified source")
+				} else {
+					lease = time.Until(source.ValidUntil)
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+		r := httptest.NewRequest(http.MethodGet, "/reports/123", nil)
+		r.Header.Set("Authorization", "Bearer aurum_pat_fake")
+		r = r.WithContext(authzmw.WithPathVars(r.Context(), map[string]string{"seller_id": "123"}))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w.Code, lease
+	}
+	if code, _ := send(false); code != 204 {
+		t.Fatal(code)
+	}
+	v.mu.Lock()
+	for key, entry := range v.cache {
+		entry.fetchedAt = time.Now().Add(-14 * time.Second)
+		entry.expiresAt = time.Now().Add(time.Second)
+		v.cache[key] = entry
+	}
+	v.mu.Unlock()
+	if code, lease := send(false); code != 204 || calls.Load() != 1 || lease > 2*time.Second {
+		t.Fatal("legacy cache behavior changed", code, lease)
+	}
+	if code, lease := send(true); code != 204 || calls.Load() != 2 || lease < 14*time.Second {
+		t.Fatal("origin reused an almost expired source lease", code, lease)
+	}
+	unavailable.Store(true)
+	if code, _ := send(true); code != 502 || calls.Load() != 3 {
+		t.Fatal("issuer outage fell back to a cached validation", code)
+	}
+	unavailable.Store(false)
+	revoked.Store(true)
+	if code, _ := send(true); code != 401 || calls.Load() != 4 {
+		t.Fatal("revoked origin credential accepted", code)
+	}
+	if code, _ := send(false); code != 401 || calls.Load() != 5 {
+		t.Fatal("revocation retained a positive shared cache", code)
+	}
+}
