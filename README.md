@@ -1333,3 +1333,7 @@ state expires (up to24h); never rename keys to reset spent quota. Redis must ret
 state across restarts with persistence and no eviction. Losing state loses spent
 attempts, so restore it or suspend affected routes before resuming. CSAR publishes
 Retry-After/X-CSAR timing; workers own refresh schedules, not provider counters.
+A zero cap explicitly denies admission until an allowance is verified. Quota routes
+reject ordinary/transparent inline retries; each admitted request has one attempt.
+Config and runtime share policy validation. Backend causes remain in server logs,
+while client errors stay generic.

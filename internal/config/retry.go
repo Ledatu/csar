@@ -52,3 +52,12 @@ func (c *Config) ResolveRetryPolicies() error {
 	}
 	return nil
 }
+
+// TransparentRetryEnabled applies the protocol override to the retry policy.
+func (r *RouteConfig) TransparentRetryEnabled() bool {
+	enabled := r.Retry != nil && r.Retry.AutoRetry429
+	if r.Protocol != nil && r.Protocol.TransparentRetry != nil {
+		enabled = *r.Protocol.TransparentRetry
+	}
+	return enabled
+}

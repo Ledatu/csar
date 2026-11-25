@@ -684,7 +684,7 @@
       "properties": {
         "name": { "type": "string", "pattern": "^[a-zA-Z0-9_.:-]{1,64}$" },
         "key": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "requests": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "requests": { "type": "integer", "minimum": 0, "maximum": 10000, "description": "Rolling request cap; zero denies every request." },
         "window": { "type": "string" }
       }
     },

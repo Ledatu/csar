@@ -8,15 +8,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ledatu/csar/internal/requestquota"
 	"github.com/redis/go-redis/v9"
 )
 
 // RequestQuota is router-owned request admission, not a worker ownership lease.
-type RequestQuota struct {
-	Name, Key string
-	Requests  int
-	Window    time.Duration
-}
+type RequestQuota = requestquota.Policy
 
 // All windows are checked before charging any. Redis TIME, rather than router
 // clocks, defines rolling windows; policy changes do not rename stored keys.
@@ -35,7 +32,9 @@ for i,key in ipairs(KEYS) do
  if #last > 0 and tonumber(last[2]) > now then return redis.error_reply('request quota clock moved backwards') end
  redis.call('ZREMRANGEBYSCORE',key,1,now-window)
  local count = math.max(0,redis.call('ZCARD',key)-1)
- if count >= capacity then
+ if capacity == 0 then
+  retry = math.max(retry,window)
+ elseif count >= capacity then
   local edge = redis.call('ZRANGE',key,count-capacity+1,count-capacity+1,'WITHSCORES')
   retry = math.max(retry,tonumber(edge[2])+window-now)
  end
@@ -50,14 +49,18 @@ return 0
 `)
 
 func (dt *DynamicThrottler) SetQuotas(client *redis.Client, quotas []RequestQuota) error {
-	if len(quotas) > 8 || len(quotas) > 0 && (client == nil || !client.Options().ContextTimeoutEnabled) {
-		return fmt.Errorf("too many request quotas")
+	if err := requestquota.Validate(quotas); err != nil {
+		return err
 	}
-	for _, q := range quotas {
-		if q.Name == "" || q.Key == "" || q.Key != quotas[0].Key || q.Requests < 1 || q.Requests > 10000 || q.Window < time.Second || q.Window > 24*time.Hour || dt.maxWait != 0 {
-			return fmt.Errorf("invalid request quota")
+	if len(quotas) > 0 {
+		if client == nil || !client.Options().ContextTimeoutEnabled {
+			return fmt.Errorf("request quotas require a context-aware Redis client")
+		}
+		if dt.maxWait != 0 {
+			return fmt.Errorf("request quotas require immediate admission")
 		}
 	}
+
 	dt.quotaClient = client
 	dt.quotas = append([]RequestQuota(nil), quotas...)
 	return nil
@@ -81,8 +84,11 @@ func (dt *DynamicThrottler) admitQuotas(ctx context.Context) error {
 	bounded, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	wait, err := requestQuotaScript.Run(bounded, dt.quotaClient, keys, args...).Int64()
-	if err != nil || wait < 0 || wait > (24*time.Hour).Milliseconds() {
-		return fmt.Errorf("%w: request quota", ErrBackendUnavailable)
+	if err != nil {
+		return fmt.Errorf("%w: request quota: %w", ErrBackendUnavailable, err)
+	}
+	if wait < 0 || wait > (24*time.Hour).Milliseconds() {
+		return fmt.Errorf("%w: invalid request quota response", ErrBackendUnavailable)
 	}
 	if wait > 0 {
 		return &RetryAfterError{Wait: time.Duration(wait) * time.Millisecond, Key: "request-quota"}

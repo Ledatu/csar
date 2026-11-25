@@ -643,12 +643,7 @@ func (r *Router) setupBackpressure(rt *route, fr config.FlatRoute, key string, l
 	hasAdaptive := fr.Route.Traffic != nil &&
 		fr.Route.Traffic.AdaptiveBackpressure != nil &&
 		fr.Route.Traffic.AdaptiveBackpressure.Enabled
-	hasAutoRetry := fr.Route.Retry != nil && fr.Route.Retry.AutoRetry429
-
-	// ProtocolPolicy.TransparentRetry overrides auto_retry_429 when explicitly set.
-	if fr.Route.Protocol != nil && fr.Route.Protocol.TransparentRetry != nil {
-		hasAutoRetry = *fr.Route.Protocol.TransparentRetry
-	}
+	hasAutoRetry := fr.Route.TransparentRetryEnabled()
 
 	if !hasAdaptive && !hasAutoRetry {
 		return

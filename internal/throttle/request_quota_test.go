@@ -187,4 +187,107 @@ func TestRequestQuotaNativeRedisAtomicity(t *testing.T) {
 	if admitted.Load() != 20 {
 		t.Fatal("native Redis overspent", admitted.Load())
 	}
+	if err := d.SetQuotas(client, []RequestQuota{{Name: "report-day", Key: "report:global", Requests: 0, Window: 24 * time.Hour}}); err != nil {
+		t.Fatal(err)
+	}
+	var blocked *RetryAfterError
+	if err := d.admitQuotas(ctx); !errors.As(err, &blocked) || blocked.Wait != 24*time.Hour {
+		t.Fatal("native Redis did not close unverified report budget", err)
+	}
+}
+
+func TestClosedQuotaCannotSpendOtherWindowsOrForgetAttempts(t *testing.T) {
+	mr := miniredis.RunT(t)
+	mr.SetTime(time.Now().UTC())
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr(), ContextTimeoutEnabled: true, MaxRetries: -1})
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	d := NewDynamicThrottler(client, "test:", "read:{query.cabinet}", 1000, 100, 0)
+	quotas := []RequestQuota{{Name: "minute", Key: "reports:global", Requests: 2, Window: time.Minute}, {Name: "daily", Key: "reports:global", Requests: 0, Window: 24 * time.Hour}}
+	if err := d.SetQuotas(client, quotas); err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithRequest(context.Background(), httptest.NewRequest("POST", "/reports", nil))
+	for range 3 {
+		var denied *RetryAfterError
+		if err := d.admitQuotas(ctx); !errors.As(err, &denied) || denied.Wait != 24*time.Hour {
+			t.Fatal("closed quota did not deny", err)
+		}
+	}
+	quotas[1].Requests = 2
+	if err := d.SetQuotas(client, quotas); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.admitQuotas(ctx); err != nil {
+		t.Fatal("closed quota charged another window", err)
+	}
+	quotas[1].Requests = 0
+	if err := d.SetQuotas(client, quotas); err != nil {
+		t.Fatal(err)
+	}
+	var denied *RetryAfterError
+	if err := d.admitQuotas(ctx); !errors.As(err, &denied) {
+		t.Fatal(err)
+	}
+	quotas[1].Requests = 2
+	if err := d.SetQuotas(client, quotas); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.admitQuotas(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.admitQuotas(ctx); !errors.As(err, &denied) || denied.Wait != 24*time.Hour {
+		t.Fatal("reopening forgot spent attempts", err)
+	}
+}
+
+func TestRuntimeQuotaValidationUsesFullPolicyShape(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr(), ContextTimeoutEnabled: true, MaxRetries: -1})
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	d := NewDynamicThrottler(client, "test:", "reads", 1000, 100, 0)
+	good := RequestQuota{Name: "daily", Key: "reports:global", Requests: 1, Window: 24 * time.Hour}
+	bad := good
+	bad.Name = "has space"
+	if d.SetQuotas(client, []RequestQuota{bad}) == nil {
+		t.Fatal("runtime accepted invalid name")
+	}
+	if d.SetQuotas(client, []RequestQuota{good, good}) == nil {
+		t.Fatal("runtime accepted duplicate quotas")
+	}
+	bad = good
+	bad.Key = strings.Repeat("x", 257)
+	if d.SetQuotas(client, []RequestQuota{bad}) == nil {
+		t.Fatal("runtime accepted oversized key")
+	}
+	if d.SetQuotas(nil, []RequestQuota{good}) == nil {
+		t.Fatal("missing Redis accepted")
+	}
+}
+
+func TestQuotaBackendErrorRetainsCause(t *testing.T) {
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr(), ContextTimeoutEnabled: true, MaxRetries: -1})
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	d := NewDynamicThrottler(client, "test:", "reads", 1000, 100, 0)
+	if err := d.SetQuotas(client, []RequestQuota{{Name: "daily", Key: "reports:global", Requests: 1, Window: 24 * time.Hour}}); err != nil {
+		t.Fatal(err)
+	}
+	mr.SetError("ERR local quota diagnostic")
+	err := d.admitQuotas(WithRequest(context.Background(), httptest.NewRequest("POST", "/reports", nil)))
+	var cause redis.Error
+	if !errors.Is(err, ErrBackendUnavailable) || !errors.As(err, &cause) || !strings.Contains(err.Error(), "local quota diagnostic") {
+		t.Fatal("quota error cause lost", err)
+	}
 }

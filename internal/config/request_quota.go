@@ -2,8 +2,8 @@ package config
 
 import (
 	"fmt"
-	"regexp"
-	"time"
+
+	"github.com/ledatu/csar/internal/requestquota"
 )
 
 // RequestQuota is an additional rolling request cap, independent of GCRA burst.
@@ -15,8 +15,6 @@ type RequestQuota struct {
 	Window   Duration `yaml:"window" json:"window"`
 }
 
-var quotaName = regexp.MustCompile(`^[a-zA-Z0-9_.:-]{1,64}$`)
-
 func (c *Config) ValidateRequestQuotas() error {
 	seen := map[string]RequestQuota{}
 	for path, methods := range c.Paths {
@@ -25,15 +23,24 @@ func (c *Config) ValidateRequestQuotas() error {
 			if t == nil || len(t.Quotas) == 0 {
 				continue
 			}
-			if t.Backend != "redis" || t.Key == "" || t.MaxWait.Duration != 0 || len(t.VIPOverrides) > 0 || len(t.ExcludeIPs) > 0 || len(t.Quotas) > 8 {
+			if t.Backend != "redis" || t.Key == "" || t.MaxWait.Duration != 0 || len(t.VIPOverrides) > 0 || len(t.ExcludeIPs) > 0 {
 				return fmt.Errorf("route %s %s: request quotas require dynamic Redis admission without waits or bypasses", method, path)
 			}
-			names := map[string]bool{}
+			route := methods[method]
+			if route.Retry != nil && route.Retry.MaxAttempts != 1 {
+				return fmt.Errorf("route %s %s: request quotas require a single upstream attempt", method, path)
+			}
+			if route.TransparentRetryEnabled() {
+				return fmt.Errorf("route %s %s: request quotas forbid transparent retries", method, path)
+			}
+			policies := make([]requestquota.Policy, len(t.Quotas))
+			for i, q := range t.Quotas {
+				policies[i] = requestquota.Policy{Name: q.Name, Key: q.Key, Requests: q.Requests, Window: q.Window.Duration}
+			}
+			if err := requestquota.Validate(policies); err != nil {
+				return fmt.Errorf("route %s %s: %w", method, path, err)
+			}
 			for _, q := range t.Quotas {
-				if !quotaName.MatchString(q.Name) || q.Key == "" || len(q.Key) > 256 || q.Key != t.Quotas[0].Key || names[q.Name] || q.Requests < 1 || q.Requests > 10000 || q.Window.Duration < time.Second || q.Window.Duration > 24*time.Hour {
-					return fmt.Errorf("route %s %s: invalid request quota", method, path)
-				}
-				names[q.Name] = true
 				if prior, ok := seen[q.Name]; ok && prior != q {
 					return fmt.Errorf("request quota %s has conflicting limits", q.Name)
 				}

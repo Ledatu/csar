@@ -56,3 +56,44 @@ func TestNamedQuotaPolicyIsCopied(t *testing.T) {
 		t.Fatal("quota policy aliased")
 	}
 }
+
+func TestQuotaPoliciesRejectEveryInlineReplayPath(t *testing.T) {
+	yes, no := true, false
+	for _, tc := range []struct {
+		name     string
+		retry    *RetryConfig
+		protocol *ProtocolPolicy
+		bad      bool
+	}{
+		{name: "no_retry"},
+		{name: "one_attempt", retry: &RetryConfig{MaxAttempts: 1}},
+		{name: "ordinary_retry", retry: &RetryConfig{MaxAttempts: 2}, bad: true},
+		{name: "retry_defaults", retry: &RetryConfig{}, bad: true},
+		{name: "auto_retry", retry: &RetryConfig{MaxAttempts: 1, AutoRetry429: true}, bad: true},
+		{name: "protocol_retry", protocol: &ProtocolPolicy{TransparentRetry: &yes}, bad: true},
+		{name: "protocol_enables_retry", retry: &RetryConfig{MaxAttempts: 1}, protocol: &ProtocolPolicy{TransparentRetry: &yes}, bad: true},
+		{name: "protocol_disables_retry", retry: &RetryConfig{MaxAttempts: 1, AutoRetry429: true}, protocol: &ProtocolPolicy{TransparentRetry: &no}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := quotaConfig()
+			r := c.Paths["/read"]["get"]
+			r.Retry = tc.retry
+			r.Protocol = tc.protocol
+			c.Paths["/read"]["get"] = r
+			if err := c.ValidateRequestQuotas(); (err != nil) != tc.bad {
+				t.Fatal("unexpected quota/replay validation", err)
+			}
+		})
+	}
+	c := quotaConfig()
+	c.RetryPolicies = map[string]RetryConfig{"inherited": {MaxAttempts: 2}}
+	r := c.Paths["/read"]["get"]
+	r.Retry = &RetryConfig{Use: "inherited"}
+	c.Paths["/read"]["get"] = r
+	if err := c.ResolvePolicies(); err != nil {
+		t.Fatal(err)
+	}
+	if c.ValidateRequestQuotas() == nil {
+		t.Fatal("inherited retry bypassed quota validation")
+	}
+}
