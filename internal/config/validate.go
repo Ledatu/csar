@@ -15,6 +15,9 @@ import (
 
 // Validate checks the configuration for required fields and consistency.
 func (c *Config) Validate() error {
+	if err := c.ValidateRequestQuotas(); err != nil {
+		return err
+	}
 	if err := c.OriginIssuer.Validate(); err != nil {
 		return err
 	}

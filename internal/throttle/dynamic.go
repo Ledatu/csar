@@ -73,7 +73,9 @@ type DynamicThrottler struct {
 	maxWait time.Duration
 
 	// Observability
-	waiting atomic.Int64
+	waiting     atomic.Int64
+	quotas      []RequestQuota
+	quotaClient *redis.Client
 }
 
 // NewDynamicThrottler creates a DynamicThrottler for per-entity rate limiting.
@@ -101,8 +103,11 @@ func (dt *DynamicThrottler) Wait(ctx context.Context) error {
 	defer dt.waiting.Add(-1)
 
 	resolvedKey := dt.resolveKey(requestFromContext(ctx))
-	return gcraWait(ctx, dt.client, dt.script, dt.keyPrefix+resolvedKey, resolvedKey,
-		newGCRAParams(dt.rps, dt.burst), dt.maxWait)
+	if err := gcraWait(ctx, dt.client, dt.script, dt.keyPrefix+resolvedKey, resolvedKey,
+		newGCRAParams(dt.rps, dt.burst), dt.maxWait); err != nil {
+		return err
+	}
+	return dt.admitQuotas(ctx)
 }
 
 // SuspendRequestFor holds back only the key that r resolves to, so an

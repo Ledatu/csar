@@ -42,6 +42,9 @@ func (c *Config) ResolveThrottlePolicies() error {
 			}
 			// Merge: inline fields override policy defaults.
 			merged := route.Traffic
+			if merged.Quotas == nil {
+				merged.Quotas = append([]RequestQuota(nil), policy.Quotas...)
+			}
 			if merged.RPS == 0 {
 				merged.RPS = policy.RPS
 			}

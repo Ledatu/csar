@@ -5,6 +5,7 @@ package csar.v1;
 option go_package = "github.com/ledatu/csar/proto/csar/v1;csarv1";
 
 import "google/protobuf/duration.proto";
+import "csar/throttle/v1/quota.proto";
 
 // CoordinatorService is the internal gRPC service for Coordinator <-> Router communication.
 // Routers connect to the Coordinator to receive configuration and quota assignments.
@@ -256,6 +257,7 @@ message TrafficConfigProto {
   repeated VIPOverrideProto vip_overrides = 8;
   AdaptiveBackpressureProto adaptive_backpressure = 9;
   string client_limit_mode = 10;
+  repeated csar.throttle.v1.RequestQuota quotas = 11;
 }
 
 message VIPOverrideProto {
@@ -279,6 +281,7 @@ message ThrottlingPolicyProto {
   repeated string exclude_ips = 6;
   repeated VIPOverrideProto vip_overrides = 7;
   string client_limit_mode = 8;
+  repeated csar.throttle.v1.RequestQuota quotas = 9;
 }
 
 message GlobalThrottleProto {

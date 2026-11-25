@@ -3,18 +3,22 @@ package config
 import "fmt"
 
 const AuditReleaseCapability = "csar.audit_release_policy_version"
+const RequestQuotaCapability = "csar.request_quota_policy_version"
 const UsageBudgetCapability = "csar.usage_budget_policy_version"
 
 // PolicyCapabilities returns owned version metadata for distributed route
 // semantics. New policies extend this registry instead of another wire field.
 func PolicyCapabilities() map[string]uint32 {
-	return map[string]uint32{AuditReleaseCapability: 1, UsageBudgetCapability: 1}
+	return map[string]uint32{AuditReleaseCapability: 1, UsageBudgetCapability: 1, RequestQuotaCapability: 1}
 }
 
 func (c *Config) RequiredCapabilities() map[string]uint32 {
 	required := make(map[string]uint32)
 	for _, methods := range c.Paths {
 		for method := range methods {
+			if traffic := methods[method].Traffic; traffic != nil && len(traffic.Quotas) > 0 {
+				required[RequestQuotaCapability] = 1
+			}
 			if methods[method].UsageBudget != nil {
 				required[UsageBudgetCapability] = 1
 			}

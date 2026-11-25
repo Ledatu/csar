@@ -27,6 +27,9 @@ import (
 
 // New creates a new Router from the given configuration.
 func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, error) {
+	if err := cfg.ValidateRequestQuotas(); err != nil {
+		return nil, err
+	}
 	r := &Router{
 		routes: make(map[string]*route),
 		cfg:    cfg,
@@ -50,6 +53,12 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 	}
 	if err := r.setupUsage(cfg); err != nil {
 		return nil, err
+	}
+	if cfg.RequiredCapabilities()[config.RequestQuotaCapability] != 0 {
+		if r.redisClient == nil {
+			return nil, fmt.Errorf("request quotas require Redis")
+		}
+		r.quotaRedis = r.newAdmissionRedis()
 	}
 	selections, selectionErr := credentialRejectionSelections(r.credentialRejectionRoutes, flatRoutes)
 	if selectionErr != nil {
@@ -485,6 +494,13 @@ func (r *Router) setupThrottle(rt *route, cfg *config.Config, fr config.FlatRout
 			keyPrefix = cfg.Redis.KeyPrefix
 		}
 		dt := throttle.NewDynamicThrottler(r.redisClient, keyPrefix, t.Key, t.RPS, t.Burst, t.MaxWait.Duration)
+		quotas := make([]throttle.RequestQuota, len(t.Quotas))
+		for i, q := range t.Quotas {
+			quotas[i] = throttle.RequestQuota{Name: q.Name, Key: q.Key, Requests: q.Requests, Window: q.Window.Duration}
+		}
+		if err := dt.SetQuotas(r.quotaRedis, quotas); err != nil {
+			return err
+		}
 		r.throttleManager.RegisterWaiter(key, dt)
 		logger.Info("registered dynamic-key throttle",
 			"route", key,
@@ -627,12 +643,7 @@ func (r *Router) setupBackpressure(rt *route, fr config.FlatRoute, key string, l
 	hasAdaptive := fr.Route.Traffic != nil &&
 		fr.Route.Traffic.AdaptiveBackpressure != nil &&
 		fr.Route.Traffic.AdaptiveBackpressure.Enabled
-	hasAutoRetry := fr.Route.Retry != nil && fr.Route.Retry.AutoRetry429
-
-	// ProtocolPolicy.TransparentRetry overrides auto_retry_429 when explicitly set.
-	if fr.Route.Protocol != nil && fr.Route.Protocol.TransparentRetry != nil {
-		hasAutoRetry = *fr.Route.Protocol.TransparentRetry
-	}
+	hasAutoRetry := fr.Route.TransparentRetryEnabled()
 
 	if !hasAdaptive && !hasAutoRetry {
 		return

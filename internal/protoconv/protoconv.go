@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/ledatu/csar-core/configutil"
+	throttlev1 "github.com/ledatu/csar-proto/csar/throttle/v1"
 	"github.com/ledatu/csar/internal/config"
 	csarv1 "github.com/ledatu/csar/proto/csar/v1"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -233,6 +234,7 @@ func protoToTraffic(t *csarv1.TrafficConfigProto) config.TrafficConfig {
 		Key:             t.GetKey(),
 		ExcludeIPs:      t.GetExcludeIps(),
 		ClientLimitMode: t.GetClientLimitMode(),
+		Quotas:          protoToQuotas(t.GetQuotas()),
 	}
 	if vips := t.GetVipOverrides(); len(vips) > 0 {
 		tc.VIPOverrides = make([]config.VIPOverride, 0, len(vips))
@@ -611,6 +613,7 @@ func protoToThrottlingPolicies(policies map[string]*csarv1.ThrottlingPolicyProto
 			Key:             p.GetKey(),
 			ExcludeIPs:      p.GetExcludeIps(),
 			ClientLimitMode: p.GetClientLimitMode(),
+			Quotas:          protoToQuotas(p.GetQuotas()),
 		}
 		if vips := p.GetVipOverrides(); len(vips) > 0 {
 			tp.VIPOverrides = make([]config.VIPOverride, 0, len(vips))
@@ -787,6 +790,17 @@ func protoToAuthMethods(methods []*csarv1.AuthValidateConfigProto) []config.Auth
 	out := make([]config.AuthValidateConfig, 0, len(methods))
 	for _, method := range methods {
 		out = append(out, *protoToAuthValidateConfig(method))
+	}
+	return out
+}
+
+func protoToQuotas(quotas []*throttlev1.RequestQuota) []config.RequestQuota {
+	if quotas == nil {
+		return nil
+	}
+	out := make([]config.RequestQuota, 0, len(quotas))
+	for _, q := range quotas {
+		out = append(out, config.RequestQuota{Name: q.GetName(), Key: q.GetKey(), Requests: int(q.GetRequests()), Window: configutil.Duration{Duration: q.GetWindow().AsDuration()}})
 	}
 	return out
 }
