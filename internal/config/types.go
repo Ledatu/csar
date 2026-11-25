@@ -674,6 +674,7 @@ type YandexKMSConfig struct {
 //	x-csar-traffic: { rps: 10, burst: 20, ... }       # inline object
 //	x-csar-traffic: { use: "heavy-task", max_wait: "60s" }  # policy ref + overrides
 type TrafficConfig struct {
+	Quotas []RequestQuota `yaml:"quotas,omitempty" json:"quotas,omitempty"`
 	// Use is an optional reference to a named throttling_policies entry.
 	// When set, all other fields are inherited from the policy; any
 	// inline fields override the policy's values (shallow merge).
@@ -754,6 +755,7 @@ func (tc *TrafficConfig) UnmarshalYAML(value *yaml.Node) error {
 // ThrottlingPolicy defines a named, reusable throttling configuration.
 // Defined at the top-level throttling_policies map, referenced by name in routes.
 type ThrottlingPolicy struct {
+	Quotas []RequestQuota `yaml:"quotas,omitempty" json:"quotas,omitempty"`
 	// RPS is the allowed requests per second.
 	RPS float64 `yaml:"rate,omitempty" json:"rate,omitempty"`
 

@@ -86,7 +86,7 @@ run-secure-local: build
 		-token-file tokens.yaml
 
 proto:
-	protoc --go_out=. --go_opt=paths=source_relative \
+	protoc -I . -I "$$(GOWORK=off go list -m -f '{{.Dir}}' github.com/ledatu/csar-proto)" --go_out=. --go_opt=paths=source_relative \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		proto/csar/v1/auth.proto \
 		proto/csar/v1/coordinator.proto

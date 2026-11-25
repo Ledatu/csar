@@ -91,6 +91,7 @@ type vipOverride struct {
 // the pipeline: ip_check -> cors -> security_inject -> throttle.Wait -> circuit_breaker -> proxy.Forward.
 type Router struct {
 	usageLimiter              *usagebudget.Limiter
+	quotaRedis                *redis.Client
 	usageRedis                *redis.Client
 	originIssuer              RootIssuer
 	originReceivers           map[string]string
@@ -164,6 +165,9 @@ func (r *Router) RegisteredKeys() []string {
 // Call this before discarding a router instance (e.g. on SIGHUP reload) to prevent
 // goroutine leaks. Safe to call multiple times.
 func (r *Router) Close() {
+	if r.quotaRedis != nil {
+		_ = r.quotaRedis.Close()
+	}
 	if r.usageRedis != nil {
 		_ = r.usageRedis.Close()
 	}

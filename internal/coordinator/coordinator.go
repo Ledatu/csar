@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	throttlev1 "github.com/ledatu/csar-proto/csar/throttle/v1"
 	"github.com/ledatu/csar/internal/config"
 	"github.com/ledatu/csar/internal/configsource"
 	"github.com/ledatu/csar/internal/statestore"
@@ -394,6 +395,9 @@ func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_Su
 
 	protoRoutes := make([]*csarv1.RouteConfig, 0, len(routes))
 	for i := range routes {
+		if traffic := routes[i].Route.Traffic; traffic != nil && len(traffic.Quotas) > 0 && metadata[config.RequestQuotaCapability] != "1" {
+			return status.Error(codes.FailedPrecondition, "router does not support request quota policies")
+		}
 		if routes[i].Route.UsageBudget != nil && metadata[config.UsageBudgetCapability] != "1" {
 			return status.Error(codes.FailedPrecondition, "router does not support usage budget policies")
 		}
@@ -736,6 +740,7 @@ func trafficToProto(t *config.TrafficConfig) *csarv1.TrafficConfigProto {
 		Key:             t.Key,
 		ExcludeIps:      t.ExcludeIPs,
 		ClientLimitMode: t.ClientLimitMode,
+		Quotas:          quotasToProto(t.Quotas),
 	}
 	if len(t.VIPOverrides) > 0 {
 		pb.VipOverrides = make([]*csarv1.VIPOverrideProto, 0, len(t.VIPOverrides))
@@ -1160,6 +1165,7 @@ func throttlingPoliciesToProto(policies map[string]config.ThrottlingPolicy) map[
 			Key:             p.Key,
 			ExcludeIps:      p.ExcludeIPs,
 			ClientLimitMode: p.ClientLimitMode,
+			Quotas:          quotasToProto(p.Quotas),
 		}
 		if len(p.VIPOverrides) > 0 {
 			tp.VipOverrides = make([]*csarv1.VIPOverrideProto, 0, len(p.VIPOverrides))
@@ -1298,6 +1304,17 @@ func authMethodsToProto(methods []config.AuthValidateConfig) []*csarv1.AuthValid
 	out := make([]*csarv1.AuthValidateConfigProto, 0, len(methods))
 	for i := range methods {
 		out = append(out, authValidateToProto(&methods[i]))
+	}
+	return out
+}
+
+func quotasToProto(quotas []config.RequestQuota) []*throttlev1.RequestQuota {
+	if quotas == nil {
+		return nil
+	}
+	out := make([]*throttlev1.RequestQuota, 0, len(quotas))
+	for _, q := range quotas {
+		out = append(out, &throttlev1.RequestQuota{Name: q.Name, Key: q.Key, Requests: safeInt32(q.Requests), Window: durationpb.New(q.Window.Duration)})
 	}
 	return out
 }

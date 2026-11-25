@@ -40,23 +40,7 @@ func (r *Router) setupUsage(cfg *config.Config) error {
 	}
 	// Reuse endpoint/credentials/TLS, but isolate admission in a bounded pool with
 	// context-aware socket IO and no ambiguous command replay. Legacy pools stay unchanged.
-	options := *r.redisClient.Options()
-	// Options() contains the existing client's live push processor. A new pool
-	// needs its own processor rather than re-registering handlers on that object.
-	options.PushNotificationProcessor = nil
-	options.ContextTimeoutEnabled = true
-	options.MaxRetries = -1
-	options.PoolSize = 8
-	options.MaxActiveConns = 8
-	options.MinIdleConns = 0
-	options.DialTimeout = 250 * time.Millisecond
-	options.ReadTimeout = 250 * time.Millisecond
-	options.WriteTimeout = 250 * time.Millisecond
-	options.PoolTimeout = 250 * time.Millisecond
-	r.usageRedis = redis.NewClient(&options)
-	if r.metrics != nil {
-		r.usageRedis.AddHook(redisx.NewErrorHook(r.metrics.RecordRedisCommandError))
-	}
+	r.usageRedis = r.newAdmissionRedis()
 	prefix := "csar:usage:"
 	if cfg.Redis != nil {
 		prefix = cfg.Redis.KeyPrefix + prefix
@@ -109,4 +93,25 @@ func (r *Router) admitUsage(w http.ResponseWriter, req *http.Request, rt *route)
 		apierror.New("usage_unavailable", http.StatusServiceUnavailable, "usage admission unavailable").WithRequestID(r.requestID(req)).Write(w)
 	}
 	return false
+}
+
+func (r *Router) newAdmissionRedis() *redis.Client {
+	options := *r.redisClient.Options()
+	// Options() contains the existing client's live push processor. A new pool
+	// needs its own processor rather than re-registering handlers on that object.
+	options.PushNotificationProcessor = nil
+	options.ContextTimeoutEnabled = true
+	options.MaxRetries = -1
+	options.PoolSize = 8
+	options.MaxActiveConns = 8
+	options.MinIdleConns = 0
+	options.DialTimeout = 250 * time.Millisecond
+	options.ReadTimeout = 250 * time.Millisecond
+	options.WriteTimeout = 250 * time.Millisecond
+	options.PoolTimeout = 250 * time.Millisecond
+	client := redis.NewClient(&options)
+	if r.metrics != nil {
+		client.AddHook(redisx.NewErrorHook(r.metrics.RecordRedisCommandError))
+	}
+	return client
 }

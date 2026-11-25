@@ -1324,3 +1324,12 @@ usage and are not refunded. Versioned coordinator capabilities preserve policy
 limits and explicit removal. This supplies ingress protection; owner compute,
 unique-work, concurrency and byte reservations remain separate W3 work. Capacity,
 HA failure and fairness acceptance remain gates before production activation.
+
+Request quota contracts: `csar/throttle/v1.RequestQuota` carries additional rolling
+request caps alongside GCRA pacing. CSAR requires Redis and capability version1;
+all windows charge atomically using Redis time. Stable names/keys preserve attempts
+across replicas/reloads and limit reductions. Window changes fail closed until old
+state expires (up to24h); never rename keys to reset spent quota. Redis must retain
+state across restarts with persistence and no eviction. Losing state loses spent
+attempts, so restore it or suspend affected routes before resuming. CSAR publishes
+Retry-After/X-CSAR timing; workers own refresh schedules, not provider counters.
