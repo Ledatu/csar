@@ -20,7 +20,7 @@ var validateAuthnCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("reading config: %w", err)
 		}
-		if _, err := authnconfig.LoadFromBytes(data); err != nil {
+		if _, err := authnconfig.LoadFromBytesWithCredentialReceiver(data); err != nil {
 			return fmt.Errorf("authn config validation failed: %w", err)
 		}
 		fmt.Println("OK: authn config is valid")
@@ -39,7 +39,7 @@ var validateAuthzCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("reading config: %w", err)
 		}
-		if _, err := authzconfig.LoadFromBytes(data); err != nil {
+		if _, err := authzconfig.LoadFromBytesWithServiceCapabilities(data); err != nil {
 			return fmt.Errorf("authz config validation failed: %w", err)
 		}
 		fmt.Println("OK: authz config is valid")
