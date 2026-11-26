@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ledatu/csar-core/authntokens"
 	"github.com/ledatu/csar-core/gatewayctx"
 	authzv1 "github.com/ledatu/csar-proto/csar/authz/v1"
 	"github.com/ledatu/csar/internal/apierror"
@@ -23,6 +24,13 @@ import (
 var placeholderRe = regexp.MustCompile(`\{(query|header|path)\.([^}]+)\}`)
 
 type pathVarsKey struct{}
+type requiredScopeKey struct{}
+
+// WithRequiredScope binds a verified v2 credential to the exact authorization
+// scope that the route must actually check. Client headers cannot set this key.
+func WithRequiredScope(ctx context.Context, subject string, scope authntokens.ScopeRef) context.Context {
+	return context.WithValue(ctx, requiredScopeKey{}, AuthorizedScope{Subject: subject, Type: scope.Type, ID: scope.ID})
+}
 
 // WithPathVars stores path variable bindings in the request context.
 // Must be called before path rewriting so values reflect the original URL.
@@ -91,6 +99,9 @@ func (m *Middleware) Wrap(cfg Config, next http.Handler) http.Handler {
 				continue
 			}
 			evaluated++
+			if required, ok := r.Context().Value(requiredScopeKey{}).(AuthorizedScope); ok && (required.Subject != req.Subject || required.Type != req.ScopeType || required.ID != req.ScopeId) {
+				continue
+			}
 
 			result, err := m.client.CheckAccess(r.Context(), req)
 			if err != nil {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ledatu/csar-core/authntokens"
 	"github.com/ledatu/csar-core/gatewayctx"
 	authzv1 "github.com/ledatu/csar-proto/csar/authz/v1"
 	"github.com/ledatu/csar/internal/authz"
@@ -300,5 +301,23 @@ func TestWrap_StripHeadersAppliedBeforeCheck(t *testing.T) {
 
 	if got := upstream.Header.Get("X-User-Roles"); got != "" {
 		t.Errorf("X-User-Roles = %q, want stripped", got)
+	}
+}
+
+func TestV2CredentialRequiresExactAuthorizedScope(t *testing.T) {
+	for _, scope := range []string{"workspace:north-branch", "other:north-branch"} {
+		req := httptest.NewRequest("GET", "/facts", nil)
+		req.Header.Set(gatewayctx.HeaderSubject, "owner")
+		req = req.WithContext(WithRequiredScope(req.Context(), "owner", authntokens.ScopeRef{Type: "tenant", ID: "workspace:north-branch"}))
+		check := &fakeChecker{decide: allowScope("tenant")}
+		route := &config.AuthzRouteConfig{Subject: "{header.X-Gateway-Subject}", Resource: "facts", Action: "read", ScopeType: "tenant", ScopeID: scope}
+		w, upstream := serve(t, check, route, req)
+		if scope == "workspace:north-branch" {
+			if w.Code != 204 || upstream == nil || len(check.calls) != 1 {
+				t.Fatal("matching scope rejected")
+			}
+		} else if w.Code != 403 || upstream != nil || len(check.calls) != 0 {
+			t.Fatal("same resource under another namespace reached backend", w.Code)
+		}
 	}
 }

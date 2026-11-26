@@ -289,10 +289,10 @@ func (c *Config) Validate() error {
 				if err := route.ValidateGrantCache(); err != nil {
 					return fmt.Errorf("path %s method %s: %w", path, method, err)
 				}
-				if route.Authz == nil && route.AuthValidate.hasMode(authntokens.GrantResource) {
+				if route.Authz == nil && route.AuthValidate.hasMode(authntokens.GrantResource, authntokens.GrantResourceV2) {
 					return fmt.Errorf("path %s method %s: resource delegation requires authorization", path, method)
 				}
-				if route.AuthValidate.Mode == "mcp" || route.AuthValidate.Mode == "mcp-account" || route.AuthValidate.Mode == authntokens.GrantExchange {
+				if route.AuthValidate.Mode == "mcp" || route.AuthValidate.Mode == "mcp-account" || route.AuthValidate.Mode == authntokens.GrantExchange || route.AuthValidate.Mode == authntokens.GrantExchangeV2 {
 					if route.AuthValidate.Mode == "mcp" && route.Authz == nil {
 						return fmt.Errorf("path %s method %s: cabinet MCP delegation requires authorization", path, method)
 					}

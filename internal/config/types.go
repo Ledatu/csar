@@ -991,7 +991,9 @@ type AuthValidateConfig struct {
 	IntrospectionTLS      string `yaml:"introspection_tls,omitempty" json:"introspection_tls,omitempty"`
 
 	// RequiredScope binds the credential to the route operation.
-	RequiredScope string `yaml:"required_scope,omitempty" json:"required_scope,omitempty"`
+	RequiredScope     string `yaml:"required_scope,omitempty" json:"required_scope,omitempty"`
+	CredentialProfile string `yaml:"credential_profile,omitempty" json:"credential_profile,omitempty"`
+	ResourceNamespace string `yaml:"resource_namespace,omitempty" json:"resource_namespace,omitempty"`
 	// ResourcePathParam identifies the matched route parameter for grant-resource.
 	ResourcePathParam string `yaml:"resource_path_param,omitempty" json:"resource_path_param,omitempty"`
 	// SellerPathParam is the legacy seller protocol binding.

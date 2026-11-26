@@ -2,6 +2,7 @@ package config
 
 import "fmt"
 
+const DelegationV2Capability = "csar.delegation_contract_version"
 const AuditReleaseCapability = "csar.audit_release_policy_version"
 const RequestQuotaCapability = "csar.request_quota_policy_version"
 const UsageBudgetCapability = "csar.usage_budget_policy_version"
@@ -9,7 +10,7 @@ const UsageBudgetCapability = "csar.usage_budget_policy_version"
 // PolicyCapabilities returns owned version metadata for distributed route
 // semantics. New policies extend this registry instead of another wire field.
 func PolicyCapabilities() map[string]uint32 {
-	return map[string]uint32{AuditReleaseCapability: 1, UsageBudgetCapability: 1, RequestQuotaCapability: 1}
+	return map[string]uint32{AuditReleaseCapability: 1, UsageBudgetCapability: 1, RequestQuotaCapability: 1, DelegationV2Capability: 2}
 }
 
 func (c *Config) RequiredCapabilities() map[string]uint32 {
@@ -21,6 +22,9 @@ func (c *Config) RequiredCapabilities() map[string]uint32 {
 			}
 			if methods[method].UsageBudget != nil {
 				required[UsageBudgetCapability] = 1
+			}
+			if c.AuthValidateNeedsDelegationV2(methods[method].AuthValidate) {
+				required[DelegationV2Capability] = 2
 			}
 			if methods[method].AuditRelease {
 				required[AuditReleaseCapability] = 1
@@ -44,4 +48,38 @@ func (c *Config) CheckPolicySnapshot(active map[string]uint32) error {
 		}
 	}
 	return nil
+}
+
+func (c *Config) AuthValidateNeedsDelegationV2(a *AuthValidateConfig) bool {
+	seen := make(map[string]bool)
+	var walk func(*AuthValidateConfig, int) bool
+	walk = func(a *AuthValidateConfig, depth int) bool {
+		if a == nil {
+			return false
+		}
+		if depth > 8 {
+			return true
+		}
+		if a.RequiresDelegationV2() {
+			return true
+		}
+		if c != nil && a.Use != "" {
+			if seen[a.Use] {
+				return true
+			}
+			seen[a.Use] = true
+			p := c.AuthValidatePolicies[a.Use]
+			if walk(&p, depth+1) {
+				return true
+			}
+			delete(seen, a.Use)
+		}
+		for i := range a.Methods {
+			if walk(&a.Methods[i], depth+1) {
+				return true
+			}
+		}
+		return false
+	}
+	return walk(a, 0)
 }

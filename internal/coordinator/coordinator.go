@@ -401,6 +401,9 @@ func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_Su
 		if routes[i].Route.UsageBudget != nil && metadata[config.UsageBudgetCapability] != "1" {
 			return status.Error(codes.FailedPrecondition, "router does not support usage budget policies")
 		}
+		if cfg.AuthValidateNeedsDelegationV2(routes[i].Route.AuthValidate) && metadata[config.DelegationV2Capability] != "2" {
+			return status.Error(codes.FailedPrecondition, "router does not support v2 delegation policies")
+		}
 		if routes[i].Route.AuditRelease && metadata[config.AuditReleaseCapability] != "1" {
 			return status.Error(codes.FailedPrecondition, "router does not support audit release policies")
 		}
@@ -1050,18 +1053,19 @@ func authValidateToProto(a *config.AuthValidateConfig) *csarv1.AuthValidateConfi
 		IntrospectionEndpoint: a.IntrospectionEndpoint,
 		IntrospectionTls:      a.IntrospectionTLS,
 		RequiredScope:         a.RequiredScope,
-		SellerPathParam:       a.SellerPathParam,
-		ResourcePathParam:     a.ResourcePathParam,
-		ForwardHeaders:        a.ForwardHeaders,
-		Issuer:                a.Issuer,
-		Audiences:             a.Audiences,
-		HeaderName:            a.HeaderName,
-		TokenPrefix:           a.TokenPrefix,
-		CacheTtl:              durationpb.New(a.CacheTTL.Duration),
-		RequiredClaims:        a.RequiredClaims,
-		ForwardClaims:         a.ForwardClaims,
-		CookieName:            a.CookieName,
-		IssueTokens:           issueTokensToProto(a.IssueTokens),
+		CredentialProfile:     a.CredentialProfile, ResourceNamespace: a.ResourceNamespace,
+		SellerPathParam:   a.SellerPathParam,
+		ResourcePathParam: a.ResourcePathParam,
+		ForwardHeaders:    a.ForwardHeaders,
+		Issuer:            a.Issuer,
+		Audiences:         a.Audiences,
+		HeaderName:        a.HeaderName,
+		TokenPrefix:       a.TokenPrefix,
+		CacheTtl:          durationpb.New(a.CacheTTL.Duration),
+		RequiredClaims:    a.RequiredClaims,
+		ForwardClaims:     a.ForwardClaims,
+		CookieName:        a.CookieName,
+		IssueTokens:       issueTokensToProto(a.IssueTokens),
 	}
 }
 

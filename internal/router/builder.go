@@ -148,6 +148,25 @@ func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, erro
 
 // buildRoute creates and registers a single route from a FlatRoute definition.
 func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *resilience.CircuitBreakerManager, logger *slog.Logger) error {
+	if err := fr.Route.AuthValidate.ValidateDelegationV2(fr.Path); err != nil {
+		return err
+	}
+	if fr.Route.AuthValidate != nil && fr.Route.AuthValidate.RequiresDelegationV2() {
+		if err := cfg.ValidateRouteDelegationV2(fr.Route.AuthValidate, fr.Path, fr.Route.Authz != nil); err != nil {
+			return err
+		}
+	}
+	if fr.Route.AuthValidate != nil && fr.Route.AuthValidate.ForwardsDelegationV2() {
+		backend := fr.Route.Backend
+		if backend.TLS == nil || backend.TLS.InsecureSkipVerify || backend.TLS.CertFile == "" || backend.TLS.KeyFile == "" {
+			return fmt.Errorf("v2 exchange requires verified backend mTLS")
+		}
+		for _, target := range backend.AllTargets() {
+			if !strings.HasPrefix(target, "https://") {
+				return fmt.Errorf("v2 exchange requires HTTPS backend")
+			}
+		}
+	}
 	if err := fr.Route.ValidateGrantCache(); err != nil {
 		return fmt.Errorf("route %s %s: %w", fr.Method, fr.Path, err)
 	}
@@ -809,6 +828,7 @@ func (r *Router) setupToken(rt *route, fr config.FlatRoute, cfg *config.Config, 
 		Mode:              fr.Route.AuthValidate.Mode,
 		Endpoint:          fr.Route.AuthValidate.IntrospectionEndpoint,
 		RequiredScope:     fr.Route.AuthValidate.RequiredScope,
+		CredentialProfile: fr.Route.AuthValidate.CredentialProfile, ResourceNamespace: fr.Route.AuthValidate.ResourceNamespace,
 		SellerPathParam:   fr.Route.AuthValidate.SellerPathParam,
 		ResourcePathParam: fr.Route.AuthValidate.ResourcePathParam,
 		PlatformResource:  fr.Route.Authz != nil && fr.Route.Authz.ScopeType == "platform" && len(fr.Route.Authz.AnyOf) == 0,

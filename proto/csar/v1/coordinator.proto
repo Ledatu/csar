@@ -317,6 +317,8 @@ message AuthValidateConfigProto {
   string seller_path_param = 20;
   repeated AuthValidateConfigProto methods = 21;
   string resource_path_param = 22;
+  string credential_profile = 23;
+  string resource_namespace = 24;
 }
 
 // ---------------------------------------------------------------------------

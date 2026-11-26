@@ -1,3 +1,24 @@
+## Namespace-aware delegation v2 (U08/U09, source only)
+
+Distinct grant-exchange-v2/discovery-v2/resource-v2 modes require exact profile,
+namespace, audience, scope and matched resource parameters. Core v2 responses
+must strictly echo every binding and a classified owner/caller, original grant
+revision and fresh deadline; v1 responses, duplicate/unknown fields and incomplete
+snapshots deny. Resource use additionally binds the issuer's authorized ScopeRef
+to the exact Authz branch that actually checks access before backend/cache use.
+All v2 credential introspection is per request; exchange/discovery response caches
+are forbidden. Exchange forwards only its fresh proof over verified backend mTLS.
+
+The existing policy capability registry now advertises
+`csar.delegation_contract_version=2`. Coordinator subscribers must advertise it
+before receiving active v2 routes, including named/selected policies. Full wire
+snapshots retain profile/namespace on new coordinator protobuf tags 23/24; all old
+tags remain stable. Missing required fields/version metadata retain the last good
+router, while explicit versioned removal works. Router rebuilds revalidate v2
+bindings and TLS/authz dependencies independently of a helper's validation.
+Core is pinned to merged #48. No deployed route/config, Redis state/limits,
+credential producer or outbound Telegram-ID JWT bridge is changed.
+
 ## Uniform caller envelope compatibility — source only
 
 Pins merged Core34bbe3cf so verified caller/origin envelopes can carry bounded
