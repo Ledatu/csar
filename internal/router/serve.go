@@ -175,6 +175,12 @@ func (r *Router) serveWithIPCheck(w http.ResponseWriter, req *http.Request, rt *
 // here before any backend dispatch, which makes it the one place guaranteed to
 // run on every proxied request.
 func (r *Router) serveAfterJWT(w http.ResponseWriter, req *http.Request, rt *route) {
+	req = withOriginBinding(req, rt.config.OriginBinding == "account")
+	// Account MCP is stateless JSON. A client offering both JSON and SSE permits
+	// JSON negotiation; actual streaming/upgrade requests remain unsupported.
+	if rt.config.OriginBinding == "account" && req.Method == http.MethodPost && req.Header.Get("Upgrade") == "" && strings.HasPrefix(req.Header.Get("Content-Type"), "application/json") && strings.Contains(req.Header.Get("Accept"), "application/json") {
+		req.Header.Set("Accept", "application/json")
+	}
 	if authn.RejectUnconsumedOrigin(req) != nil {
 		apierror.New(apierror.CodeAuthFailed, http.StatusUnauthorized, "unsupported origin context").Write(w)
 		return
@@ -574,12 +580,16 @@ func (r *Router) servePipeline(w http.ResponseWriter, req *http.Request, rt *rou
 
 func (r *Router) serveUpstream(w http.ResponseWriter, req *http.Request, rt *route) {
 	if r.originReceivers[rt.routeKey] != "" {
-		_, resource, err := r.verifiedTenantSource(req)
+		_, resource, account, err := r.verifiedOriginSource(req, rt.config.OriginBinding == "account")
 		if err != nil || isStreamingRequest(req) {
 			apierror.New(apierror.CodeAuthFailed, http.StatusUnauthorized, "verified origin source expired or unsupported").Write(w)
 			return
 		}
-		req.Header.Set(gatewayctx.HeaderTenant, resource)
+		if account == nil {
+			req.Header.Set(gatewayctx.HeaderTenant, resource)
+		} else {
+			req.Header.Del(gatewayctx.HeaderTenant)
+		}
 	}
 	// A throttle wait may outlive a proof that was valid at ingress.
 	if validateOriginResource(req) != nil {

@@ -16,7 +16,7 @@ func (v *TokenValidator) wrapGrantV2(cfg TokenConfig, next http.Handler) http.Ha
 		gatewayctx.StripTrusted(r.Header)
 		purpose := strings.TrimSuffix(cfg.Mode, "-v2")
 		source, other := gatewayctx.HeaderCsarAuthorization, "Authorization"
-		if purpose == authntokens.GrantExchange {
+		if purpose == authntokens.GrantExchange || purpose == authntokens.AccessResource {
 			source, other = other, source
 		}
 		raw, ok := strings.CutPrefix(r.Header.Get(source), "Bearer ")
@@ -25,7 +25,7 @@ func (v *TokenValidator) wrapGrantV2(cfg TokenConfig, next http.Handler) http.Ha
 			return
 		}
 		in := authntokens.DelegationRequestV2{Version: 2, Token: raw, Purpose: purpose, ProfileID: cfg.CredentialProfile, Audience: cfg.Audiences[0], Scope: cfg.RequiredScope, Namespace: cfg.ResourceNamespace}
-		if purpose == authntokens.GrantResource {
+		if purpose == authntokens.GrantResource || purpose == authntokens.AccessResource {
 			in.Resource = &authntokens.ResourceRef{Namespace: cfg.ResourceNamespace, ID: authzmw.PathVarsFromContext(r.Context())[cfg.ResourcePathParam]}
 		}
 		if in.Validate() != nil {
@@ -60,7 +60,7 @@ func (v *TokenValidator) wrapGrantV2(cfg TokenConfig, next http.Handler) http.Ha
 			rejectGrant(w, 403)
 			return
 		}
-		forwarded := withSource(r, out.Identity, out.ExpiresAt)
+		forwarded := withAccountSource(r, out.Identity, out.ExpiresAt, &authntokens.AccountBinding{Kind: "credential", ProfileID: out.ProfileID, ProfileRevision: out.ProfileRevision, Audience: out.Audience})
 		if out.AuthorizedScope != nil {
 			forwarded = forwarded.WithContext(authzmw.WithRequiredScope(forwarded.Context(), out.Identity.EffectiveSubject, *out.AuthorizedScope))
 		}

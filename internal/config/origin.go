@@ -49,3 +49,18 @@ func (c *Config) HasOriginReceivers() bool {
 	}
 	return false
 }
+
+// Account origin is an explicitly separate control-plane binding. A missing
+// field remains tenant-only; it never infers account mode from an absent tenant.
+func (r *RouteConfig) ValidateOriginBinding() error {
+	if r.OriginBinding == "" || r.OriginBinding == "tenant" {
+		return nil
+	}
+	if r.OriginBinding != "account" || r.OriginReceiver == "" || r.AuthValidate == nil || r.Tenant != nil || r.Cache != nil || r.UsageBudget != nil {
+		return fmt.Errorf("account origin requires explicit receiver/authentication without tenant, cache or usage budget")
+	}
+	if r.Retry != nil && r.Retry.MaxAttempts != 1 || r.TransparentRetryEnabled() {
+		return fmt.Errorf("account origin forbids request replay")
+	}
+	return nil
+}

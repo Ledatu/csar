@@ -404,6 +404,12 @@ func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_Su
 		if cfg.AuthValidateNeedsDelegationV2(routes[i].Route.AuthValidate) && metadata[config.DelegationV2Capability] != "2" {
 			return status.Error(codes.FailedPrecondition, "router does not support v2 delegation policies")
 		}
+		if cfg.AuthValidateNeedsAccessResource(routes[i].Route.AuthValidate) && metadata[config.AccessResourceCapability] != "1" {
+			return status.Error(codes.FailedPrecondition, "router does not support direct access resource policies")
+		}
+		if routes[i].Route.OriginBinding == "account" && metadata[config.AccountOriginCapability] != "1" {
+			return status.Error(codes.FailedPrecondition, "router does not support account origin policies")
+		}
 		if routes[i].Route.AuditRelease && metadata[config.AuditReleaseCapability] != "1" {
 			return status.Error(codes.FailedPrecondition, "router does not support audit release policies")
 		}
@@ -601,8 +607,8 @@ func routeEntryToProto(r *statestore.RouteEntry) *csarv1.RouteConfig {
 		Path:           r.Path,
 		Method:         r.Method,
 		TargetUrl:      r.Route.Backend.TargetURL,
-		OriginReceiver: r.Route.OriginReceiver,
-		AuditRelease:   r.Route.AuditRelease,
+		OriginReceiver: r.Route.OriginReceiver, OriginBinding: proto.String(r.Route.OriginBinding),
+		AuditRelease: r.Route.AuditRelease,
 	}
 
 	if r.Route.Resilience != nil {

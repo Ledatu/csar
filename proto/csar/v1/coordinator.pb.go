@@ -593,8 +593,10 @@ type RouteConfig struct {
 	UsageBudgetOwner       uint32               `protobuf:"varint,35,opt,name=usage_budget_owner,json=usageBudgetOwner,proto3" json:"usage_budget_owner,omitempty"`
 	UsageBudgetOwnerSeller uint32               `protobuf:"varint,36,opt,name=usage_budget_owner_seller,json=usageBudgetOwnerSeller,proto3" json:"usage_budget_owner_seller,omitempty"`
 	UsageBudgetFleet       uint32               `protobuf:"varint,37,opt,name=usage_budget_fleet,json=usageBudgetFleet,proto3" json:"usage_budget_fleet,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// Empty retains tenant semantics; account requires explicit capability.
+	OriginBinding *string `protobuf:"bytes,38,opt,name=origin_binding,json=originBinding,proto3,oneof" json:"origin_binding,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RouteConfig) Reset() {
@@ -870,6 +872,13 @@ func (x *RouteConfig) GetUsageBudgetFleet() uint32 {
 		return x.UsageBudgetFleet
 	}
 	return 0
+}
+
+func (x *RouteConfig) GetOriginBinding() string {
+	if x != nil && x.OriginBinding != nil {
+		return *x.OriginBinding
+	}
+	return ""
 }
 
 type BackendConfigProto struct {
@@ -4108,7 +4117,7 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\rR\x05value:\x028\x01B\x13\n" +
 	"\x11_redis_key_prefix\"=\n" +
 	"\rRouteSnapshot\x12,\n" +
-	"\x06routes\x18\x01 \x03(\v2\x14.csar.v1.RouteConfigR\x06routes\"\x8c\x0e\n" +
+	"\x06routes\x18\x01 \x03(\v2\x14.csar.v1.RouteConfigR\x06routes\"\xcb\x0e\n" +
 	"\vRouteConfig\x12\x19\n" +
 	"\broute_id\x18\x01 \x01(\tR\arouteId\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x16\n" +
@@ -4151,10 +4160,12 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x13usage_budget_caller\x18\" \x01(\rR\x11usageBudgetCaller\x12,\n" +
 	"\x12usage_budget_owner\x18# \x01(\rR\x10usageBudgetOwner\x129\n" +
 	"\x19usage_budget_owner_seller\x18$ \x01(\rR\x16usageBudgetOwnerSeller\x12,\n" +
-	"\x12usage_budget_fleet\x18% \x01(\rR\x10usageBudgetFleet\x1a:\n" +
+	"\x12usage_budget_fleet\x18% \x01(\rR\x10usageBudgetFleet\x12*\n" +
+	"\x0eorigin_binding\x18& \x01(\tH\x00R\roriginBinding\x88\x01\x01\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf1\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\x11\n" +
+	"\x0f_origin_binding\"\xf1\x02\n" +
 	"\x12BackendConfigProto\x12\x1d\n" +
 	"\n" +
 	"target_url\x18\x01 \x01(\tR\ttargetUrl\x12\x18\n" +
@@ -4689,6 +4700,7 @@ func file_proto_csar_v1_coordinator_proto_init() {
 		(*ConfigUpdate_FullConfigSnapshot)(nil),
 	}
 	file_proto_csar_v1_coordinator_proto_msgTypes[3].OneofWrappers = []any{}
+	file_proto_csar_v1_coordinator_proto_msgTypes[5].OneofWrappers = []any{}
 	file_proto_csar_v1_coordinator_proto_msgTypes[42].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

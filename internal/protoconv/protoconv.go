@@ -25,6 +25,9 @@ func FullSnapshotToConfig(snap *csarv1.FullConfigSnapshot) *config.Config {
 	}
 
 	for _, r := range snap.GetRoutes() {
+		if snap.GetPolicyVersions()[config.AccountOriginCapability] == 1 && r.OriginBinding == nil {
+			cfg.SnapshotOriginBindingMissing = true
+		}
 		rc := protoToRouteConfig(r)
 		method := strings.ToLower(r.GetMethod())
 		path := r.GetPath()
@@ -81,7 +84,7 @@ func FullSnapshotToConfig(snap *csarv1.FullConfigSnapshot) *config.Config {
 }
 
 func protoToRouteConfig(r *csarv1.RouteConfig) config.RouteConfig {
-	rc := config.RouteConfig{OriginReceiver: r.GetOriginReceiver(), AuditRelease: r.GetAuditRelease()}
+	rc := config.RouteConfig{OriginReceiver: r.GetOriginReceiver(), OriginBinding: r.GetOriginBinding(), AuditRelease: r.GetAuditRelease()}
 	if r.GetUsageBudgetName() != "" || r.UsageBudgetWindow != nil || r.GetUsageBudgetCaller() != 0 || r.GetUsageBudgetOwner() != 0 || r.GetUsageBudgetOwnerSeller() != 0 || r.GetUsageBudgetFleet() != 0 {
 		rc.UsageBudget = &config.UsageBudgetConfig{Name: r.GetUsageBudgetName(), Window: config.Duration{Duration: r.GetUsageBudgetWindow().AsDuration()}, Caller: r.GetUsageBudgetCaller(), Owner: r.GetUsageBudgetOwner(), OwnerSeller: r.GetUsageBudgetOwnerSeller(), Fleet: r.GetUsageBudgetFleet()}
 	}

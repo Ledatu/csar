@@ -173,6 +173,9 @@ message RouteConfig {
   uint32 usage_budget_owner = 35;
   uint32 usage_budget_owner_seller = 36;
   uint32 usage_budget_fleet = 37;
+
+  // Empty retains tenant semantics; account requires explicit capability.
+  optional string origin_binding = 38;
 }
 
 // ---------------------------------------------------------------------------

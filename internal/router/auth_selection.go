@@ -55,7 +55,7 @@ func (r *Router) setupTerminalAuthentication(rt *route, fr config.FlatRoute, cfg
 	switch fr.Route.AuthValidate.Mode {
 	case "session":
 		return r.setupSession(rt, fr, cfg, key, logger)
-	case "token", "mcp", "mcp-account", "delegated", "delegated-discovery", authntokens.GrantExchange, authntokens.GrantDiscovery, authntokens.GrantResource, authntokens.GrantExchangeV2, authntokens.GrantDiscoveryV2, authntokens.GrantResourceV2:
+	case "token", "mcp", "mcp-account", "delegated", "delegated-discovery", authntokens.GrantExchange, authntokens.GrantDiscovery, authntokens.GrantResource, authntokens.GrantExchangeV2, authntokens.GrantDiscoveryV2, authntokens.GrantResourceV2, authntokens.AccessResourceV2:
 		return r.setupToken(rt, fr, cfg, key, logger)
 	case "", "jwt":
 		return r.setupJWT(rt, fr, cfg, key, logger)

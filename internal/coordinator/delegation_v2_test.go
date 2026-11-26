@@ -70,3 +70,46 @@ func TestV2CapabilityWireBindingsAndRemoval(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountAndDirectCapabilitiesAndPresenceSurviveSnapshot(t *testing.T) {
+	store := statestore.NewMemoryStore()
+	defer store.Close()
+	coord := New(store, newTestLogger())
+	cfg := &config.Config{Paths: map[string]config.PathConfig{"/security": {"post": {OriginReceiver: "svc:authn", OriginBinding: "account", Backend: config.BackendConfig{TargetURL: "https://authn"}}}, "/facts/{id}": {"get": {Backend: config.BackendConfig{TargetURL: "https://facts"}, AuthValidate: &config.AuthValidateConfig{Mode: "access-resource-v2"}}}}}
+	coord.SetTopLevelConfig(cfg)
+	stream := &snapshotRecorder{}
+	metadata := map[string]string{config.OriginPolicyCapability: "1", config.DelegationV2Capability: "2"}
+	if err := coord.sendFullConfigSnapshot(stream, metadata); status.Code(err) != codes.FailedPrecondition {
+		t.Fatal("old subscriber received new semantics", err)
+	}
+	metadata[config.AccountOriginCapability] = "1"
+	metadata[config.AccessResourceCapability] = "1"
+	if err := coord.sendFullConfigSnapshot(stream, metadata); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := proto.Marshal(stream.last.GetFullConfigSnapshot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire csarv1.FullConfigSnapshot
+	if err := proto.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	restored := protoconv.FullSnapshotToConfig(&wire)
+	if restored.Paths["/security"]["post"].OriginBinding != "account" || restored.CheckPolicySnapshot(cfg.RequiredCapabilities()) != nil {
+		t.Fatal("account binding lost")
+	}
+	for _, r := range wire.Routes {
+		if r.OriginBinding == nil {
+			t.Fatal("explicit binding presence lost")
+		}
+		r.OriginBinding = nil
+	}
+	if protoconv.FullSnapshotToConfig(&wire).CheckPolicySnapshot(cfg.RequiredCapabilities()) == nil {
+		t.Fatal("dropped binding became tenant default")
+	}
+	field := (&csarv1.RouteConfig{}).ProtoReflect().Descriptor().Fields().ByName("origin_binding")
+	if field == nil || field.Number() != 38 || !field.HasPresence() {
+		t.Fatal("append-only account field missing")
+	}
+}
