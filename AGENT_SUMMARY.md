@@ -1,3 +1,12 @@
+## Matching Authn/Authz helper validation
+
+`csar-helper validate-authn` uses the explicit credential receiver schema and
+`validate-authz` the full service-capability receiver schema. CLI validation now
+matches the implemented runtimes, including secure separate owner/consent cookies,
+transactional issuer audit, pinned client TLS and per-service role ceilings.
+Older default schema readers remain fail-closed. Helpers validate configuration;
+they neither register runtime endpoints nor activate a deployed feature.
+
 ## Namespace-aware delegation v2 (U08/U09, source only)
 
 Distinct grant-exchange-v2/discovery-v2/resource-v2 modes require exact profile,
