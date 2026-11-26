@@ -374,3 +374,9 @@ A zero cap explicitly denies admission until an allowance is verified. Quota rou
 reject ordinary/transparent inline retries; each admitted request has one attempt.
 Config and runtime share policy validation. Backend causes remain in server logs,
 while client errors stay generic.
+
+## Generic usage-budget vocabulary (source only, November 26)
+- owner_tenant is the preferred YAML/JSON input; owner_seller remains compatible.
+  Normalization precedes route comparison/storage; conflicting aliases fail.
+  Canonical JSON/protobuf and physical Redis dimensions remain unchanged.
+  The pair remains owner + verified authorized tenant, never product/resource ID.

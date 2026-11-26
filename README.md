@@ -1304,7 +1304,11 @@ unsupported routers/snapshots cannot silently drop an active barrier. Upgrade
 broker-confirming ingest and the entire router/coordinator fleet before enabling.
 
 `x-csar-usage-budget` opts a tenant route into shared ingress admission with
-`name`, `window`, `caller`, `owner`, `owner_seller` and `fleet` capacities. Routes
+`name`, `window`, `caller`, `owner`, `owner_tenant` and `fleet` capacities.
+`owner_seller` remains a compatibility alias; equal aliases are accepted and
+conflicting aliases fail. Both names charge the same owner-plus-verified-tenant
+counter. Stored JSON, protobuf and Redis retain their existing `owner_seller`
+identifiers, so changing vocabulary cannot reset spending or double-charge. Routes
 sharing a policy name must use identical limits, including compatible API/MCP
 paths. Every accepted request costs one unit before KMS, cache or receipt work;
 HIT, polling and pages are charged too. Credentials, RPC IDs and body/query
