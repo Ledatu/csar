@@ -41,12 +41,12 @@ func (c *Config) validateAuthValidate(a *AuthValidateConfig, path, method string
 		if a.CookieName == "" {
 			return fmt.Errorf("path %s method %s: x-csar-authn-validate.cookie_name is required for session mode", path, method)
 		}
-	case "token", "mcp", "mcp-account", "delegated", "delegated-discovery", authntokens.GrantExchange, authntokens.GrantDiscovery, authntokens.GrantResource, authntokens.GrantExchangeV2, authntokens.GrantDiscoveryV2, authntokens.GrantResourceV2:
+	case "token", "mcp", "mcp-account", "delegated", "delegated-discovery", authntokens.GrantExchange, authntokens.GrantDiscovery, authntokens.GrantResource, authntokens.GrantExchangeV2, authntokens.GrantDiscoveryV2, authntokens.GrantResourceV2, authntokens.AccessResourceV2:
 		if authntokens.IsDelegation(a.Mode) || authntokens.IsDelegationV2(a.Mode) {
 			if len(a.Audiences) != 1 || strings.TrimSpace(a.Audiences[0]) == "" || a.SellerPathParam != "" {
 				return fmt.Errorf("path %s method %s: delegation requires one audience and forbids seller_path_param", path, method)
 			}
-			if (a.Mode == authntokens.GrantResource || a.Mode == authntokens.GrantResourceV2) != (a.ResourcePathParam != "") ||
+			if (a.Mode == authntokens.GrantResource || a.Mode == authntokens.GrantResourceV2 || a.Mode == authntokens.AccessResourceV2) != (a.ResourcePathParam != "") ||
 				(a.ResourcePathParam != "" && !strings.Contains(path, "{"+a.ResourcePathParam+"}")) {
 				return fmt.Errorf("path %s method %s: grant-resource requires a matched resource_path_param", path, method)
 			}
@@ -172,7 +172,7 @@ func (a AuthValidateConfig) CredentialSource() (string, error) {
 		return "", fmt.Errorf("MCP ingress requires a dedicated route")
 	case "delegated", "delegated-discovery", authntokens.GrantDiscovery, authntokens.GrantResource, authntokens.GrantDiscoveryV2, authntokens.GrantResourceV2:
 		return "header:" + gatewayctx.HeaderCsarAuthorization, nil
-	case "token":
+	case "token", authntokens.AccessResourceV2:
 		return "header:Authorization", nil
 	case "", "jwt":
 		if a.CookieName != "" {
@@ -214,7 +214,7 @@ func (r *RouteConfig) ValidateGrantCache() error {
 }
 
 func (a *AuthValidateConfig) RequiresDelegationV2() bool {
-	return a != nil && a.hasMode(authntokens.GrantExchangeV2, authntokens.GrantDiscoveryV2, authntokens.GrantResourceV2)
+	return a != nil && a.hasMode(authntokens.GrantExchangeV2, authntokens.GrantDiscoveryV2, authntokens.GrantResourceV2, authntokens.AccessResourceV2)
 }
 
 // Required independently on snapshot rebuilds: dropped new fields never default.
@@ -238,7 +238,7 @@ func (a *AuthValidateConfig) ValidateDelegationV2(path string) error {
 	if !authntokens.ValidProfileID(a.CredentialProfile) || !authntokens.ValidNamespace(a.ResourceNamespace) || len(a.Audiences) != 1 || !authntokens.ValidAudience(a.Audiences[0]) || !authntokens.ValidScope(a.RequiredScope) || a.SellerPathParam != "" || a.CacheTTL.Duration != 0 {
 		return fmt.Errorf("invalid required v2 delegation bindings")
 	}
-	resource := a.Mode == authntokens.GrantResourceV2
+	resource := a.Mode == authntokens.GrantResourceV2 || a.Mode == authntokens.AccessResourceV2
 	if resource != (a.ResourcePathParam != "") || resource && !strings.Contains(path, "{"+a.ResourcePathParam+"}") {
 		return fmt.Errorf("v2 resource requires a matched route parameter")
 	}
@@ -263,7 +263,7 @@ func (c *Config) ValidateRouteDelegationV2(a *AuthValidateConfig, path string, h
 	if err := c.validateAuthValidate(a, path, ""); err != nil {
 		return err
 	}
-	if a.Mode == authntokens.GrantResourceV2 && !hasAuthz {
+	if (a.Mode == authntokens.GrantResourceV2 || a.Mode == authntokens.AccessResourceV2) && !hasAuthz {
 		return fmt.Errorf("v2 resource requires authorization")
 	}
 	return nil

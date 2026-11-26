@@ -5,12 +5,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/ledatu/csar-core/authntokens"
 	"github.com/ledatu/csar-core/caller"
 )
 
 // Source is a private-context authentication result, never a client header.
 // ValidUntil also bounds the freshness lease of a cached issuer validation.
 type Source struct {
+	Account    *authntokens.AccountBinding
 	Caller     *caller.Identity
 	ValidUntil time.Time
 }
@@ -31,7 +33,17 @@ func SourceFromContext(ctx context.Context) (*Source, bool) {
 		return nil, false
 	}
 	copySource := *source
+	copySource.Account = source.Account.Clone()
 	principal := *source.Caller
 	copySource.Caller = &principal
 	return &copySource, true
+}
+
+func withAccountSource(r *http.Request, id *caller.Identity, until time.Time, b *authntokens.AccountBinding) *http.Request {
+	r = withSource(r, id, until)
+	source, _ := SourceFromContext(r.Context())
+	if source != nil {
+		source.Account = b.Clone()
+	}
+	return r.WithContext(context.WithValue(r.Context(), sourceKey{}, source))
 }

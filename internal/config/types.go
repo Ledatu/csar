@@ -75,6 +75,7 @@ func (sc *SecurityConfigs) UnmarshalYAML(value *yaml.Node) error {
 
 // Config holds the top-level CSAR configuration.
 type Config struct {
+	SnapshotOriginBindingMissing bool `yaml:"-" json:"-"`
 	// OriginPolicyVersion is snapshot provenance, never a YAML override.
 	// Zero identifies legacy coordinators that cannot preserve receiver policies.
 	OriginPolicyVersion uint32            `yaml:"-" json:"-"`
@@ -292,6 +293,7 @@ type RouteConfig struct {
 
 	// OriginReceiver binds this route to a backend service principal, independently
 	// of its access-token audience. Empty disables origin forwarding.
+	OriginBinding  string `yaml:"x-csar-origin-binding,omitempty" json:"x-csar-origin-binding,omitempty"`
 	OriginReceiver string `yaml:"x-csar-origin-receiver,omitempty" json:"x-csar-origin-receiver,omitempty"`
 
 	// Access control — per-route IP allowlist (optional).

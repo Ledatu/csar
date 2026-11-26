@@ -62,3 +62,28 @@ func TestNamedV2PolicyRequiresCapabilityAndCyclicReferenceDoesNotRecurse(t *test
 		t.Fatal("invalid cyclic configuration did not fail closed")
 	}
 }
+
+func TestDirectResourceCapabilityAndAccountControlRestrictions(t *testing.T) {
+	cfg, err := ParseBytes([]byte(strings.Replace(delegationV2YAML, "mode: grant-resource-v2", "mode: access-resource-v2", 1)))
+	if err != nil || cfg.RequiredCapabilities()[AccessResourceCapability] != 1 {
+		t.Fatal("direct operation missing capability", err)
+	}
+	if source, err := (AuthValidateConfig{Mode: authntokens.AccessResourceV2}).CredentialSource(); err != nil || source != "header:Authorization" {
+		t.Fatal(source, err)
+	}
+	route := RouteConfig{OriginReceiver: "svc:authn", OriginBinding: "account", AuthValidate: &AuthValidateConfig{Mode: "jwt"}}
+	if err := route.ValidateOriginBinding(); err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(*RouteConfig){func(r *RouteConfig) { r.OriginReceiver = "" }, func(r *RouteConfig) { r.Cache = &CacheConfig{} }, func(r *RouteConfig) { r.Tenant = &TenantConfig{} }, func(r *RouteConfig) { r.UsageBudget = &UsageBudgetConfig{} }, func(r *RouteConfig) { r.OriginBinding = "unknown" }, func(r *RouteConfig) { r.AuthValidate = nil }} {
+		bad := route
+		mutate(&bad)
+		if bad.ValidateOriginBinding() == nil {
+			t.Fatal("unsafe account control route accepted")
+		}
+	}
+	c := &Config{AuthValidatePolicies: map[string]AuthValidateConfig{"direct": {Mode: authntokens.AccessResourceV2}}}
+	if !c.AuthValidateNeedsAccessResource(&AuthValidateConfig{Use: "direct"}) {
+		t.Fatal("named direct operation dropped capability")
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledatu/csar-core/authntokens"
 	"github.com/ledatu/csar-core/caller"
 	"github.com/ledatu/csar-core/gatewayctx"
 	"github.com/ledatu/csar-core/origincontext"
@@ -46,7 +47,10 @@ func (r *Router) checkOriginRoute(rt *route, transport http.RoundTripper) error 
 	if !enabled {
 		return nil
 	}
-	if receiver == "" || !caller.ValidReference(receiver) || r.originIssuer == nil || rt.authentication == nil || rt.authzConfig == nil || rt.tenantConfig != nil {
+	if err := rt.config.ValidateOriginBinding(); err != nil {
+		return err
+	}
+	if receiver == "" || !caller.ValidReference(receiver) || r.originIssuer == nil || rt.authentication == nil || (rt.config.OriginBinding != "account" && rt.authzConfig == nil) || rt.tenantConfig != nil {
 		return fmt.Errorf("route %s: origin forwarding requires issuer, receiver, authentication and static tenant authorization", rt.routeKey)
 	}
 	tlsTransport, ok := transport.(*http.Transport)
@@ -81,7 +85,7 @@ func (r *Router) forwardOrigin(rt *route, next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		source, resource, err := r.verifiedTenantSource(req)
+		source, resource, account, err := r.verifiedOriginSource(req, rt.config.OriginBinding == "account")
 		if err != nil {
 			apierror.New(apierror.CodeAuthFailed, http.StatusUnauthorized, "verified origin source expired or unavailable").Write(w)
 			return
@@ -97,7 +101,7 @@ func (r *Router) forwardOrigin(rt *route, next http.Handler) http.Handler {
 				apierror.New(apierror.CodeAuthFailed, http.StatusBadRequest, "request cannot carry origin context").Write(w)
 				return
 			}
-			proof, err = r.originIssuer.Issue(req.Context(), &origincontext.RootRequest{Caller: source.Caller, Receiver: receiver, Resource: resource, RequestHash: hash, SourceExpiresAt: source.ValidUntil})
+			proof, err = r.originIssuer.Issue(req.Context(), &origincontext.RootRequest{Account: account, Caller: source.Caller, Receiver: receiver, Resource: resource, RequestHash: hash, SourceExpiresAt: source.ValidUntil})
 			if err != nil {
 				apierror.New(apierror.CodeUpstreamError, http.StatusBadGateway, "origin issuer unavailable").Write(w)
 				return
@@ -107,15 +111,23 @@ func (r *Router) forwardOrigin(rt *route, next http.Handler) http.Handler {
 				return
 			}
 		}
+		if proof.Claims != nil && ((account == nil) != (proof.Claims.Account == nil) || account != nil && *account != *proof.Claims.Account) {
+			apierror.New(apierror.CodeAccessDenied, http.StatusForbidden, "origin binding mismatch").Write(w)
+			return
+		}
 		if proof.Claims == nil || proof.Claims.ExpiresAt == nil || proof.Token == "" || len(proof.Token) > origincontext.MaxTokenBytes || proof.Claims.Receiver != receiver || proof.Claims.Resource != resource || !time.Now().Before(proof.Claims.ExpiresAt.Time) {
 			apierror.New(apierror.CodeAccessDenied, http.StatusForbidden, "origin binding expired or mismatched").Write(w)
 			return
 		}
-		if err := gatewayctx.SetOrigin(req.Header, &gatewayctx.Origin{Caller: proof.Claims.Origin, OperationID: proof.Claims.OperationID, ParentOperationID: proof.Claims.ParentOperationID, ExpiresAt: proof.Claims.ExpiresAt.Time}); err != nil {
+		if err := gatewayctx.SetOrigin(req.Header, &gatewayctx.Origin{Caller: proof.Claims.Origin, Account: proof.Claims.Account, OperationID: proof.Claims.OperationID, ParentOperationID: proof.Claims.ParentOperationID, ExpiresAt: proof.Claims.ExpiresAt.Time}); err != nil {
 			apierror.New(apierror.CodeUpstreamError, http.StatusBadGateway, "invalid origin metadata").Write(w)
 			return
 		}
-		req.Header.Set(gatewayctx.HeaderTenant, resource)
+		if account == nil {
+			req.Header.Set(gatewayctx.HeaderTenant, resource)
+		} else {
+			req.Header.Del(gatewayctx.HeaderTenant)
+		}
 		req.Header.Set(origincontext.HeaderForwardedAuthorization, "Bearer "+proof.Token)
 		deadline := proof.Claims.ExpiresAt.Time
 		if source.ValidUntil.Before(deadline) {
@@ -192,4 +204,33 @@ func (r *Router) validateOriginSelections(routes []config.FlatRoute) error {
 		}
 	}
 	return nil
+}
+
+func (r *Router) verifiedOriginSource(req *http.Request, accountMode bool) (*authn.Source, string, *authntokens.AccountBinding, error) {
+	if !accountMode {
+		source, resource, err := r.verifiedTenantSource(req)
+		return source, resource, nil, err
+	}
+	source, ok := authn.SourceFromContext(req.Context())
+	if !ok || req.Context().Err() != nil || source.Caller == nil || !time.Now().Before(source.ValidUntil) || req.Header.Get(gatewayctx.HeaderTenant) != "" {
+		return nil, "", nil, origincontext.ErrInvalid
+	}
+	id, err := gatewayctx.CallerFromHeaders(req.Header)
+	if err != nil || id == nil || *id != *source.Caller {
+		return nil, "", nil, origincontext.ErrInvalid
+	}
+	if claims, present := origincontext.FromContext(req.Context()); present {
+		if claims.Account == nil || claims.Account.Validate(claims.Origin) != nil || validateOriginResource(req) != nil {
+			return nil, "", nil, origincontext.ErrInvalid
+		}
+		return source, "", claims.Account.Clone(), nil
+	}
+	account := source.Account.Clone()
+	if account == nil {
+		account = &authntokens.AccountBinding{Kind: "subject"}
+	}
+	if account.Validate(source.Caller) != nil {
+		return nil, "", nil, origincontext.ErrInvalid
+	}
+	return source, "", account, nil
 }

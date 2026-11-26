@@ -1,3 +1,7 @@
+## Explicit account origin and direct-resource routing (approved §21, source only)
+
+Account routes explicitly select x-csar-origin-binding: account, have no tenant/data cache/usage budget, and preserve v2 account metadata through root and STS service hops. Static tenant behavior is unchanged. Account JSON POSTs may negotiate application/json when clients also offer SSE; actual streaming remains rejected. Direct access-resource-v2 consumes Authorization and enforces the exact returned scope on the actual Authz branch. Separate required capability keys preserve both semantics; append-only optional RouteConfig tag 38 records origin_binding presence and snapshot loss fails closed. Production, Redis, deployment and outbound Telegram-ID JWT behavior are unchanged.
+
 ## Manual credential helper receiver
 
 `validate-authn` selects the manual-aware credential receiver after Authn's

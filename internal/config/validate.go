@@ -203,6 +203,9 @@ func (c *Config) Validate() error {
 					return fmt.Errorf("path %s method %s: invalid usage budget: %w", path, method, err)
 				}
 			}
+			if err := route.ValidateOriginBinding(); err != nil {
+				return fmt.Errorf("path %s method %s: %w", path, method, err)
+			}
 			if route.OriginReceiver != "" && !caller.ValidReference(route.OriginReceiver) {
 				return fmt.Errorf("path %s method %s: invalid x-csar-origin-receiver", path, method)
 			}
@@ -289,7 +292,7 @@ func (c *Config) Validate() error {
 				if err := route.ValidateGrantCache(); err != nil {
 					return fmt.Errorf("path %s method %s: %w", path, method, err)
 				}
-				if route.Authz == nil && route.AuthValidate.hasMode(authntokens.GrantResource, authntokens.GrantResourceV2) {
+				if route.Authz == nil && route.AuthValidate.hasMode(authntokens.GrantResource, authntokens.GrantResourceV2, authntokens.AccessResourceV2) {
 					return fmt.Errorf("path %s method %s: resource delegation requires authorization", path, method)
 				}
 				if route.AuthValidate.Mode == "mcp" || route.AuthValidate.Mode == "mcp-account" || route.AuthValidate.Mode == authntokens.GrantExchange || route.AuthValidate.Mode == authntokens.GrantExchangeV2 {
