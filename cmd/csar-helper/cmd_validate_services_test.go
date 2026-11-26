@@ -138,3 +138,36 @@ func TestAuthnHelperValidatesPublicOAuthProfiles(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthnHelperValidatesIdentityPolicy(t *testing.T) {
+	old := validateAuthnPath
+	t.Cleanup(func() { validateAuthnPath = old })
+	validateAuthnPath = filepath.Join(t.TempDir(), "config.yaml")
+	policy := `browser_directory:
+  version: 1
+  providers: {external: {id_format: opaque}}
+identity_import:
+  version: 1
+  enabled: true
+  router_peer_cn: import-router
+  lock_database_dsn: postgres://session-fixture
+  importers:
+    app:
+      subject: svc:app-importer
+      source: unrelated-app
+      providers: [external]
+      max_users: 10
+      apply: {enabled: true, actions: [create], max_creates: 2, max_links: 0}
+`
+	for _, tc := range []struct {
+		body  string
+		valid bool
+	}{{helperAuthnReceiver + policy, true}, {helperAuthnReceiver + strings.Replace(policy, "providers: [external]", "providers: [email]", 1), false}, {helperAuthnReceiver + strings.Replace(policy, "router_peer_cn: import-router", "router_peer_cn: ''", 1), false}, {helperAuthnReceiver + strings.Replace(policy, "id_format: opaque", "id_format: opaque, unknown: true", 1), false}} {
+		if err := os.WriteFile(validateAuthnPath, []byte(tc.body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateAuthnCmd.RunE(validateAuthnCmd, nil); (err == nil) != tc.valid {
+			t.Fatal(tc.valid, err)
+		}
+	}
+}

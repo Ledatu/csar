@@ -380,3 +380,8 @@ while client errors stay generic.
   Normalization precedes route comparison/storage; conflicting aliases fail.
   Canonical JSON/protobuf and physical Redis dimensions remain unchanged.
   The pair remains owner + verified authorized tenant, never product/resource ID.
+
+## Matching explicit identity-policy helper (source only, November 26)
+- validate-authn uses Core's identity-policy receiver after runtime implementation.
+  Directory/provider/projection restrictions and importer caller/provider/apply
+  bounds are validated without activating endpoints or changing deployment.
