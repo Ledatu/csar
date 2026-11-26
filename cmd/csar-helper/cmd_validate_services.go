@@ -20,7 +20,7 @@ var validateAuthnCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("reading config: %w", err)
 		}
-		if _, err := authnconfig.LoadFromBytesWithIdentityPolicy(data); err != nil {
+		if _, err := authnconfig.LoadFromBytesWithProfileAdmission(data); err != nil {
 			return fmt.Errorf("authn config validation failed: %w", err)
 		}
 		fmt.Println("OK: authn config is valid")
