@@ -396,3 +396,10 @@ API `token` validation retains introspection/cache, seller/scope/caller binding
 and credential stripping. The outbound upstream JWT bridge is unchanged. Old
 route bundles must not be loaded into this binary; coordinate the generic bundle
 and receiver rollout separately. No production, Redis or deployment edits.
+
+## Profile admission config reader — review preparation
+
+The Authn helper uses Core's explicit profile-admission-compatible loader. Earlier
+loaders still reject the policy. Publish/validate coordinated configs only with
+this pinned helper and matching Authn runtime; this source does not publish or
+activate any configuration. Router authentication/forwarding/JWT bridge are unchanged.
