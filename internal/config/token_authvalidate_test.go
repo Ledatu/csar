@@ -44,8 +44,8 @@ paths:
 	}
 }
 
-func TestMCPTransportValidation(t *testing.T) {
-	const valid = `
+func TestRetiredMCPModesRejected(t *testing.T) {
+	const old = `
 listen_addr: ":8080"
 backend_tls_policies:
   router-client:
@@ -71,20 +71,10 @@ paths:
         target_url: https://seller-mcp
         tls: router-client
 `
-	if _, err := Load(writeTemp(t, valid)); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct{ name, before, after string }{
-		{"plaintext report destination", "https://seller-mcp", "http://seller-mcp"},
-		{"missing backend client identity", "        tls: router-client", ""},
-		{"unverified introspection", "    cert_file:", "    insecure_skip_verify: true\n    cert_file:"},
-		{"cached exchange", "        mode: mcp", "        mode: mcp\n        cache_ttl: 10s"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, err := Load(writeTemp(t, strings.Replace(valid, tc.before, tc.after, 1))); err == nil {
-				t.Fatal("accepted unsafe MCP transport configuration")
-			}
-		})
+	for _, mode := range []string{"mcp", "mcp-account", "delegated", "delegated-discovery"} {
+		if _, err := Load(writeTemp(t, strings.Replace(old, "mode: mcp", "mode: "+mode, 1))); err == nil {
+			t.Fatal("retired mode accepted", mode)
+		}
 	}
 }
 

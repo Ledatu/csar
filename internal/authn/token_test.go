@@ -67,3 +67,17 @@ func TestTokenValidatorScopesCabinetAndStripsCredential(t *testing.T) {
 		t.Fatalf("foreign cabinet status=%d, want 403", rec.Code)
 	}
 }
+
+func TestRetiredMCPModesNeverReachIssuerOrBackend(t *testing.T) {
+	for _, mode := range []string{"mcp", "mcp-account", "delegated", "delegated-discovery"} {
+		validator := NewTokenValidator(slog.Default(), http.DefaultClient)
+		wrapped := validator.Wrap(TokenConfig{Mode: mode, Endpoint: "https://must-not-be-called.invalid"}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("retired credential reached backend") }))
+		r := httptest.NewRequest("POST", "/rpc", nil)
+		r.Header.Set("Authorization", "Bearer aurum_pat_fake")
+		w := httptest.NewRecorder()
+		wrapped.ServeHTTP(w, r)
+		if w.Code != 401 {
+			t.Fatal(mode, w.Code)
+		}
+	}
+}

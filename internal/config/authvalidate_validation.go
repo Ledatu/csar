@@ -41,7 +41,7 @@ func (c *Config) validateAuthValidate(a *AuthValidateConfig, path, method string
 		if a.CookieName == "" {
 			return fmt.Errorf("path %s method %s: x-csar-authn-validate.cookie_name is required for session mode", path, method)
 		}
-	case "token", "mcp", "mcp-account", "delegated", "delegated-discovery", authntokens.GrantExchange, authntokens.GrantDiscovery, authntokens.GrantResource, authntokens.GrantExchangeV2, authntokens.GrantDiscoveryV2, authntokens.GrantResourceV2, authntokens.AccessResourceV2:
+	case "token", authntokens.GrantExchange, authntokens.GrantDiscovery, authntokens.GrantResource, authntokens.GrantExchangeV2, authntokens.GrantDiscoveryV2, authntokens.GrantResourceV2, authntokens.AccessResourceV2:
 		if authntokens.IsDelegation(a.Mode) || authntokens.IsDelegationV2(a.Mode) {
 			if len(a.Audiences) != 1 || strings.TrimSpace(a.Audiences[0]) == "" || a.SellerPathParam != "" {
 				return fmt.Errorf("path %s method %s: delegation requires one audience and forbids seller_path_param", path, method)
@@ -168,9 +168,9 @@ func (a AuthValidateConfig) CredentialSource() (string, error) {
 			return "", fmt.Errorf("session credential source requires a cookie_name")
 		}
 		return "cookie:" + a.CookieName, nil
-	case "mcp", "mcp-account", authntokens.GrantExchange, authntokens.GrantExchangeV2:
-		return "", fmt.Errorf("MCP ingress requires a dedicated route")
-	case "delegated", "delegated-discovery", authntokens.GrantDiscovery, authntokens.GrantResource, authntokens.GrantDiscoveryV2, authntokens.GrantResourceV2:
+	case authntokens.GrantExchange, authntokens.GrantExchangeV2:
+		return "", fmt.Errorf("grant exchange requires a dedicated route")
+	case authntokens.GrantDiscovery, authntokens.GrantResource, authntokens.GrantDiscoveryV2, authntokens.GrantResourceV2:
 		return "header:" + gatewayctx.HeaderCsarAuthorization, nil
 	case "token", authntokens.AccessResourceV2:
 		return "header:Authorization", nil

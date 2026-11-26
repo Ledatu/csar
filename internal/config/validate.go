@@ -295,17 +295,14 @@ func (c *Config) Validate() error {
 				if route.Authz == nil && route.AuthValidate.hasMode(authntokens.GrantResource, authntokens.GrantResourceV2, authntokens.AccessResourceV2) {
 					return fmt.Errorf("path %s method %s: resource delegation requires authorization", path, method)
 				}
-				if route.AuthValidate.Mode == "mcp" || route.AuthValidate.Mode == "mcp-account" || route.AuthValidate.Mode == authntokens.GrantExchange || route.AuthValidate.Mode == authntokens.GrantExchangeV2 {
-					if route.AuthValidate.Mode == "mcp" && route.Authz == nil {
-						return fmt.Errorf("path %s method %s: cabinet MCP delegation requires authorization", path, method)
-					}
+				if route.AuthValidate.Mode == authntokens.GrantExchange || route.AuthValidate.Mode == authntokens.GrantExchangeV2 {
 					tls := route.Backend.TLS
 					if tls == nil || tls.InsecureSkipVerify || tls.CertFile == "" || tls.KeyFile == "" {
-						return fmt.Errorf("path %s method %s: forwarding MCP delegation requires verified backend mTLS", path, method)
+						return fmt.Errorf("path %s method %s: forwarding grant exchange requires verified backend mTLS", path, method)
 					}
 					for _, target := range route.Backend.AllTargets() {
 						if !strings.HasPrefix(target, "https://") {
-							return fmt.Errorf("path %s method %s: MCP backend must use HTTPS", path, method)
+							return fmt.Errorf("path %s method %s: grant exchange backend must use HTTPS", path, method)
 						}
 					}
 				}

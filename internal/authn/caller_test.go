@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -73,8 +72,6 @@ func TestOpaqueTokenCallerBindingCacheAndLegacy(t *testing.T) {
 		{"unregistered", "token", caller.APIKey, func(r *tokenResult) {
 			r.Identity.CallerKind, r.Identity.CallerID, r.Identity.Assurance = caller.Unknown, "", caller.Legacy
 		}, 204},
-		{"MCP access", "mcp-account", caller.OAuthAccess, nil, 204},
-		{"MCP proof", "delegated", caller.DelegationProof, nil, 204},
 		{"foreign subject", "token", caller.APIKey, func(r *tokenResult) { r.Identity.EffectiveSubject = "foreign" }, 502},
 		{"foreign credential", "token", caller.APIKey, func(r *tokenResult) { r.Identity.CredentialID = "foreign" }, 502},
 		{"wrong credential type", "token", caller.STS, nil, 502},
@@ -82,7 +79,7 @@ func TestOpaqueTokenCallerBindingCacheAndLegacy(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			result := tokenResult{Active: true, Subject: "user:1", CredentialID: "key:1", SellerID: "123", Scopes: []string{"analytics:read"},
-				ExpiresAt: time.Now().Add(time.Hour), Identity: tokenCaller(test.kind), AccountGrant: true, DelegatedToken: "aurum_dlg_" + strings.Repeat("p", 43)}
+				ExpiresAt: time.Now().Add(time.Hour), Identity: tokenCaller(test.kind)}
 			if test.mutate != nil {
 				test.mutate(&result)
 			}
@@ -117,12 +114,7 @@ func TestOpaqueTokenCallerBindingCacheAndLegacy(t *testing.T) {
 			for range 2 {
 				r := httptest.NewRequest(http.MethodGet, "/reports/123", nil)
 				header, raw := "Authorization", "aurum_pat_fake"
-				if test.mode == "mcp-account" {
-					raw = "aurum_mcp_fake"
-				}
-				if test.mode == "delegated" {
-					header, raw = gatewayctx.HeaderCsarAuthorization, "aurum_dlg_fake"
-				}
+
 				r.Header.Set(header, "Bearer "+raw)
 				r.Header.Set(gatewayctx.HeaderCaller, "forged")
 				r.Header.Set(gatewayctx.HeaderOriginCaller, "forged")

@@ -385,3 +385,14 @@ while client errors stay generic.
 - validate-authn uses Core's identity-policy receiver after runtime implementation.
   Directory/provider/projection restrictions and importer caller/provider/apply
   bounds are validated without activating endpoints or changing deployment.
+
+## Obsolete MCP validation modes retired — source only
+
+`mcp`, `mcp-account`, `delegated` and `delegated-discovery` configuration and their
+application-specific proof/prefix adapters are removed. Both config validation
+and direct validator construction deny retired modes. Generic delegation v1/v2,
+resource access, session/JWT and signed-origin paths remain. Existing personal
+API `token` validation retains introspection/cache, seller/scope/caller binding
+and credential stripping. The outbound upstream JWT bridge is unchanged. Old
+route bundles must not be loaded into this binary; coordinate the generic bundle
+and receiver rollout separately. No production, Redis or deployment edits.
