@@ -1852,6 +1852,8 @@ type AuthValidateConfigProto struct {
 	SellerPathParam       string                     `protobuf:"bytes,20,opt,name=seller_path_param,json=sellerPathParam,proto3" json:"seller_path_param,omitempty"`
 	Methods               []*AuthValidateConfigProto `protobuf:"bytes,21,rep,name=methods,proto3" json:"methods,omitempty"`
 	ResourcePathParam     string                     `protobuf:"bytes,22,opt,name=resource_path_param,json=resourcePathParam,proto3" json:"resource_path_param,omitempty"`
+	CredentialProfile     string                     `protobuf:"bytes,23,opt,name=credential_profile,json=credentialProfile,proto3" json:"credential_profile,omitempty"`
+	ResourceNamespace     string                     `protobuf:"bytes,24,opt,name=resource_namespace,json=resourceNamespace,proto3" json:"resource_namespace,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -2036,6 +2038,20 @@ func (x *AuthValidateConfigProto) GetMethods() []*AuthValidateConfigProto {
 func (x *AuthValidateConfigProto) GetResourcePathParam() string {
 	if x != nil {
 		return x.ResourcePathParam
+	}
+	return ""
+}
+
+func (x *AuthValidateConfigProto) GetCredentialProfile() string {
+	if x != nil {
+		return x.CredentialProfile
+	}
+	return ""
+}
+
+func (x *AuthValidateConfigProto) GetResourceNamespace() string {
+	if x != nil {
+		return x.ResourceNamespace
 	}
 	return ""
 }
@@ -4228,7 +4244,7 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x13GlobalThrottleProto\x12\x10\n" +
 	"\x03rps\x18\x01 \x01(\x01R\x03rps\x12\x14\n" +
 	"\x05burst\x18\x02 \x01(\x05R\x05burst\x124\n" +
-	"\bmax_wait\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\amaxWait\"\xe3\b\n" +
+	"\bmax_wait\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\amaxWait\"\xc1\t\n" +
 	"\x17AuthValidateConfigProto\x12\x10\n" +
 	"\x03use\x18\x01 \x01(\tR\x03use\x12\x19\n" +
 	"\bjwks_url\x18\x02 \x01(\tR\ajwksUrl\x12\x16\n" +
@@ -4255,7 +4271,9 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x0erequired_scope\x18\x13 \x01(\tR\rrequiredScope\x12*\n" +
 	"\x11seller_path_param\x18\x14 \x01(\tR\x0fsellerPathParam\x12:\n" +
 	"\amethods\x18\x15 \x03(\v2 .csar.v1.AuthValidateConfigProtoR\amethods\x12.\n" +
-	"\x13resource_path_param\x18\x16 \x01(\tR\x11resourcePathParam\x1aA\n" +
+	"\x13resource_path_param\x18\x16 \x01(\tR\x11resourcePathParam\x12-\n" +
+	"\x12credential_profile\x18\x17 \x01(\tR\x11credentialProfile\x12-\n" +
+	"\x12resource_namespace\x18\x18 \x01(\tR\x11resourceNamespace\x1aA\n" +
 	"\x13RequiredClaimsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a@\n" +

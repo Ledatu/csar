@@ -58,6 +58,12 @@ func (c *Config) resolveAuthValidate(input AuthValidateConfig, terminal bool) (A
 	if input.IntrospectionTLS != "" {
 		merged.IntrospectionTLS = input.IntrospectionTLS
 	}
+	if input.CredentialProfile != "" {
+		merged.CredentialProfile = input.CredentialProfile
+	}
+	if input.ResourceNamespace != "" {
+		merged.ResourceNamespace = input.ResourceNamespace
+	}
 	if input.RequiredScope != "" {
 		merged.RequiredScope = input.RequiredScope
 	}

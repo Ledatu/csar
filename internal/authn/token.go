@@ -17,6 +17,7 @@ import (
 	"github.com/ledatu/csar-core/authntokens"
 	"github.com/ledatu/csar-core/caller"
 	"github.com/ledatu/csar-core/gatewayctx"
+	"github.com/ledatu/csar-core/httpx"
 	"github.com/ledatu/csar/internal/apierror"
 	"github.com/ledatu/csar/pkg/middleware/authzmw"
 )
@@ -27,6 +28,8 @@ const maxTokenCacheEntries = 10000
 type TokenConfig struct {
 	Mode              string
 	Endpoint          string
+	CredentialProfile string
+	ResourceNamespace string
 	RequiredScope     string
 	PlatformResource  bool
 	ResourcePathParam string
@@ -69,6 +72,9 @@ func NewTokenValidator(logger *slog.Logger, client *http.Client) *TokenValidator
 }
 
 func (v *TokenValidator) Wrap(cfg TokenConfig, next http.Handler) http.Handler {
+	if authntokens.IsDelegationV2(cfg.Mode) {
+		return v.wrapGrantV2(cfg, next)
+	}
 	if authntokens.IsDelegation(cfg.Mode) {
 		return v.wrapGrant(cfg, next)
 	}
@@ -271,6 +277,9 @@ func (v *TokenValidator) postIntrospection(r *http.Request, endpoint string, pay
 		return fmt.Errorf("introspection returned HTTP %d", resp.StatusCode)
 	}
 
+	if _, v2 := result.(*authntokens.DelegationResultV2); v2 {
+		return httpx.ReadStrictJSON(&http.Request{Body: http.MaxBytesReader(nil, resp.Body, 16<<10)}, result)
+	}
 	if err := decodeTokenResponse(resp.Body, result); err != nil {
 		return fmt.Errorf("decode introspection: %w", err)
 	}
