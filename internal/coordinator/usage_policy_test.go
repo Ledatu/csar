@@ -15,11 +15,19 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"gopkg.in/yaml.v3"
 )
 
 func TestUsagePolicySurvivesStoreWireAndCapability(t *testing.T) {
 	budget := &config.UsageBudgetConfig{Name: "reports", Window: config.Duration{Duration: time.Minute}, Caller: 2, Owner: 3, OwnerSeller: 3, Fleet: 10}
-	cfg := &config.Config{Paths: map[string]config.PathConfig{"/report": {"get": {Backend: config.BackendConfig{TargetURL: "https://reports"}, UsageBudget: budget}}}}
+	var generic config.UsageBudgetConfig
+	if err := yaml.Unmarshal([]byte("name: reports\nwindow: 1m\ncaller: 2\nowner: 3\nowner_tenant: 3\nfleet: 10\n"), &generic); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(&generic, budget) {
+		t.Fatal("generic policy failed canonical normalization")
+	}
+	cfg := &config.Config{Paths: map[string]config.PathConfig{"/report": {"get": {Backend: config.BackendConfig{TargetURL: "https://reports"}, UsageBudget: &generic}}}}
 	entry := configsource.ConfigToRouteEntries(cfg)["GET:/report"]
 	data, err := json.Marshal(entry)
 	if err != nil {

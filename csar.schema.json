@@ -1880,13 +1880,15 @@
         "x-csar-usage-budget": {
           "type": "object", "additionalProperties": false,
           "description": "Shared aggregate ingress budget. Reuse the same name and limits across compatible API/MCP routes. All four dimensions are mandatory; no caller kind receives an implicit exemption.",
-          "required": ["name", "window", "caller", "owner", "owner_seller", "fleet"],
+          "required": ["name", "window", "caller", "owner", "fleet"],
+          "anyOf": [{"required": ["owner_tenant"]}, {"required": ["owner_seller"]}],
           "properties": {
             "name": { "type": "string", "pattern": "^[A-Za-z0-9_.:-]{1,64}$" },
             "window": { "type": "string", "description": "Fixed usage window from 1s to 24h." },
             "caller": { "type": "integer", "minimum": 1, "maximum": 1000000000 },
             "owner": { "type": "integer", "minimum": 1, "maximum": 1000000000 },
-            "owner_seller": { "type": "integer", "minimum": 1, "maximum": 1000000000 },
+            "owner_tenant": { "type": "integer", "minimum": 1, "maximum": 1000000000, "description": "Owner plus verified authorized tenant capacity; preferred input name. Conflicting aliases fail validation." },
+            "owner_seller": { "type": "integer", "minimum": 1, "maximum": 1000000000, "description": "Compatibility alias for owner_tenant; retains the same physical counter." },
             "fleet": { "type": "integer", "minimum": 1, "maximum": 1000000000 }
           }
         },
