@@ -114,3 +114,27 @@ func TestServiceValidationCLIUsesMatchingReceiverPreflight(t *testing.T) {
 		})
 	}
 }
+
+func TestAuthnHelperValidatesPublicOAuthProfiles(t *testing.T) {
+	old := validateAuthnPath
+	t.Cleanup(func() { validateAuthnPath = old })
+	validateAuthnPath = filepath.Join(t.TempDir(), "public.yaml")
+	public := `  public_oauth:
+    version: 1
+    enabled: true
+    dynamic_clients: true
+    authorization_endpoint: https://api.example.test/oauth/authorize
+    token_endpoint: https://api.example.test/oauth/token
+    registration_endpoint: https://api.example.test/oauth/register
+    profiles: [{profile_id: facts, resource_aliases: [https://facts.example.test/]}]
+`
+	for _, body := range []string{helperAuthnReceiver + public, helperAuthnReceiver + strings.Replace(public, "profile_id: facts", "profile_id: missing", 1), helperAuthnReceiver + strings.Replace(public, "https://facts.example.test/", "https://facts.example.test", 1)} {
+		if err := os.WriteFile(validateAuthnPath, []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+		err := validateAuthnCmd.RunE(validateAuthnCmd, nil)
+		if (err == nil) != (body == helperAuthnReceiver+public) {
+			t.Fatal("public policy validation mismatch", err)
+		}
+	}
+}
