@@ -40,6 +40,7 @@ credentials:
   profiles:
     - id: facts
       revision: 2
+      manual_issuance: {family: connection, max_ttl: 24h}
       accepted_grant_revisions: [1, 2]
       audience: https://facts.example.test
       scopes: [{scope: 'facts:read', decision_profile: facts-reader}]

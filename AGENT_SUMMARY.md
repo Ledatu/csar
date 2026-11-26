@@ -1,3 +1,10 @@
+## Manual credential helper receiver
+
+`validate-authn` selects the manual-aware credential receiver after Authn's
+profile-controlled issuance implementation. The older receiver deliberately
+rejects enabled manual policy. CLI tests validate a real connection policy with
+secure sessions/TLS/audit; no runtime/deployed configuration is activated.
+
 ## Matching Authn/Authz helper validation
 
 `csar-helper validate-authn` uses the explicit credential receiver schema and
