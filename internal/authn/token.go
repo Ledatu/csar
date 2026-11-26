@@ -41,17 +41,14 @@ type TokenConfig struct {
 }
 
 type tokenResult struct {
-	validUntil     time.Time
-	Identity       *caller.Identity `json:"identity,omitempty"`
-	AccountGrant   bool             `json:"account_grant"`
-	Discovery      bool             `json:"discovery"`
-	DelegatedToken string           `json:"delegated_token"`
-	Active         bool             `json:"active"`
-	Subject        string           `json:"subject"`
-	CredentialID   string           `json:"credential_id"`
-	SellerID       string           `json:"seller_id"`
-	Scopes         []string         `json:"scopes"`
-	ExpiresAt      time.Time        `json:"expires_at"`
+	validUntil   time.Time
+	Identity     *caller.Identity `json:"identity,omitempty"`
+	Active       bool             `json:"active"`
+	Subject      string           `json:"subject"`
+	CredentialID string           `json:"credential_id"`
+	SellerID     string           `json:"seller_id"`
+	Scopes       []string         `json:"scopes"`
+	ExpiresAt    time.Time        `json:"expires_at"`
 }
 
 type tokenCacheEntry struct {
@@ -78,6 +75,12 @@ func (v *TokenValidator) Wrap(cfg TokenConfig, next http.Handler) http.Handler {
 	if authntokens.IsDelegation(cfg.Mode) {
 		return v.wrapGrant(cfg, next)
 	}
+	if cfg.Mode != "" && cfg.Mode != "token" {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gatewayctx.StripTrusted(r.Header)
+			v.reject(w, http.StatusUnauthorized, "unsupported credential mode")
+		})
+	}
 	if cfg.CacheTTL <= 0 {
 		cfg.CacheTTL = defaultTokenCacheTTL
 	}
@@ -87,12 +90,6 @@ func (v *TokenValidator) Wrap(cfg TokenConfig, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gatewayctx.StripTrusted(r.Header)
 		header, prefix := "Authorization", "aurum_pat_"
-		switch cfg.Mode {
-		case "mcp", "mcp-account":
-			prefix = "aurum_mcp_"
-		case "delegated", "delegated-discovery":
-			header, prefix = gatewayctx.HeaderCsarAuthorization, "aurum_dlg_"
-		}
 		if len(r.Header.Values(header)) != 1 {
 			v.reject(w, http.StatusUnauthorized, "one bearer credential required")
 			return
@@ -124,42 +121,18 @@ func (v *TokenValidator) Wrap(cfg TokenConfig, next http.Handler) http.Handler {
 			return
 		}
 		vars := authzmw.PathVarsFromContext(r.Context())
-		switch cfg.Mode {
-		case "mcp":
-			if result.SellerID == "" {
-				v.reject(w, 403, "missing grant")
-				return
-			}
-		case "mcp-account":
-			if !result.AccountGrant {
-				v.reject(w, http.StatusForbidden, "account grant required")
-				return
-			}
-		case "delegated-discovery":
-			if !result.Discovery || !result.AccountGrant {
-				v.reject(w, 403, "discovery grant required")
-				return
-			}
-		default:
-			if result.Discovery || result.SellerID == "" || vars[cfg.SellerPathParam] != result.SellerID {
-				v.reject(w, 403, "cabinet not allowed for this key")
-				return
-			}
+		if result.SellerID == "" || vars[cfg.SellerPathParam] != result.SellerID {
+			v.reject(w, 403, "cabinet not allowed for this key")
+			return
 		}
+
 		// Credentials are consumed at the edge, even if the backend is another
 		// trusted service. Only verified gateway context is forwarded.
 		clearCredentials(r)
-		if cfg.Mode == "mcp" || cfg.Mode == "mcp-account" {
-			if !strings.HasPrefix(result.DelegatedToken, "aurum_dlg_") || len(result.DelegatedToken) != len("aurum_dlg_")+43 {
-				v.reject(w, http.StatusUnauthorized, "delegation unavailable")
-				return
-			}
-			r.Header.Set("Authorization", "Bearer "+result.DelegatedToken)
-		}
 		r.Header.Set(gatewayctx.HeaderScopes, cfg.RequiredScope)
 		r.Header.Set(gatewayctx.HeaderSubject, result.Subject)
 		r.Header.Set(gatewayctx.HeaderCredentialID, result.CredentialID)
-		if result.SellerID != "" && cfg.Mode != "delegated-discovery" {
+		if result.SellerID != "" {
 			r.Header.Set(gatewayctx.HeaderTenant, "wildberries:"+result.SellerID)
 		}
 		if err := gatewayctx.SetCaller(r.Header, result.Identity); err != nil {
@@ -189,26 +162,13 @@ func (v *TokenValidator) introspect(r *http.Request, cfg TokenConfig, raw string
 		}
 	}
 	payload := map[string]string{"token": raw}
-	if cfg.Mode == "delegated" {
-		seller := authzmw.PathVarsFromContext(r.Context())[cfg.SellerPathParam]
-		if seller == "" {
-			return tokenResult{}, nil
-		}
-		payload["seller_id"] = seller
-	}
 	var result tokenResult
 	if err := v.postIntrospection(r, cfg.Endpoint, payload, &result); err != nil {
 		return tokenResult{}, err
 	}
-	kind := caller.APIKey
-	switch cfg.Mode {
-	case "mcp", "mcp-account":
-		kind = caller.OAuthAccess
-	case "delegated", "delegated-discovery":
-		kind = caller.DelegationProof
-	}
+
 	if result.Active {
-		if err := validateIssuerCaller(result.Identity, result.Subject, result.CredentialID, kind); err != nil {
+		if err := validateIssuerCaller(result.Identity, result.Subject, result.CredentialID, caller.APIKey); err != nil {
 			return tokenResult{}, err // Never cache inconsistent issuer metadata.
 		}
 		result.validUntil = result.ExpiresAt
