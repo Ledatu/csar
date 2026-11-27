@@ -880,7 +880,7 @@ type RetryConfig struct {
 	Use string `yaml:"use,omitempty" json:"use,omitempty"`
 
 	// MaxAttempts is the maximum number of total attempts (including the original).
-	// Default: 3.
+	// Omitted/zero defaults to 1; only values greater than 1 enable retries.
 	MaxAttempts int `yaml:"max_attempts" json:"max_attempts"`
 
 	// Backoff is the base delay between retries (exponential backoff with jitter).

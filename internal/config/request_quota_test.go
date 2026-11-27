@@ -68,7 +68,7 @@ func TestQuotaPoliciesRejectEveryInlineReplayPath(t *testing.T) {
 		{name: "no_retry"},
 		{name: "one_attempt", retry: &RetryConfig{MaxAttempts: 1}},
 		{name: "ordinary_retry", retry: &RetryConfig{MaxAttempts: 2}, bad: true},
-		{name: "retry_defaults", retry: &RetryConfig{}, bad: true},
+		{name: "retry_defaults", retry: &RetryConfig{}},
 		{name: "auto_retry", retry: &RetryConfig{MaxAttempts: 1, AutoRetry429: true}, bad: true},
 		{name: "protocol_retry", protocol: &ProtocolPolicy{TransparentRetry: &yes}, bad: true},
 		{name: "protocol_enables_retry", retry: &RetryConfig{MaxAttempts: 1}, protocol: &ProtocolPolicy{TransparentRetry: &yes}, bad: true},

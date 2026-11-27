@@ -61,3 +61,9 @@ func (r *RouteConfig) TransparentRetryEnabled() bool {
 	}
 	return enabled
 }
+
+// OrdinaryRetryEnabled requires an explicit total-attempt budget above one.
+// Missing retry configuration and omitted/zero counts never enable replay.
+func (r *RouteConfig) OrdinaryRetryEnabled() bool {
+	return r.Retry != nil && r.Retry.MaxAttempts > 1
+}

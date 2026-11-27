@@ -857,7 +857,7 @@
     },
     "RetryConfigObject": {
       "type": "object",
-      "description": "Automatic retry with exponential backoff for upstream requests.",
+      "description": "Opt-in upstream retries. Omitted or zero max_attempts disables ordinary replay.",
       "additionalProperties": false,
       "properties": {
         "use": {
@@ -866,8 +866,9 @@
         },
         "max_attempts": {
           "type": "integer",
-          "description": "Maximum total attempts (including the original).",
-          "minimum": 1
+          "description": "Maximum total attempts including the original. Omitted/zero means one attempt; greater than one explicitly enables retries.",
+          "minimum": 0,
+          "default": 1
         },
         "backoff": {
           "$ref": "#/$defs/Duration",

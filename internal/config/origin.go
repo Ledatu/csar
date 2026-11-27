@@ -59,7 +59,7 @@ func (r *RouteConfig) ValidateOriginBinding() error {
 	if r.OriginBinding != "account" || r.OriginReceiver == "" || r.AuthValidate == nil || r.Tenant != nil || r.Cache != nil || r.UsageBudget != nil {
 		return fmt.Errorf("account origin requires explicit receiver/authentication without tenant, cache or usage budget")
 	}
-	if r.Retry != nil && r.Retry.MaxAttempts != 1 || r.TransparentRetryEnabled() {
+	if r.OrdinaryRetryEnabled() || r.TransparentRetryEnabled() {
 		return fmt.Errorf("account origin forbids request replay")
 	}
 	return nil

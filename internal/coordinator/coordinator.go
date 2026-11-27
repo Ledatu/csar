@@ -772,9 +772,15 @@ func trafficToProto(t *config.TrafficConfig) *csarv1.TrafficConfigProto {
 }
 
 func retryToProto(r *config.RetryConfig) *csarv1.RetryConfigProto {
+	// Older routers interpret zero as three attempts. Send an explicit one
+	// so an omitted retry budget remains disabled during mixed-version rollout.
+	attempts := r.MaxAttempts
+	if attempts == 0 {
+		attempts = 1
+	}
 	pb := &csarv1.RetryConfigProto{
 		Use:             r.Use,
-		MaxAttempts:     safeInt32(r.MaxAttempts),
+		MaxAttempts:     safeInt32(attempts),
 		Backoff:         durationpb.New(r.Backoff.Duration),
 		MaxBackoff:      durationpb.New(r.MaxBackoff.Duration),
 		AutoRetry_429:   r.AutoRetry429,

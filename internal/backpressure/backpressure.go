@@ -66,9 +66,9 @@ type Config struct {
 	// the middleware returns 503 + X-CSAR-Status: throttled immediately.
 	MaxInternalWait time.Duration
 
-	// MaxBodyBuffer caps the request body size buffered for transparent
-	// retries. Bodies larger than this bypass backpressure interception
-	// entirely — they are proxied directly without 429 detection or replay.
+	// MaxBodyBuffer caps request-body capture when transparent retry is enabled.
+	// Oversized bodies then bypass interception. Observation-only handling
+	// never buffers or replaces the request body, regardless of this limit.
 	// Default: 10 MiB (DefaultMaxBodyBuffer).
 	MaxBodyBuffer int64
 }
@@ -184,8 +184,9 @@ func (p *peekWriter) Flush() {
 //     sleeps and retries the request transparently
 //  4. Otherwise: converts to 503 + X-CSAR-Status: throttled for csar-ts
 //
-// Request bodies are capped at MaxBodyBuffer. Oversized bodies bypass
-// interception entirely (proxied directly, no 429 detection/replay).
+// With transparent retry enabled, request bodies are capped at MaxBodyBuffer;
+// oversized bodies bypass interception. Known oversized bodies retain that bypass
+// even without replay. Otherwise observation leaves the body stream intact.
 // Non-429 responses are streamed to the client with zero buffering.
 func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !m.cfg.Enabled {
@@ -193,10 +194,9 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ── Cap request body for replay (prevents memory DoS) ────────
+	// Preserve the existing raw-response bypass for known oversized requests,
+	// without reading or retaining their bodies even in observation-only mode.
 	maxBody := m.cfg.MaxBodyBuffer
-
-	// Fast path: if Content-Length is known and exceeds cap, skip entirely.
 	if r.ContentLength > maxBody {
 		m.logger.Debug("backpressure: body exceeds buffer cap (Content-Length), bypassing",
 			"content_length", r.ContentLength, "cap", maxBody)
@@ -204,42 +204,46 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Buffer the request body up to maxBody+1 to detect overflow.
-	// Do NOT close r.Body yet — if oversized we need the remaining bytes.
 	var bodyBytes []byte
-	if r.Body != nil {
-		lr := io.LimitReader(r.Body, maxBody+1)
-		var err error
-		bodyBytes, err = io.ReadAll(lr)
-		if err != nil {
-			if closeErr := r.Body.Close(); closeErr != nil {
-				m.logger.Debug("backpressure: closing request body", "error", closeErr)
+	// Observing quota headers does not require retaining the request.
+	// Only explicit transparent replay may buffer and replace its body.
+	if m.cfg.AutoRetry {
+		// Buffer the request body up to maxBody+1 to detect overflow.
+		// Do NOT close r.Body yet — if oversized we need the remaining bytes.
+		if r.Body != nil {
+			lr := io.LimitReader(r.Body, maxBody+1)
+			var err error
+			bodyBytes, err = io.ReadAll(lr)
+			if err != nil {
+				if closeErr := r.Body.Close(); closeErr != nil {
+					m.logger.Debug("backpressure: closing request body", "error", closeErr)
+				}
+				m.logger.Error("backpressure: failed to buffer request body", "error", err)
+				apierror.New("bad_request", http.StatusBadRequest, "failed to read request body").Write(w)
+				return
 			}
-			m.logger.Error("backpressure: failed to buffer request body", "error", err)
-			apierror.New("bad_request", http.StatusBadRequest, "failed to read request body").Write(w)
-			return
+			if int64(len(bodyBytes)) > maxBody {
+				// Oversized (chunked transfer or Content-Length was missing/wrong).
+				// Reassemble body: what we read + remaining unread data.
+				r.Body = struct {
+					io.Reader
+					io.Closer
+				}{io.MultiReader(bytes.NewReader(bodyBytes), r.Body), r.Body}
+				r.ContentLength = -1 // total length unknown
+				m.logger.Debug("backpressure: body exceeds buffer cap (read), bypassing",
+					"buffered", len(bodyBytes), "cap", maxBody)
+				m.next.ServeHTTP(w, r)
+				return
+			}
+			if closeErr := r.Body.Close(); closeErr != nil {
+				m.logger.Debug("backpressure: closing consumed request body", "error", closeErr)
+			}
 		}
-		if int64(len(bodyBytes)) > maxBody {
-			// Oversized (chunked transfer or Content-Length was missing/wrong).
-			// Reassemble body: what we read + remaining unread data.
-			r.Body = struct {
-				io.Reader
-				io.Closer
-			}{io.MultiReader(bytes.NewReader(bodyBytes), r.Body), r.Body}
-			r.ContentLength = -1 // total length unknown
-			m.logger.Debug("backpressure: body exceeds buffer cap (read), bypassing",
-				"buffered", len(bodyBytes), "cap", maxBody)
-			m.next.ServeHTTP(w, r)
-			return
-		}
-		if closeErr := r.Body.Close(); closeErr != nil {
-			m.logger.Debug("backpressure: closing consumed request body", "error", closeErr)
-		}
-	}
 
-	// ── First attempt (zero response buffering for non-429) ──────
-	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-	r.ContentLength = int64(len(bodyBytes))
+		// ── First attempt (zero response buffering for non-429) ──────
+		r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		r.ContentLength = int64(len(bodyBytes))
+	}
 
 	pw := newPeekWriter(w)
 	m.next.ServeHTTP(pw, r)

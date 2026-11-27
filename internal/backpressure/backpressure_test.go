@@ -35,7 +35,7 @@ func (b *brokenRequestBody) Close() error { b.closed = true; return nil }
 
 func TestMiddlewareRejectsPartialRequestBody(t *testing.T) {
 	var calls int
-	m := New(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }), Config{Enabled: true}, nil, quietLogger())
+	m := New(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }), Config{Enabled: true, AutoRetry: true}, nil, quietLogger())
 	req := httptest.NewRequest(http.MethodPost, "/test", nil)
 	body := &brokenRequestBody{}
 	req.Body = body
@@ -61,7 +61,7 @@ func TestOversizedBodyBypassPreservesBodyAndCloser(t *testing.T) {
 			t.Error(err)
 		}
 		w.WriteHeader(http.StatusNoContent)
-	}), Config{Enabled: true, MaxBodyBuffer: 4}, nil, quietLogger())
+	}), Config{Enabled: true, AutoRetry: true, MaxBodyBuffer: 4}, nil, quietLogger())
 	req := httptest.NewRequest(http.MethodPost, "/test", nil)
 	req.Body, req.ContentLength = body, -1
 	rr := httptest.NewRecorder()
@@ -174,5 +174,33 @@ func TestNoSuspensionWithoutSuspendBucket(t *testing.T) {
 
 	if len(rec.paths) != 0 {
 		t.Errorf("suspended %v without suspend_bucket", rec.paths)
+	}
+}
+
+func TestObservationWithoutRetryPreservesRequestBody(t *testing.T) {
+	for _, length := range []int64{-1, 4, 1000} {
+		body := &brokenRequestBody{}
+		calls := 0
+		req := httptest.NewRequest("POST", "/", nil)
+		req.Body = body
+		req.ContentLength = length
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			if r.Body != body || body.closed || r.ContentLength != length {
+				t.Fatal("observation-only backpressure changed body")
+			}
+			w.Header().Set("Retry-After", "10")
+			w.WriteHeader(429)
+		})
+		m := New(handler, Config{Enabled: true, MaxBodyBuffer: 4}, nil, quietLogger())
+		rec := httptest.NewRecorder()
+		m.ServeHTTP(rec, req)
+		wantStatus := http.StatusServiceUnavailable
+		if length > 4 {
+			wantStatus = http.StatusTooManyRequests // existing oversized-request bypass
+		}
+		if calls != 1 || rec.Code != wantStatus || body.closed {
+			t.Fatalf("length=%d calls=%d status=%d want=%d closed=%v", length, calls, rec.Code, wantStatus, body.closed)
+		}
 	}
 }

@@ -27,7 +27,7 @@ func (c *Config) ValidateRequestQuotas() error {
 				return fmt.Errorf("route %s %s: request quotas require dynamic Redis admission without waits or bypasses", method, path)
 			}
 			route := methods[method]
-			if route.Retry != nil && route.Retry.MaxAttempts != 1 {
+			if route.OrdinaryRetryEnabled() {
 				return fmt.Errorf("route %s %s: request quotas require a single upstream attempt", method, path)
 			}
 			if route.TransparentRetryEnabled() {

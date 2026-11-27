@@ -29,13 +29,19 @@ func BuildCacheKey(routeKey, keyTemplate string, varyHeaders []string, keyQuery 
 		}
 	}
 	if r.Method == http.MethodPost {
-		return buildPOSTCacheKey(routeKey, base, varyHeaders, keyQuery, namespaces, r, bodyDigest)
+		return buildPOSTCacheKey(routeKey, base, append([]string{"Accept-Encoding"}, varyHeaders...), keyQuery, namespaces, r, bodyDigest)
 	}
 	rendered, err := RenderTemplate(base, r)
 	if err != nil {
 		return "", err
 	}
 
+	// Always isolate negotiated representations, including multiple header
+	// lines. The version marker also avoids reusing old encoding-blind entries.
+	rendered += "\nresponse-encoding-v1"
+	for _, value := range r.Header.Values("Accept-Encoding") {
+		rendered += fmt.Sprintf("\naccept-encoding:%d:%s", len(value), value)
+	}
 	if len(varyHeaders) > 0 {
 		headers := append([]string(nil), varyHeaders...)
 		sort.Strings(headers)
@@ -77,7 +83,7 @@ func buildPOSTCacheKey(routeKey, template string, varyHeaders []string, keyQuery
 		Namespaces map[string]int64
 		BodySHA256 string
 	}{
-		Version:    "post-v1",
+		Version:    "post-v2",
 		Route:      routeKey,
 		Template:   template,
 		Path:       r.URL.EscapedPath(),

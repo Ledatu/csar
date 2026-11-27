@@ -1,8 +1,9 @@
 // Package retry provides HTTP middleware for retrying upstream requests
 // with exponential backoff and jitter.
 //
-// Only idempotent methods (GET, HEAD, OPTIONS) are retried by default,
-// and only on transient upstream errors (502, 503, 504).
+// Retries are disabled unless MaxAttempts is explicitly greater than one.
+// Once enabled, the default eligible methods are GET, HEAD and OPTIONS,
+// with transient upstream errors (502, 503, 504).
 //
 // Recommended by security audit §3.1: CSAR has circuit breakers but
 // lacked immediate retries for transient failures.
@@ -26,7 +27,7 @@ import (
 // Config configures the retry behavior.
 type Config struct {
 	// MaxAttempts is the total number of attempts (1 = no retries).
-	// If ≤ 0, defaults to 3.
+	// If ≤ 0, defaults to 1 (no retries).
 	MaxAttempts int
 
 	// Backoff is the base delay between retries.
@@ -48,7 +49,7 @@ type Config struct {
 // DefaultConfig returns a Config with sane defaults.
 func DefaultConfig() Config {
 	return Config{
-		MaxAttempts: 3,
+		MaxAttempts: 1,
 		Backoff:     1 * time.Second,
 		MaxBackoff:  10 * time.Second,
 		RetryableStatusCodes: map[int]struct{}{
@@ -101,8 +102,8 @@ func New(next http.Handler, cfg Config, logger *slog.Logger) *Middleware {
 
 // ServeHTTP implements http.Handler.
 func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// If the method is not retryable, pass through immediately.
-	if !m.isRetryableMethod(r.Method) {
+	// A single attempt needs neither request replay nor response capture.
+	if m.cfg.MaxAttempts == 1 || !m.isRetryableMethod(r.Method) {
 		m.next.ServeHTTP(w, r)
 		return
 	}
@@ -123,6 +124,7 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	initialHeaders := w.Header().Clone()
 	var lastRecorder *httptest.ResponseRecorder
 
 retryLoop:
@@ -140,25 +142,30 @@ retryLoop:
 		}
 		r.ContentLength = int64(len(bodyBytes))
 
-		// Capture the response in a recorder.
-		rec := httptest.NewRecorder()
-		m.next.ServeHTTP(rec, r)
-		lastRecorder = rec
-
-		// If the status code is not retryable, we're done.
-		if !m.isRetryableStatus(rec.Code) {
-			break
+		// Only responses that can still be retried need capture. Successful,
+		// non-retryable and final responses stream to the original writer.
+		aw := &attemptWriter{ResponseWriter: w}
+		if attempt < m.cfg.MaxAttempts {
+			aw.shouldCapture = m.isRetryableStatus
 		}
-
-		// If this was the last attempt, don't sleep.
-		if attempt == m.cfg.MaxAttempts {
-			m.logger.Warn("retry: all attempts exhausted",
-				"method", r.Method,
-				"path", r.URL.Path,
-				"status", rec.Code,
-				"attempts", attempt,
-			)
-			break
+		m.next.ServeHTTP(aw, r)
+		if aw.code == 0 {
+			aw.WriteHeader(http.StatusOK)
+		}
+		if aw.recorder == nil {
+			if attempt == m.cfg.MaxAttempts && m.isRetryableStatus(aw.code) {
+				m.logger.Warn("retry: all attempts exhausted", "method", r.Method,
+					"path", r.URL.Path, "status", aw.code, "attempts", attempt)
+			}
+			return
+		}
+		rec := aw.recorder
+		lastRecorder = rec
+		// The retry response's headers have not been committed. Restore the
+		// original headers so no failed-attempt cookie/encoding/trailer leaks.
+		clear(w.Header())
+		for key, values := range initialHeaders {
+			w.Header()[key] = append([]string(nil), values...)
 		}
 
 		// Calculate backoff with jitter.
@@ -187,6 +194,66 @@ retryLoop:
 		// Should not happen, but be safe.
 		http.Error(w, `{"error":"retry: no response captured"}`, http.StatusBadGateway)
 	}
+}
+
+// attemptWriter commits ordinary responses immediately, keeping the recorder
+// solely for statuses which may be retried. It never parses or re-encodes bytes.
+type attemptWriter struct {
+	http.ResponseWriter
+	shouldCapture func(int) bool
+	recorder      *httptest.ResponseRecorder
+	code          int
+}
+
+func (w *attemptWriter) Header() http.Header {
+	if w.recorder != nil {
+		return w.recorder.Header()
+	}
+	return w.ResponseWriter.Header()
+}
+
+func (w *attemptWriter) WriteHeader(code int) {
+	if w.code != 0 {
+		return
+	}
+	if code >= 100 && code < 200 && code != http.StatusSwitchingProtocols {
+		w.ResponseWriter.WriteHeader(code)
+		return
+	}
+	w.code = code
+	if w.shouldCapture != nil && w.shouldCapture(code) {
+		w.recorder = httptest.NewRecorder()
+		for key, values := range w.ResponseWriter.Header() {
+			w.recorder.Header()[key] = append([]string(nil), values...)
+		}
+		w.recorder.WriteHeader(code)
+		return
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *attemptWriter) Write(body []byte) (int, error) {
+	if w.code == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	if w.recorder != nil {
+		return w.recorder.Write(body)
+	}
+	return w.ResponseWriter.Write(body)
+}
+
+func (w *attemptWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *attemptWriter) Flush() { _ = w.FlushError() }
+
+func (w *attemptWriter) FlushError() error {
+	if w.code == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	if w.recorder != nil {
+		return nil
+	}
+	return http.NewResponseController(w.ResponseWriter).Flush()
 }
 
 // isRetryableMethod checks if the HTTP method is eligible for retry.
