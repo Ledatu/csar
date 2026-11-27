@@ -27,10 +27,10 @@ func postCacheRequest(body string) *http.Request {
 	return req
 }
 
-func TestBuildCacheKey_GETHEADCompatibility(t *testing.T) {
+func TestBuildCacheKey_GETHEADEncodingVersion(t *testing.T) {
 	for method, want := range map[string]string{
-		"GET":  "b0df1bf4f11e10e49ebd5f10b2004b7cb9b5623dbd867d62b4720d2428b25386",
-		"HEAD": "9de0fb81ff80aca6d6de7aaf437df154f60f66ad5e834c482adac01a47a20e8a",
+		"GET":  "7fdd80e4b2316f822a5b94dd49cc0c36d2e54818b8b36572790436a701e6721c",
+		"HEAD": "95d22b7216d7dc3b38e6882083c9b2d5c52389b1532fa92d1d2e7ac73d43f954",
 	} {
 		req := httptest.NewRequest(method, "/stocks?limit=10", nil)
 		got, err := BuildCacheKey(method+":/stocks", "", nil, nil, nil, req, "")

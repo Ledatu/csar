@@ -1,3 +1,19 @@
+## Response streaming and optional gzip — source only
+
+Retries default off: absent/empty/zero attempt budgets install no retry layer.
+Explicit total attempts above 1 opt in; legacy one-attempt config remains valid.
+Observation-only backpressure preserves the original request body. Coordinator
+snapshots encode omitted budgets as 1 to prevent older routers inferring 3.
+Retry-enabled routes stream non-retryable responses and final attempts; only intermediate retryable
+responses retain capture. Configured replay eligibility and timing are unchanged.
+`--response-gzip` is restart-required/default-off, applying Core's shared bounded
+JSON compressor outside the reloadable router (after redaction/cache selection).
+Upstream gzip remains intact. Health/readiness and unsupported representations
+are not newly encoded. Response cache keys now isolate all Accept-Encoding lines;
+GET/HEAD encoding version and post-v2 create a cold cache during mixed-version
+rollout. Cache-fill/coalescing/DLP buffering remains. Matching Core source is
+pinned for standalone builds; no deployment or production feature was enabled.
+
 ## Public OAuth helper compatibility — source only
 
 Helper authn validation uses Core's explicit public OAuth receiver loader after

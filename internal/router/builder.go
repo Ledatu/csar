@@ -256,8 +256,8 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 	//   retry → backpressure → proxy
 	r.setupBackpressure(rt, fr, key, logger)
 
-	// Set up retry middleware if retry config is present (audit §3.1).
-	if fr.Route.Retry != nil {
+	// Install retry capture only for an explicit retry budget.
+	if fr.Route.OrdinaryRetryEnabled() {
 		r.setupRetry(rt, fr, key, logger)
 	}
 

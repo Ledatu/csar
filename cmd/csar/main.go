@@ -50,6 +50,7 @@ func main() {
 
 func run() error {
 	// CLI flags
+	responseGzip := flag.Bool("response-gzip", false, "enable negotiated gzip for successful JSON responses (restart required)")
 	healthAddr := flag.String("health-addr", ":9100", "plain HTTP health/readiness/metrics sidecar listen address (empty to disable)")
 	otlpEndpoint := flag.String("otlp-endpoint", "", "OTLP gRPC endpoint for tracing (empty to disable)")
 	otlpInsecure := flag.Bool("otlp-insecure", false, "use insecure connection for OTLP (default: TLS required)")
@@ -321,7 +322,7 @@ func run() error {
 		logger.Info("readiness endpoint mounted", "path", readinessPath)
 	}
 
-	mux.Handle("/", rh)
+	mux.Handle("/", withResponseGzip(rh, *responseGzip, logger))
 
 	// Create HTTP server
 	srv := &http.Server{

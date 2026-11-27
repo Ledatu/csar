@@ -1341,3 +1341,45 @@ A zero cap explicitly denies admission until an allowance is verified. Quota rou
 reject ordinary/transparent inline retries; each admitted request has one attempt.
 Config and runtime share policy validation. Backend causes remain in server logs,
 while client errors stay generic.
+
+
+## Response streaming and optional gzip
+
+Retries are disabled by default. Omit `x-csar-retry`; an empty block or an
+resolved attempt budget of zero also enables no retries and installs no retry
+middleware. A named policy's explicit budget is inherited only when referenced.
+The original request/response streams without retry buffering. The legacy
+max_attempts: 1 spelling remains supported but is unnecessary. A route or named
+policy must explicitly set max_attempts above 1 to enable ordinary retries;
+methods must also be eligible. Non-retryable responses and final attempts stream
+immediately; only intermediate retryable responses are captured. Configured retry
+methods/statuses and delays retain their meaning. Adaptive
+backpressure observes 429 headers without reading/copying the request body unless
+transparent 429 replay was explicitly enabled. New coordinators serialize an
+omitted attempt budget as one so older routers do not infer three total attempts.
+A response already committed to the caller is never replayed because of a later
+body or connection failure. Redaction and cache fills can still buffer bodies.
+
+The restart-required `--response-gzip` router flag defaults to false. When enabled,
+Core's `httpx/compress` adds fast negotiated gzip to HTTP 200 JSON responses of at
+least 1 KiB. Its decision buffers at most a small prefix, not the whole body. An
+explicit flush immediately commits the negotiated encoding, including for small
+prefixes, so chunked proxy responses can stay compressed and stream. Existing
+upstream gzip passes through unchanged. The wrapper sits outside the reloadable router,
+so redaction and cache selection finish first; health/readiness endpoints are
+not wrapped. HEAD, ranges, partial/non-JSON responses, upgrades, cookies,
+no-store and no-transform bypass new compression. No request decompression,
+new retries or automatic production activation is introduced.
+
+Response-cache keys always include every Accept-Encoding header line, including
+absence, independently of authored vary_headers. GET/HEAD use an encoding version
+marker and POST keys are post-v2. Previous keys are not reused: deployment creates
+a cold cache, and mixed versions use separate keys until old entries expire.
+Fallback gzip occurs after cache storage, while upstream-encoded representations
+remain partitioned. Cache-fill buffering/coalescing and DLP's existing full-body
+processing are separate from this streaming change.
+
+CSAR pins the published Core compression source commit for standalone builds.
+Local development can also use an isolated Go workspace with the matching Core
+and CSAR worktrees. Compression adds CPU work; benchmark actual
+payloads/concurrency before enabling it in deployment settings.

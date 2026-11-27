@@ -26,7 +26,7 @@ func (b *brokenRequestBody) Close() error { b.closed = true; return nil }
 
 func TestMiddlewareRejectsPartialRequestBody(t *testing.T) {
 	var calls int
-	m := New(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }), Config{}, testLogger())
+	m := New(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { calls++ }), Config{MaxAttempts: 2}, testLogger())
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	body := &brokenRequestBody{}
 	req.Body = body
@@ -240,8 +240,8 @@ func TestMiddleware_ResponseHeadersPreserved(t *testing.T) {
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
-	if cfg.MaxAttempts != 3 {
-		t.Errorf("MaxAttempts = %d, want 3", cfg.MaxAttempts)
+	if cfg.MaxAttempts != 1 {
+		t.Errorf("MaxAttempts = %d, want 1 (retries disabled)", cfg.MaxAttempts)
 	}
 	if cfg.Backoff != time.Second {
 		t.Errorf("Backoff = %v, want 1s", cfg.Backoff)
