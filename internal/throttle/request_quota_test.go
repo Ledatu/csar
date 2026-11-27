@@ -174,7 +174,7 @@ func TestRequestQuotaNativeRedisAtomicity(t *testing.T) {
 	var admitted atomic.Int32
 	for range 40 {
 		wg.Go(func() {
-			err := d.admitQuotas(ctx)
+			err := d.Wait(ctx)
 			var wait *RetryAfterError
 			if err == nil {
 				admitted.Add(1)
@@ -191,7 +191,7 @@ func TestRequestQuotaNativeRedisAtomicity(t *testing.T) {
 		t.Fatal(err)
 	}
 	var blocked *RetryAfterError
-	if err := d.admitQuotas(ctx); !errors.As(err, &blocked) || blocked.Wait != 24*time.Hour {
+	if err := d.Wait(ctx); !errors.As(err, &blocked) || blocked.Wait != 24*time.Hour {
 		t.Fatal("native Redis did not close unverified report budget", err)
 	}
 }
