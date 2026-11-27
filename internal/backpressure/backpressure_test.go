@@ -178,7 +178,7 @@ func TestNoSuspensionWithoutSuspendBucket(t *testing.T) {
 }
 
 func TestObservationWithoutRetryPreservesRequestBody(t *testing.T) {
-	for _, length := range []int64{-1, 1000} {
+	for _, length := range []int64{-1, 4, 1000} {
 		body := &brokenRequestBody{}
 		calls := 0
 		req := httptest.NewRequest("POST", "/", nil)
@@ -195,8 +195,12 @@ func TestObservationWithoutRetryPreservesRequestBody(t *testing.T) {
 		m := New(handler, Config{Enabled: true, MaxBodyBuffer: 4}, nil, quietLogger())
 		rec := httptest.NewRecorder()
 		m.ServeHTTP(rec, req)
-		if calls != 1 || rec.Code != 503 || body.closed {
-			t.Fatalf("calls=%d status=%d closed=%v", calls, rec.Code, body.closed)
+		wantStatus := http.StatusServiceUnavailable
+		if length > 4 {
+			wantStatus = http.StatusTooManyRequests // existing oversized-request bypass
+		}
+		if calls != 1 || rec.Code != wantStatus || body.closed {
+			t.Fatalf("length=%d calls=%d status=%d want=%d closed=%v", length, calls, rec.Code, wantStatus, body.closed)
 		}
 	}
 }

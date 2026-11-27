@@ -13,6 +13,10 @@ are not newly encoded. Response cache keys now isolate all Accept-Encoding lines
 GET/HEAD encoding version and post-v2 create a cold cache during mixed-version
 rollout. Cache-fill/coalescing/DLP buffering remains. Matching Core source is
 pinned for standalone builds; no deployment or production feature was enabled.
+Native STS transport coverage checks automatic gzip decoding and unchanged v1
+429/503 behavior. Known oversized requests retain their raw-response bypass;
+unknown-length bodies stream instead of a replay-buffer preflight. Preserve all
+deployed credential-rejection route arguments when enabling the startup flag.
 
 ## Public OAuth helper compatibility — source only
 

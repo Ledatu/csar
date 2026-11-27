@@ -185,10 +185,21 @@ func (p *peekWriter) Flush() {
 //  4. Otherwise: converts to 503 + X-CSAR-Status: throttled for csar-ts
 //
 // With transparent retry enabled, request bodies are capped at MaxBodyBuffer;
-// oversized bodies bypass interception. Without retry, bodies pass through intact.
+// oversized bodies bypass interception. Known oversized bodies retain that bypass
+// even without replay. Otherwise observation leaves the body stream intact.
 // Non-429 responses are streamed to the client with zero buffering.
 func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !m.cfg.Enabled {
+		m.next.ServeHTTP(w, r)
+		return
+	}
+
+	// Preserve the existing raw-response bypass for known oversized requests,
+	// without reading or retaining their bodies even in observation-only mode.
+	maxBody := m.cfg.MaxBodyBuffer
+	if r.ContentLength > maxBody {
+		m.logger.Debug("backpressure: body exceeds buffer cap (Content-Length), bypassing",
+			"content_length", r.ContentLength, "cap", maxBody)
 		m.next.ServeHTTP(w, r)
 		return
 	}
@@ -197,17 +208,6 @@ func (m *Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Observing quota headers does not require retaining the request.
 	// Only explicit transparent replay may buffer and replace its body.
 	if m.cfg.AutoRetry {
-		// ── Cap request body for replay (prevents memory DoS) ────────
-		maxBody := m.cfg.MaxBodyBuffer
-
-		// Fast path: if Content-Length is known and exceeds cap, skip entirely.
-		if r.ContentLength > maxBody {
-			m.logger.Debug("backpressure: body exceeds buffer cap (Content-Length), bypassing",
-				"content_length", r.ContentLength, "cap", maxBody)
-			m.next.ServeHTTP(w, r)
-			return
-		}
-
 		// Buffer the request body up to maxBody+1 to detect overflow.
 		// Do NOT close r.Body yet — if oversized we need the remaining bytes.
 		if r.Body != nil {

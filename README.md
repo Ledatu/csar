@@ -1345,7 +1345,7 @@ while client errors stay generic.
 
 ## Response streaming and optional gzip
 
-Retries are disabled by default. Omit `x-csar-retry`; an empty block or an
+Retries are disabled by default. Omit `x-csar-retry`; an empty block or a
 resolved attempt budget of zero also enables no retries and installs no retry
 middleware. A named policy's explicit budget is inherited only when referenced.
 The original request/response streams without retry buffering. The legacy
@@ -1355,7 +1355,10 @@ methods must also be eligible. Non-retryable responses and final attempts stream
 immediately; only intermediate retryable responses are captured. Configured retry
 methods/statuses and delays retain their meaning. Adaptive
 backpressure observes 429 headers without reading/copying the request body unless
-transparent 429 replay was explicitly enabled. New coordinators serialize an
+transparent 429 replay was explicitly enabled. Known requests above its body cap
+retain their existing raw-response bypass. Unknown-length bodies stream without
+pre-reading; a later body read failure is handled by the proxy rather than by
+a replay-buffer preflight. New coordinators serialize an
 omitted attempt budget as one so older routers do not infer three total attempts.
 A response already committed to the caller is never replayed because of a later
 body or connection failure. Redaction and cache fills can still buffer bodies.
@@ -1383,3 +1386,12 @@ CSAR pins the published Core compression source commit for standalone builds.
 Local development can also use an isolated Go workspace with the matching Core
 and CSAR worktrees. Compression adds CPU work; benchmark actual
 payloads/concurrency before enabling it in deployment settings.
+
+Normal Go STS HTTP clients negotiate gzip through their underlying transport and
+receive decoded JSON automatically; no manual Accept-Encoding injection or STS
+token endpoint change is needed. Explicitly setting Accept-Encoding leaves
+decoding to the caller. A native STS integration test checks decoded payloads,
+caller/token header separation, and unchanged v1 upstream-429 normalization and
+503 errors with fallback gzip enabled. Production commands may include extra
+credential-rejection route flags: preserve the full deployed argv when enabling
+gzip rather than replacing it with a shorter base Compose command.
