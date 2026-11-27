@@ -112,6 +112,11 @@ func (dt *DynamicThrottler) Wait(ctx context.Context) error {
 		newGCRAParams(dt.rps, dt.burst), dt.maxWait); err != nil {
 		return err
 	}
+	// Parking is not permission to use a method quota. Another replica may
+	// have consumed it while we waited; cancellation must not charge it either.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return dt.admitQuotas(ctx)
 }
 

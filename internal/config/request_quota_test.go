@@ -14,7 +14,8 @@ func TestRequestQuotasRejectUnsafeConfiguration(t *testing.T) {
 		change func(*TrafficConfig)
 	}{
 		{"local", func(t *TrafficConfig) { t.Backend = "local" }},
-		{"wait", func(t *TrafficConfig) { t.MaxWait.Duration = time.Second }},
+		{"negative_wait", func(t *TrafficConfig) { t.MaxWait.Duration = -time.Millisecond }},
+		{"long_wait", func(t *TrafficConfig) { t.MaxWait.Duration = 5*time.Second + time.Millisecond }},
 		{"bypass", func(t *TrafficConfig) { t.ExcludeIPs = []string{"127.0.0.1"} }},
 		{"missing_key", func(t *TrafficConfig) { t.Quotas[0].Key = "" }},
 		{"negative", func(t *TrafficConfig) { t.Quotas[0].Requests = -1 }},
@@ -95,5 +96,15 @@ func TestQuotaPoliciesRejectEveryInlineReplayPath(t *testing.T) {
 	}
 	if c.ValidateRequestQuotas() == nil {
 		t.Fatal("inherited retry bypassed quota validation")
+	}
+}
+
+func TestQuotaPoliciesPermitOnlyBoundedAdmissionWait(t *testing.T) {
+	for _, wait := range []time.Duration{0, time.Millisecond, 2 * time.Second, 5 * time.Second} {
+		c := quotaConfig()
+		c.Paths["/read"]["get"].Traffic.MaxWait.Duration = wait
+		if err := c.ValidateRequestQuotas(); err != nil {
+			t.Fatalf("bounded wait %s: %v", wait, err)
+		}
 	}
 }
