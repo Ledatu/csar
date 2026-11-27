@@ -131,7 +131,10 @@ func TestReloadGlobalThrottleRemoval(t *testing.T) {
 			}))
 			defer upstream.Close()
 			cfg := reloadTestConfig(upstream.URL, &config.SSRFConfig{AllowedInternalHosts: []string{"127.0.0.1"}})
-			cfg.GlobalThrottle = &config.GlobalThrottleConfig{RPS: 0.001, Burst: 1, MaxWait: config.Duration{Duration: time.Millisecond}}
+			// Refill takes 1000s, so a 1s budget still rejects the second request
+			// immediately. Avoid a 1ms deadline expiring while CI schedules the
+			// first request even though the initial burst token is available.
+			cfg.GlobalThrottle = &config.GlobalThrottleConfig{RPS: 0.001, Burst: 1, MaxWait: config.Duration{Duration: time.Second}}
 			rl := newTestReloader(t, cfg)
 			old := rl.currentRouter
 			checkReloadStatus(t, rl.reloadHandler, http.StatusNoContent)
