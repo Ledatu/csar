@@ -32,3 +32,12 @@ func Validate(quotas []Policy) error {
 	}
 	return nil
 }
+
+// ValidateWait bounds in-router admission parking. Longer quota cooldowns must
+// return retry timing to workers rather than occupy router requests.
+func ValidateWait(wait time.Duration) error {
+	if wait < 0 || wait > 5*time.Second {
+		return fmt.Errorf("request quota admission wait must be between zero and five seconds")
+	}
+	return nil
+}
