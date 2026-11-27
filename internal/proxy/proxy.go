@@ -18,10 +18,9 @@ import (
 )
 
 // ── Context-based header passthrough ─────────────────────────────────
-// httputil.ReverseProxy replaces the ResponseWriter's header map with the
-// upstream's response headers. To ensure CSAR backpressure headers survive
-// the proxy, the router injects them into the request context and
-// modifyResponse copies them back onto the final response.
+// httputil.ReverseProxy adds upstream headers to the ResponseWriter's map.
+// Trusted protocol values travel in context and replace the upstream values;
+// preexisting writer copies must be removed to avoid duplicate scalar headers.
 
 // csarCtxKey is an unexported type for CSAR header context keys.
 type csarCtxKey struct{ name string }
@@ -34,6 +33,16 @@ var (
 	ctxKeyStripCORS        = csarCtxKey{"strip-upstream-cors"}
 	ctxKeyResponseObserver = csarCtxKey{"response-observer"}
 )
+
+var protocolHeaderKeys = [...]csarCtxKey{ctxKeyWaitMS, ctxKeyStatus, ctxKeyRetryAftr, ctxKeyProtoVer}
+
+func applyProtocolHeaders(headers http.Header, ctx context.Context) {
+	for _, key := range protocolHeaderKeys {
+		if value, ok := ctx.Value(key).(string); ok && value != "" {
+			headers.Set(key.name, value)
+		}
+	}
+}
 
 // WithResponseObserver records the latest proxy attempt HTTP status, or 0 for a
 // transport failure. The callback runs synchronously in ModifyResponse or ErrorHandler;
@@ -233,6 +242,11 @@ func New(targetURL string, opts ...Option) (*ReverseProxy, error) {
 
 // ServeHTTP forwards the request to the upstream target.
 func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	for _, key := range protocolHeaderKeys {
+		if value, ok := r.Context().Value(key).(string); ok && value != "" {
+			w.Header().Del(key.name)
+		}
+	}
 	rp.proxy.ServeHTTP(w, r)
 }
 
@@ -284,31 +298,20 @@ func joinPaths(base, reqPath string) string {
 
 // modifyResponse re-injects CSAR backpressure headers into the upstream
 // response. The values were stashed in the request context by the router
-// (via WithCSARHeaders) before the proxy ran, and would otherwise be lost
-// because httputil.ReverseProxy replaces the ResponseWriter's header map.
+// (via WithCSARHeaders) before the proxy ran.
 func (rp *ReverseProxy) modifyResponse(resp *http.Response) error {
 	observeResponse(resp.Request.Context(), resp.StatusCode)
 	ctx := resp.Request.Context()
 	if ShouldStripUpstreamCORS(ctx) {
 		StripUpstreamCORSHeaders(resp.Header)
 	}
-	if v, ok := ctx.Value(ctxKeyWaitMS).(string); ok && v != "" {
-		resp.Header.Set("X-CSAR-Wait-MS", v)
-	}
-	if v, ok := ctx.Value(ctxKeyStatus).(string); ok && v != "" {
-		resp.Header.Set("X-CSAR-Status", v)
-	}
-	if v, ok := ctx.Value(ctxKeyRetryAftr).(string); ok && v != "" {
-		resp.Header.Set("Retry-After", v)
-	}
-	if v, ok := ctx.Value(ctxKeyProtoVer).(string); ok && v != "" {
-		resp.Header.Set("X-CSAR-Protocol-Version", v)
-	}
+	applyProtocolHeaders(resp.Header, ctx)
 	return nil
 }
 
 // errorHandler handles errors from the upstream.
 func (rp *ReverseProxy) errorHandler(w http.ResponseWriter, r *http.Request, err error) {
+	applyProtocolHeaders(w.Header(), r.Context())
 	observeResponse(r.Context(), 0)
 	requestID := r.Header.Get("X-Request-ID")
 	var netErr net.Error

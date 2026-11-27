@@ -12,6 +12,80 @@ import (
 	"time"
 )
 
+func TestProtocolHeadersAreSingleValuesOnTheWire(t *testing.T) {
+	for _, status := range []int{http.StatusOK, http.StatusBadRequest, http.StatusTooManyRequests} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			want := map[string]string{"X-CSAR-Wait-MS": "17", "X-CSAR-Protocol-Version": "1"}
+			if status == http.StatusTooManyRequests {
+				want["X-CSAR-Status"], want["Retry-After"] = "throttled", "2"
+			}
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				for key := range want {
+					w.Header().Add(key, "upstream-1")
+					w.Header().Add(key, "upstream-2")
+				}
+				w.Header().Add("Set-Cookie", "first=1")
+				w.Header().Add("Set-Cookie", "second=2")
+				w.WriteHeader(status)
+			}))
+			defer upstream.Close()
+			rp, err := New(upstream.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				for key, value := range want {
+					w.Header().Set(key, value)
+				}
+				ctx := WithProtocolVersion(r.Context(), want["X-CSAR-Protocol-Version"])
+				ctx = WithCSARHeaders(ctx, want["X-CSAR-Wait-MS"], want["X-CSAR-Status"], want["Retry-After"])
+				rp.ServeHTTP(w, r.WithContext(ctx))
+			}))
+			defer gateway.Close()
+			resp, err := gateway.Client().Get(gateway.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != status {
+				t.Fatalf("status=%d want=%d", resp.StatusCode, status)
+			}
+			for key, expected := range want {
+				values := resp.Header.Values(key)
+				if len(values) != 1 || values[0] != expected {
+					t.Errorf("%s=%q want single %q", key, values, expected)
+				}
+			}
+			if len(resp.Header.Values("Set-Cookie")) != 2 {
+				t.Fatal("unrelated multivalue headers changed")
+			}
+		})
+	}
+}
+
+func TestProtocolHeadersSurviveTransportFailure(t *testing.T) {
+	upstream := httptest.NewServer(http.NotFoundHandler())
+	upstream.Close()
+	rp, err := New(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	ctx := WithProtocolVersion(req.Context(), "1")
+	ctx = WithCSARHeaders(ctx, "17", "backpressure", "2")
+	w := httptest.NewRecorder()
+	rp.ServeHTTP(w, req.WithContext(ctx))
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status=%d", w.Code)
+	}
+	for key, expected := range map[string]string{"X-CSAR-Wait-MS": "17", "X-CSAR-Status": "backpressure", "Retry-After": "2", "X-CSAR-Protocol-Version": "1"} {
+		values := w.Header().Values(key)
+		if len(values) != 1 || values[0] != expected {
+			t.Errorf("%s=%q want single %q", key, values, expected)
+		}
+	}
+}
+
 func TestNew_ValidURL(t *testing.T) {
 	rp, err := New("http://localhost:3000")
 	if err != nil {
