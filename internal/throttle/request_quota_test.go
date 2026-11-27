@@ -267,6 +267,12 @@ func TestRuntimeQuotaValidationUsesFullPolicyShape(t *testing.T) {
 	if d.SetQuotas(client, []RequestQuota{bad}) == nil {
 		t.Fatal("runtime accepted oversized key")
 	}
+	for _, wait := range []time.Duration{-time.Millisecond, 5*time.Second + time.Millisecond} {
+		bounded := NewDynamicThrottler(client, "test:", "reads", 1000, 100, wait)
+		if bounded.SetQuotas(client, []RequestQuota{good}) == nil {
+			t.Fatal("runtime accepted invalid wait", wait)
+		}
+	}
 	if d.SetQuotas(nil, []RequestQuota{good}) == nil {
 		t.Fatal("missing Redis accepted")
 	}
@@ -289,5 +295,55 @@ func TestQuotaBackendErrorRetainsCause(t *testing.T) {
 	var cause redis.Error
 	if !errors.Is(err, ErrBackendUnavailable) || !errors.As(err, &cause) || !strings.Contains(err.Error(), "local quota diagnostic") {
 		t.Fatal("quota error cause lost", err)
+	}
+}
+
+func TestRequestQuotaNativeRedisParkingCannotOverspend(t *testing.T) {
+	addr := os.Getenv("CSAR_REQUEST_QUOTA_TEST_REDIS")
+	if addr == "" {
+		t.Skip("isolated loopback Redis required")
+	}
+	if !strings.HasPrefix(addr, "127.0.0.1:") {
+		t.Fatal("loopback Redis required")
+	}
+	client := redis.NewClient(&redis.Options{Addr: addr, ContextTimeoutEnabled: true, MaxRetries: -1})
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	prefix := "quota-park-test:" + uuid.NewString() + ":"
+	first := NewDynamicThrottler(client, prefix, "shared:{query.cabinet}", 10, 1, time.Second)
+	second := NewDynamicThrottler(client, prefix, "shared:{query.cabinet}", 10, 1, time.Second)
+	quota := []RequestQuota{{Name: "day", Key: "method:{query.cabinet}", Requests: 1, Window: 24 * time.Hour}}
+	for _, d := range []*DynamicThrottler{first, second} {
+		if err := d.SetQuotas(client, quota); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := WithRequest(context.Background(), httptest.NewRequest("GET", "/read?cabinet=dd", nil))
+	if err := client.Set(ctx, prefix+"shared:dd", time.Now().Add(100*time.Millisecond).UnixMilli(), time.Second).Err(); err != nil {
+		t.Fatal(err)
+	}
+	var accepted atomic.Int32
+	var wg sync.WaitGroup
+	for i := range 4 {
+		wg.Go(func() {
+			d := first
+			if i%2 != 0 {
+				d = second
+			}
+			err := d.Wait(ctx)
+			var denied *RetryAfterError
+			if err == nil {
+				accepted.Add(1)
+			} else if !errors.As(err, &denied) || denied.Key != "request-quota" {
+				t.Errorf("unexpected parked admission: %v", err)
+			}
+		})
+	}
+	wg.Wait()
+	if accepted.Load() != 1 {
+		t.Fatal("parked requests overspent rolling cap", accepted.Load())
 	}
 }
