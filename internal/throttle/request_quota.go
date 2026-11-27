@@ -40,6 +40,8 @@ for i,key in ipairs(KEYS) do
  end
 end
 if retry > 0 then return retry end
+-- Empty attempt ID only checks eligibility; admission rechecks before charging.
+if ARGV[1] == '' then return 0 end
 for i,key in ipairs(KEYS) do
  redis.call('ZADD',key,0,'window:'..ARGV[2*i])
  redis.call('ZADD',key,now,ARGV[1])
@@ -66,6 +68,14 @@ func (dt *DynamicThrottler) SetQuotas(client *redis.Client, quotas []RequestQuot
 	return nil
 }
 func (dt *DynamicThrottler) admitQuotas(ctx context.Context) error {
+	return dt.evaluateQuotas(ctx, true)
+}
+
+func (dt *DynamicThrottler) checkQuotas(ctx context.Context) error {
+	return dt.evaluateQuotas(ctx, false)
+}
+
+func (dt *DynamicThrottler) evaluateQuotas(ctx context.Context, charge bool) error {
 	if len(dt.quotas) == 0 {
 		return nil
 	}
@@ -76,7 +86,11 @@ func (dt *DynamicThrottler) admitQuotas(ctx context.Context) error {
 	}
 	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(scope)))
 	keys := make([]string, 0, len(dt.quotas))
-	args := []any{uuid.NewString()}
+	attempt := ""
+	if charge {
+		attempt = uuid.NewString()
+	}
+	args := []any{attempt}
 	for _, q := range dt.quotas {
 		keys = append(keys, dt.keyPrefix+"{request-quota:"+digest+"}:"+q.Name)
 		args = append(args, q.Window.Milliseconds(), q.Requests)

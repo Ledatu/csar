@@ -102,6 +102,11 @@ func (dt *DynamicThrottler) Wait(ctx context.Context) error {
 	dt.waiting.Add(1)
 	defer dt.waiting.Add(-1)
 
+	// A method already held by its quota must not burn a shared pacing slot.
+	// This check grants nothing: admission rechecks all windows after GCRA.
+	if err := dt.checkQuotas(ctx); err != nil {
+		return err
+	}
 	resolvedKey := dt.resolveKey(requestFromContext(ctx))
 	if err := gcraWait(ctx, dt.client, dt.script, dt.keyPrefix+resolvedKey, resolvedKey,
 		newGCRAParams(dt.rps, dt.burst), dt.maxWait); err != nil {
