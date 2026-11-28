@@ -1365,7 +1365,10 @@ body or connection failure. Redaction and cache fills can still buffer bodies.
 
 The restart-required `--response-gzip` router flag defaults to false. When enabled,
 Core's `httpx/compress` adds fast negotiated gzip to HTTP 200 JSON responses of at
-least 1 KiB. Its decision buffers at most a small prefix, not the whole body. An
+least 1 KiB on non-internal routes. Every route on the shared `/svc` and
+`/svc/…` internal surface skips CSAR-generated compression, independently of
+service name or cache status; request Accept-Encoding and upstream encoded bytes
+pass through unchanged. Its decision buffers at most a small prefix, not the whole body. An
 explicit flush immediately commits the negotiated encoding, including for small
 prefixes, so chunked proxy responses can stay compressed and stream. Existing
 upstream gzip passes through unchanged. The wrapper sits outside the reloadable router,

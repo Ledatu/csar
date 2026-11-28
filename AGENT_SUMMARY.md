@@ -8,7 +8,9 @@ Retry-enabled routes stream non-retryable responses and final attempts; only int
 responses retain capture. Configured replay eligibility and timing are unchanged.
 `--response-gzip` is restart-required/default-off, applying Core's shared bounded
 JSON compressor outside the reloadable router (after redaction/cache selection).
-Upstream gzip remains intact. Health/readiness and unsupported representations
+The shared /svc surface universally skips generated gzip without service-name
+checks. Upstream negotiation, gzip bytes and cache representations remain intact.
+Health/readiness and unsupported representations
 are not newly encoded. Response cache keys now isolate all Accept-Encoding lines;
 GET/HEAD encoding version and post-v2 create a cold cache during mixed-version
 rollout. Cache-fill/coalescing/DLP buffering remains. Matching Core source is
