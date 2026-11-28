@@ -27,6 +27,9 @@ import (
 
 // New creates a new Router from the given configuration.
 func New(cfg *config.Config, logger *slog.Logger, opts ...Option) (*Router, error) {
+	if err := cfg.ValidateResponseCompression(); err != nil {
+		return nil, err
+	}
 	if err := cfg.ValidateRequestQuotas(); err != nil {
 		return nil, err
 	}
@@ -198,6 +201,7 @@ func (r *Router) buildRoute(cfg *config.Config, fr config.FlatRoute, cbManager *
 		originalPath:    fr.Path,
 		upstreamTimeout: fr.Route.Backend.Timeout.Duration,
 	}
+	rt.responseWrapper = r.responseCompression(fr.Route.ResponseCompression)
 
 	rt.rejectionHeader, rt.rejectCredentialUnauthorized = r.credentialRejectionKeys[key]
 

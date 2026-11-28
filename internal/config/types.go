@@ -325,6 +325,9 @@ type RouteConfig struct {
 	// Cache configures HTTP response caching for this route.
 	Cache *CacheConfig `yaml:"x-csar-cache,omitempty" json:"x-csar-cache,omitempty"`
 
+	// ResponseCompression is opt-in and independent of URL shape or cache status.
+	ResponseCompression *ResponseCompressionConfig `yaml:"x-csar-response-compression,omitempty" json:"x-csar-response-compression,omitempty"`
+
 	// CacheInvalidate configures cache invalidation after successful mutation responses.
 	CacheInvalidate *CacheInvalidationConfig `yaml:"x-csar-cache-invalidate,omitempty" json:"x-csar-cache-invalidate,omitempty"`
 

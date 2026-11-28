@@ -8,7 +8,13 @@ Retry-enabled routes stream non-retryable responses and final attempts; only int
 responses retain capture. Configured replay eligibility and timing are unchanged.
 `--response-gzip` is restart-required/default-off, applying Core's shared bounded
 JSON compressor outside the reloadable router (after redaction/cache selection).
-Upstream gzip remains intact. Health/readiness and unsupported representations
+Generated gzip is selected by x-csar-response-compression, independent of URL,
+identity and cache status. Missing policy inherits the explicit startup flag,
+which defaults off; route passthrough/gzip overrides it. Upstream negotiation,
+gzip bytes and cache representations remain intact. Coordinator snapshots carry
+the shared csar-proto policy and preservation capability; upgrade readers before
+publishing policies. The client-facing wire protocol remains v1.
+Health/readiness and unsupported representations
 are not newly encoded. Response cache keys now isolate all Accept-Encoding lines;
 GET/HEAD encoding version and post-v2 create a cold cache during mixed-version
 rollout. Cache-fill/coalescing/DLP buffering remains. Matching Core source is

@@ -6,6 +6,7 @@ option go_package = "github.com/ledatu/csar/proto/csar/v1;csarv1";
 
 import "google/protobuf/duration.proto";
 import "csar/throttle/v1/quota.proto";
+import "csar/config/v1/response_compression.proto";
 
 // CoordinatorService is the internal gRPC service for Coordinator <-> Router communication.
 // Routers connect to the Coordinator to receive configuration and quota assignments.
@@ -176,6 +177,9 @@ message RouteConfig {
 
   // Empty retains tenant semantics; account requires explicit capability.
   optional string origin_binding = 38;
+
+  // Explicit encoding policy; absent inherits the router's startup default.
+  csar.config.v1.ResponseCompression response_compression = 39;
 }
 
 // ---------------------------------------------------------------------------

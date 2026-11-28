@@ -1370,16 +1370,57 @@ omitted attempt budget as one so older routers do not infer three total attempts
 A response already committed to the caller is never replayed because of a later
 body or connection failure. Redaction and cache fills can still buffer bodies.
 
-The restart-required `--response-gzip` router flag defaults to false. When enabled,
-Core's `httpx/compress` adds fast negotiated gzip to HTTP 200 JSON responses of at
-least 1 KiB. Its decision buffers at most a small prefix, not the whole body. An
-explicit flush immediately commits the negotiated encoding, including for small
-prefixes, so chunked proxy responses can stay compressed and stream. Existing
-upstream gzip passes through unchanged. The wrapper sits outside the reloadable router,
-so redaction and cache selection finish first; health/readiness endpoints are
-not wrapped. HEAD, ranges, partial/non-JSON responses, upgrades, cookies,
-no-store and no-transform bypass new compression. No request decompression,
-new retries or automatic production activation is introduced.
+Response compression is pass-through by default, independent of URLs, service
+identity and cache status. A client advertising gzip only declares decoding
+support; it does not enable CSAR-generated compression. To opt in on a route:
+
+```yaml
+paths:
+  /any/path:
+    get:
+      x-csar-backend:
+        target_url: https://upstream.example/data
+      x-csar-response-compression:
+        mode: gzip
+        min_bytes: 1024
+```
+
+`mode: passthrough` explicitly preserves upstream encoding. An omitted block
+inherits the startup default: the legacy restart-required `--response-gzip` flag
+is an explicit global opt-in and defaults to false. An explicit route mode wins
+in either direction, including passthrough when the legacy flag is true. Invalid
+or missing modes fail validation. `min_bytes` is gzip-only; zero/omitted uses
+1KiB, otherwise it must be 1..65536. No URL prefix, host or actor classification
+participates in the decision. To use per-route opt-in in an installation that
+previously enabled the blanket flag, remove that flag during its normal approved
+rollout; existing command overrides do not disappear from publishing YAML.
+Removing the blanket flag changes only the inherited default; explicit gzip
+route policies remain enabled until changed or removed.
+
+Core's `httpx/compress` supplies the shared streaming middleware. Enabled routes
+negotiate eligible HTTP 200 JSON responses with the client. The decision buffers
+only the bounded prefix, and explicit flush prioritizes streaming even for small
+bodies. Already-encoded upstream responses, including multiple Content-Encoding
+header lines, pass through without recompression. HEAD, ranges, partial/non-JSON
+responses, upgrades, cookies, no-store and no-transform do not get generated gzip.
+No request decompression or new retries are introduced.
+
+Compression wraps the final matched-route response outside audit, redaction and
+cache handling. The cache retains the upstream representation, so switching an
+encoding policy does not contaminate or require rewriting entries. Encoder pools
+are reused across routes with the same configuration and across dispatched
+requests; no live mutable request policy is shared. Outer HTTP instrumentation
+can observe the encoded response bytes; consumed decoded JSON is a separate
+client-side measurement.
+
+Coordinator snapshots preserve the optional route policy using the canonical
+`csar-proto/csar/config/v1.ResponseCompression` message, additive RouteConfig tag
+39 and preservation capability `csar.response_compression_policy_version=1`.
+Upgrade coordinator and routers before publishing route policies: unsupported
+routers are refused those snapshots, and new routers retain the last good
+configuration if a legacy snapshot would drop an active policy. Explicit policy
+removal is versioned too. The client-facing protocol stays v1; no SDK migration,
+source activation or automatic production rollout is implied.
 
 Response-cache keys always include every Accept-Encoding header line, including
 absence, independently of authored vary_headers. GET/HEAD use an encoding version

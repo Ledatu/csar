@@ -7,7 +7,8 @@
 package csarv1
 
 import (
-	v1 "github.com/ledatu/csar-proto/csar/throttle/v1"
+	v1 "github.com/ledatu/csar-proto/csar/config/v1"
+	v11 "github.com/ledatu/csar-proto/csar/throttle/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
@@ -595,8 +596,10 @@ type RouteConfig struct {
 	UsageBudgetFleet       uint32               `protobuf:"varint,37,opt,name=usage_budget_fleet,json=usageBudgetFleet,proto3" json:"usage_budget_fleet,omitempty"`
 	// Empty retains tenant semantics; account requires explicit capability.
 	OriginBinding *string `protobuf:"bytes,38,opt,name=origin_binding,json=originBinding,proto3,oneof" json:"origin_binding,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Explicit encoding policy; absent inherits the router's startup default.
+	ResponseCompression *v1.ResponseCompression `protobuf:"bytes,39,opt,name=response_compression,json=responseCompression,proto3" json:"response_compression,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *RouteConfig) Reset() {
@@ -879,6 +882,13 @@ func (x *RouteConfig) GetOriginBinding() string {
 		return *x.OriginBinding
 	}
 	return ""
+}
+
+func (x *RouteConfig) GetResponseCompression() *v1.ResponseCompression {
+	if x != nil {
+		return x.ResponseCompression
+	}
+	return nil
 }
 
 type BackendConfigProto struct {
@@ -1437,7 +1447,7 @@ type TrafficConfigProto struct {
 	VipOverrides         []*VIPOverrideProto        `protobuf:"bytes,8,rep,name=vip_overrides,json=vipOverrides,proto3" json:"vip_overrides,omitempty"`
 	AdaptiveBackpressure *AdaptiveBackpressureProto `protobuf:"bytes,9,opt,name=adaptive_backpressure,json=adaptiveBackpressure,proto3" json:"adaptive_backpressure,omitempty"`
 	ClientLimitMode      string                     `protobuf:"bytes,10,opt,name=client_limit_mode,json=clientLimitMode,proto3" json:"client_limit_mode,omitempty"`
-	Quotas               []*v1.RequestQuota         `protobuf:"bytes,11,rep,name=quotas,proto3" json:"quotas,omitempty"`
+	Quotas               []*v11.RequestQuota        `protobuf:"bytes,11,rep,name=quotas,proto3" json:"quotas,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -1542,7 +1552,7 @@ func (x *TrafficConfigProto) GetClientLimitMode() string {
 	return ""
 }
 
-func (x *TrafficConfigProto) GetQuotas() []*v1.RequestQuota {
+func (x *TrafficConfigProto) GetQuotas() []*v11.RequestQuota {
 	if x != nil {
 		return x.Quotas
 	}
@@ -1679,7 +1689,7 @@ type ThrottlingPolicyProto struct {
 	ExcludeIps      []string               `protobuf:"bytes,6,rep,name=exclude_ips,json=excludeIps,proto3" json:"exclude_ips,omitempty"`
 	VipOverrides    []*VIPOverrideProto    `protobuf:"bytes,7,rep,name=vip_overrides,json=vipOverrides,proto3" json:"vip_overrides,omitempty"`
 	ClientLimitMode string                 `protobuf:"bytes,8,opt,name=client_limit_mode,json=clientLimitMode,proto3" json:"client_limit_mode,omitempty"`
-	Quotas          []*v1.RequestQuota     `protobuf:"bytes,9,rep,name=quotas,proto3" json:"quotas,omitempty"`
+	Quotas          []*v11.RequestQuota    `protobuf:"bytes,9,rep,name=quotas,proto3" json:"quotas,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1770,7 +1780,7 @@ func (x *ThrottlingPolicyProto) GetClientLimitMode() string {
 	return ""
 }
 
-func (x *ThrottlingPolicyProto) GetQuotas() []*v1.RequestQuota {
+func (x *ThrottlingPolicyProto) GetQuotas() []*v11.RequestQuota {
 	if x != nil {
 		return x.Quotas
 	}
@@ -4030,7 +4040,7 @@ var File_proto_csar_v1_coordinator_proto protoreflect.FileDescriptor
 
 const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\n" +
-	"\x1fproto/csar/v1/coordinator.proto\x12\acsar.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1ccsar/throttle/v1/quota.proto\"\x84\x02\n" +
+	"\x1fproto/csar/v1/coordinator.proto\x12\acsar.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1ccsar/throttle/v1/quota.proto\x1a)csar/config/v1/response_compression.proto\"\x84\x02\n" +
 	"\x10SubscribeRequest\x12\x1b\n" +
 	"\trouter_id\x18\x01 \x01(\tR\brouterId\x12%\n" +
 	"\x0erouter_address\x18\x02 \x01(\tR\rrouterAddress\x12C\n" +
@@ -4117,7 +4127,7 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\rR\x05value:\x028\x01B\x13\n" +
 	"\x11_redis_key_prefix\"=\n" +
 	"\rRouteSnapshot\x12,\n" +
-	"\x06routes\x18\x01 \x03(\v2\x14.csar.v1.RouteConfigR\x06routes\"\xcb\x0e\n" +
+	"\x06routes\x18\x01 \x03(\v2\x14.csar.v1.RouteConfigR\x06routes\"\xa3\x0f\n" +
 	"\vRouteConfig\x12\x19\n" +
 	"\broute_id\x18\x01 \x01(\tR\arouteId\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x16\n" +
@@ -4161,7 +4171,8 @@ const file_proto_csar_v1_coordinator_proto_rawDesc = "" +
 	"\x12usage_budget_owner\x18# \x01(\rR\x10usageBudgetOwner\x129\n" +
 	"\x19usage_budget_owner_seller\x18$ \x01(\rR\x16usageBudgetOwnerSeller\x12,\n" +
 	"\x12usage_budget_fleet\x18% \x01(\rR\x10usageBudgetFleet\x12*\n" +
-	"\x0eorigin_binding\x18& \x01(\tH\x00R\roriginBinding\x88\x01\x01\x1a:\n" +
+	"\x0eorigin_binding\x18& \x01(\tH\x00R\roriginBinding\x88\x01\x01\x12V\n" +
+	"\x14response_compression\x18' \x01(\v2#.csar.config.v1.ResponseCompressionR\x13responseCompression\x1a:\n" +
 	"\fHeadersEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\x11\n" +
@@ -4566,7 +4577,8 @@ var file_proto_csar_v1_coordinator_proto_goTypes = []any{
 	nil,                                  // 64: csar.v1.HealthReport.QueueDepthsEntry
 	nil,                                  // 65: csar.v1.HealthReport.MetadataEntry
 	(*durationpb.Duration)(nil),          // 66: google.protobuf.Duration
-	(*v1.RequestQuota)(nil),              // 67: csar.throttle.v1.RequestQuota
+	(*v1.ResponseCompression)(nil),       // 67: csar.config.v1.ResponseCompression
+	(*v11.RequestQuota)(nil),             // 68: csar.throttle.v1.RequestQuota
 }
 var file_proto_csar_v1_coordinator_proto_depIdxs = []int32{
 	43,  // 0: csar.v1.SubscribeRequest.metadata:type_name -> csar.v1.SubscribeRequest.MetadataEntry
@@ -4613,79 +4625,80 @@ var file_proto_csar_v1_coordinator_proto_depIdxs = []int32{
 	31,  // 41: csar.v1.RouteConfig.cache_invalidate:type_name -> csar.v1.CacheInvalidationConfigProto
 	20,  // 42: csar.v1.RouteConfig.audit_capture:type_name -> csar.v1.AuditCaptureConfigProto
 	66,  // 43: csar.v1.RouteConfig.usage_budget_window:type_name -> google.protobuf.Duration
-	7,   // 44: csar.v1.BackendConfigProto.health_check:type_name -> csar.v1.HealthCheckConfigProto
-	8,   // 45: csar.v1.BackendConfigProto.tls:type_name -> csar.v1.BackendTLSConfigProto
-	66,  // 46: csar.v1.BackendConfigProto.timeout:type_name -> google.protobuf.Duration
-	66,  // 47: csar.v1.HealthCheckConfigProto.interval:type_name -> google.protobuf.Duration
-	66,  // 48: csar.v1.HealthCheckConfigProto.timeout:type_name -> google.protobuf.Duration
-	66,  // 49: csar.v1.BackendPoolConfigProto.dial_timeout:type_name -> google.protobuf.Duration
-	66,  // 50: csar.v1.BackendPoolConfigProto.tls_handshake_timeout:type_name -> google.protobuf.Duration
-	66,  // 51: csar.v1.BackendPoolConfigProto.response_header_timeout:type_name -> google.protobuf.Duration
-	66,  // 52: csar.v1.BackendPoolConfigProto.idle_conn_timeout:type_name -> google.protobuf.Duration
-	66,  // 53: csar.v1.BackendPoolConfigProto.expect_continue_timeout:type_name -> google.protobuf.Duration
-	66,  // 54: csar.v1.TrafficConfigProto.max_wait:type_name -> google.protobuf.Duration
-	13,  // 55: csar.v1.TrafficConfigProto.vip_overrides:type_name -> csar.v1.VIPOverrideProto
-	14,  // 56: csar.v1.TrafficConfigProto.adaptive_backpressure:type_name -> csar.v1.AdaptiveBackpressureProto
-	67,  // 57: csar.v1.TrafficConfigProto.quotas:type_name -> csar.throttle.v1.RequestQuota
-	59,  // 58: csar.v1.VIPOverrideProto.values:type_name -> csar.v1.VIPOverrideProto.ValuesEntry
-	66,  // 59: csar.v1.ThrottlingPolicyProto.max_wait:type_name -> google.protobuf.Duration
-	13,  // 60: csar.v1.ThrottlingPolicyProto.vip_overrides:type_name -> csar.v1.VIPOverrideProto
-	67,  // 61: csar.v1.ThrottlingPolicyProto.quotas:type_name -> csar.throttle.v1.RequestQuota
-	66,  // 62: csar.v1.GlobalThrottleProto.max_wait:type_name -> google.protobuf.Duration
-	66,  // 63: csar.v1.AuthValidateConfigProto.cache_ttl:type_name -> google.protobuf.Duration
-	60,  // 64: csar.v1.AuthValidateConfigProto.required_claims:type_name -> csar.v1.AuthValidateConfigProto.RequiredClaimsEntry
-	61,  // 65: csar.v1.AuthValidateConfigProto.forward_claims:type_name -> csar.v1.AuthValidateConfigProto.ForwardClaimsEntry
-	11,  // 66: csar.v1.AuthValidateConfigProto.issue_tokens:type_name -> csar.v1.IssueTokenConfigProto
-	17,  // 67: csar.v1.AuthValidateConfigProto.methods:type_name -> csar.v1.AuthValidateConfigProto
-	66,  // 68: csar.v1.RetryConfigProto.backoff:type_name -> google.protobuf.Duration
-	66,  // 69: csar.v1.RetryConfigProto.max_backoff:type_name -> google.protobuf.Duration
-	66,  // 70: csar.v1.RetryConfigProto.max_internal_wait:type_name -> google.protobuf.Duration
-	62,  // 71: csar.v1.TenantConfigProto.backends:type_name -> csar.v1.TenantConfigProto.BackendsEntry
-	66,  // 72: csar.v1.CacheTTLRuleProto.ttl:type_name -> google.protobuf.Duration
-	66,  // 73: csar.v1.CacheResponseTTLRuleProto.ttl:type_name -> google.protobuf.Duration
-	27,  // 74: csar.v1.CacheBypassConfigProto.headers:type_name -> csar.v1.CacheBypassHeaderProto
-	66,  // 75: csar.v1.CacheCoalesceConfigProto.wait:type_name -> google.protobuf.Duration
-	66,  // 76: csar.v1.CacheConfigProto.ttl:type_name -> google.protobuf.Duration
-	66,  // 77: csar.v1.CacheConfigProto.operation_timeout:type_name -> google.protobuf.Duration
-	23,  // 78: csar.v1.CacheConfigProto.ttl_rules:type_name -> csar.v1.CacheTTLRuleProto
-	24,  // 79: csar.v1.CacheConfigProto.key_query:type_name -> csar.v1.CacheKeyQueryConfigProto
-	66,  // 80: csar.v1.CacheConfigProto.stale_if_error:type_name -> google.protobuf.Duration
-	66,  // 81: csar.v1.CacheConfigProto.stale_while_revalidate:type_name -> google.protobuf.Duration
-	25,  // 82: csar.v1.CacheConfigProto.response_ttl_rules:type_name -> csar.v1.CacheResponseTTLRuleProto
-	26,  // 83: csar.v1.CacheConfigProto.response_tags:type_name -> csar.v1.CacheResponseTagProto
-	28,  // 84: csar.v1.CacheConfigProto.bypass:type_name -> csar.v1.CacheBypassConfigProto
-	29,  // 85: csar.v1.CacheConfigProto.coalesce:type_name -> csar.v1.CacheCoalesceConfigProto
-	66,  // 86: csar.v1.CacheInvalidationConfigProto.operation_timeout:type_name -> google.protobuf.Duration
-	66,  // 87: csar.v1.CacheInvalidationConfigProto.debounce:type_name -> google.protobuf.Duration
-	66,  // 88: csar.v1.CircuitBreakerProfileProto.interval:type_name -> google.protobuf.Duration
-	66,  // 89: csar.v1.CircuitBreakerProfileProto.timeout:type_name -> google.protobuf.Duration
-	37,  // 90: csar.v1.AuthzRouteConfigProto.any_of:type_name -> csar.v1.AuthzRouteConfigProto
-	63,  // 91: csar.v1.QuotaAssignment.quotas:type_name -> csar.v1.QuotaAssignment.QuotasEntry
-	64,  // 92: csar.v1.HealthReport.queue_depths:type_name -> csar.v1.HealthReport.QueueDepthsEntry
-	65,  // 93: csar.v1.HealthReport.metadata:type_name -> csar.v1.HealthReport.MetadataEntry
-	34,  // 94: csar.v1.FullConfigSnapshot.CircuitBreakersEntry.value:type_name -> csar.v1.CircuitBreakerProfileProto
-	10,  // 95: csar.v1.FullConfigSnapshot.SecurityProfilesEntry.value:type_name -> csar.v1.SecurityConfigProto
-	15,  // 96: csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry.value:type_name -> csar.v1.ThrottlingPolicyProto
-	21,  // 97: csar.v1.FullConfigSnapshot.CorsPoliciesEntry.value:type_name -> csar.v1.CORSConfigProto
-	18,  // 98: csar.v1.FullConfigSnapshot.RetryPoliciesEntry.value:type_name -> csar.v1.RetryConfigProto
-	19,  // 99: csar.v1.FullConfigSnapshot.RedactPoliciesEntry.value:type_name -> csar.v1.RedactConfigProto
-	17,  // 100: csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry.value:type_name -> csar.v1.AuthValidateConfigProto
-	37,  // 101: csar.v1.FullConfigSnapshot.AuthzPoliciesEntry.value:type_name -> csar.v1.AuthzRouteConfigProto
-	8,   // 102: csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry.value:type_name -> csar.v1.BackendTLSConfigProto
-	9,   // 103: csar.v1.FullConfigSnapshot.BackendPoolsEntry.value:type_name -> csar.v1.BackendPoolConfigProto
-	30,  // 104: csar.v1.FullConfigSnapshot.CachePoliciesEntry.value:type_name -> csar.v1.CacheConfigProto
-	31,  // 105: csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry.value:type_name -> csar.v1.CacheInvalidationConfigProto
-	20,  // 106: csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntry.value:type_name -> csar.v1.AuditCaptureConfigProto
-	39,  // 107: csar.v1.QuotaAssignment.QuotasEntry.value:type_name -> csar.v1.RouteQuota
-	0,   // 108: csar.v1.CoordinatorService.Subscribe:input_type -> csar.v1.SubscribeRequest
-	40,  // 109: csar.v1.CoordinatorService.ReportHealth:input_type -> csar.v1.HealthReport
-	1,   // 110: csar.v1.CoordinatorService.Subscribe:output_type -> csar.v1.ConfigUpdate
-	41,  // 111: csar.v1.CoordinatorService.ReportHealth:output_type -> csar.v1.HealthAck
-	110, // [110:112] is the sub-list for method output_type
-	108, // [108:110] is the sub-list for method input_type
-	108, // [108:108] is the sub-list for extension type_name
-	108, // [108:108] is the sub-list for extension extendee
-	0,   // [0:108] is the sub-list for field type_name
+	67,  // 44: csar.v1.RouteConfig.response_compression:type_name -> csar.config.v1.ResponseCompression
+	7,   // 45: csar.v1.BackendConfigProto.health_check:type_name -> csar.v1.HealthCheckConfigProto
+	8,   // 46: csar.v1.BackendConfigProto.tls:type_name -> csar.v1.BackendTLSConfigProto
+	66,  // 47: csar.v1.BackendConfigProto.timeout:type_name -> google.protobuf.Duration
+	66,  // 48: csar.v1.HealthCheckConfigProto.interval:type_name -> google.protobuf.Duration
+	66,  // 49: csar.v1.HealthCheckConfigProto.timeout:type_name -> google.protobuf.Duration
+	66,  // 50: csar.v1.BackendPoolConfigProto.dial_timeout:type_name -> google.protobuf.Duration
+	66,  // 51: csar.v1.BackendPoolConfigProto.tls_handshake_timeout:type_name -> google.protobuf.Duration
+	66,  // 52: csar.v1.BackendPoolConfigProto.response_header_timeout:type_name -> google.protobuf.Duration
+	66,  // 53: csar.v1.BackendPoolConfigProto.idle_conn_timeout:type_name -> google.protobuf.Duration
+	66,  // 54: csar.v1.BackendPoolConfigProto.expect_continue_timeout:type_name -> google.protobuf.Duration
+	66,  // 55: csar.v1.TrafficConfigProto.max_wait:type_name -> google.protobuf.Duration
+	13,  // 56: csar.v1.TrafficConfigProto.vip_overrides:type_name -> csar.v1.VIPOverrideProto
+	14,  // 57: csar.v1.TrafficConfigProto.adaptive_backpressure:type_name -> csar.v1.AdaptiveBackpressureProto
+	68,  // 58: csar.v1.TrafficConfigProto.quotas:type_name -> csar.throttle.v1.RequestQuota
+	59,  // 59: csar.v1.VIPOverrideProto.values:type_name -> csar.v1.VIPOverrideProto.ValuesEntry
+	66,  // 60: csar.v1.ThrottlingPolicyProto.max_wait:type_name -> google.protobuf.Duration
+	13,  // 61: csar.v1.ThrottlingPolicyProto.vip_overrides:type_name -> csar.v1.VIPOverrideProto
+	68,  // 62: csar.v1.ThrottlingPolicyProto.quotas:type_name -> csar.throttle.v1.RequestQuota
+	66,  // 63: csar.v1.GlobalThrottleProto.max_wait:type_name -> google.protobuf.Duration
+	66,  // 64: csar.v1.AuthValidateConfigProto.cache_ttl:type_name -> google.protobuf.Duration
+	60,  // 65: csar.v1.AuthValidateConfigProto.required_claims:type_name -> csar.v1.AuthValidateConfigProto.RequiredClaimsEntry
+	61,  // 66: csar.v1.AuthValidateConfigProto.forward_claims:type_name -> csar.v1.AuthValidateConfigProto.ForwardClaimsEntry
+	11,  // 67: csar.v1.AuthValidateConfigProto.issue_tokens:type_name -> csar.v1.IssueTokenConfigProto
+	17,  // 68: csar.v1.AuthValidateConfigProto.methods:type_name -> csar.v1.AuthValidateConfigProto
+	66,  // 69: csar.v1.RetryConfigProto.backoff:type_name -> google.protobuf.Duration
+	66,  // 70: csar.v1.RetryConfigProto.max_backoff:type_name -> google.protobuf.Duration
+	66,  // 71: csar.v1.RetryConfigProto.max_internal_wait:type_name -> google.protobuf.Duration
+	62,  // 72: csar.v1.TenantConfigProto.backends:type_name -> csar.v1.TenantConfigProto.BackendsEntry
+	66,  // 73: csar.v1.CacheTTLRuleProto.ttl:type_name -> google.protobuf.Duration
+	66,  // 74: csar.v1.CacheResponseTTLRuleProto.ttl:type_name -> google.protobuf.Duration
+	27,  // 75: csar.v1.CacheBypassConfigProto.headers:type_name -> csar.v1.CacheBypassHeaderProto
+	66,  // 76: csar.v1.CacheCoalesceConfigProto.wait:type_name -> google.protobuf.Duration
+	66,  // 77: csar.v1.CacheConfigProto.ttl:type_name -> google.protobuf.Duration
+	66,  // 78: csar.v1.CacheConfigProto.operation_timeout:type_name -> google.protobuf.Duration
+	23,  // 79: csar.v1.CacheConfigProto.ttl_rules:type_name -> csar.v1.CacheTTLRuleProto
+	24,  // 80: csar.v1.CacheConfigProto.key_query:type_name -> csar.v1.CacheKeyQueryConfigProto
+	66,  // 81: csar.v1.CacheConfigProto.stale_if_error:type_name -> google.protobuf.Duration
+	66,  // 82: csar.v1.CacheConfigProto.stale_while_revalidate:type_name -> google.protobuf.Duration
+	25,  // 83: csar.v1.CacheConfigProto.response_ttl_rules:type_name -> csar.v1.CacheResponseTTLRuleProto
+	26,  // 84: csar.v1.CacheConfigProto.response_tags:type_name -> csar.v1.CacheResponseTagProto
+	28,  // 85: csar.v1.CacheConfigProto.bypass:type_name -> csar.v1.CacheBypassConfigProto
+	29,  // 86: csar.v1.CacheConfigProto.coalesce:type_name -> csar.v1.CacheCoalesceConfigProto
+	66,  // 87: csar.v1.CacheInvalidationConfigProto.operation_timeout:type_name -> google.protobuf.Duration
+	66,  // 88: csar.v1.CacheInvalidationConfigProto.debounce:type_name -> google.protobuf.Duration
+	66,  // 89: csar.v1.CircuitBreakerProfileProto.interval:type_name -> google.protobuf.Duration
+	66,  // 90: csar.v1.CircuitBreakerProfileProto.timeout:type_name -> google.protobuf.Duration
+	37,  // 91: csar.v1.AuthzRouteConfigProto.any_of:type_name -> csar.v1.AuthzRouteConfigProto
+	63,  // 92: csar.v1.QuotaAssignment.quotas:type_name -> csar.v1.QuotaAssignment.QuotasEntry
+	64,  // 93: csar.v1.HealthReport.queue_depths:type_name -> csar.v1.HealthReport.QueueDepthsEntry
+	65,  // 94: csar.v1.HealthReport.metadata:type_name -> csar.v1.HealthReport.MetadataEntry
+	34,  // 95: csar.v1.FullConfigSnapshot.CircuitBreakersEntry.value:type_name -> csar.v1.CircuitBreakerProfileProto
+	10,  // 96: csar.v1.FullConfigSnapshot.SecurityProfilesEntry.value:type_name -> csar.v1.SecurityConfigProto
+	15,  // 97: csar.v1.FullConfigSnapshot.ThrottlingPoliciesEntry.value:type_name -> csar.v1.ThrottlingPolicyProto
+	21,  // 98: csar.v1.FullConfigSnapshot.CorsPoliciesEntry.value:type_name -> csar.v1.CORSConfigProto
+	18,  // 99: csar.v1.FullConfigSnapshot.RetryPoliciesEntry.value:type_name -> csar.v1.RetryConfigProto
+	19,  // 100: csar.v1.FullConfigSnapshot.RedactPoliciesEntry.value:type_name -> csar.v1.RedactConfigProto
+	17,  // 101: csar.v1.FullConfigSnapshot.AuthValidatePoliciesEntry.value:type_name -> csar.v1.AuthValidateConfigProto
+	37,  // 102: csar.v1.FullConfigSnapshot.AuthzPoliciesEntry.value:type_name -> csar.v1.AuthzRouteConfigProto
+	8,   // 103: csar.v1.FullConfigSnapshot.BackendTlsPoliciesEntry.value:type_name -> csar.v1.BackendTLSConfigProto
+	9,   // 104: csar.v1.FullConfigSnapshot.BackendPoolsEntry.value:type_name -> csar.v1.BackendPoolConfigProto
+	30,  // 105: csar.v1.FullConfigSnapshot.CachePoliciesEntry.value:type_name -> csar.v1.CacheConfigProto
+	31,  // 106: csar.v1.FullConfigSnapshot.CacheInvalidationPoliciesEntry.value:type_name -> csar.v1.CacheInvalidationConfigProto
+	20,  // 107: csar.v1.FullConfigSnapshot.AuditCapturePoliciesEntry.value:type_name -> csar.v1.AuditCaptureConfigProto
+	39,  // 108: csar.v1.QuotaAssignment.QuotasEntry.value:type_name -> csar.v1.RouteQuota
+	0,   // 109: csar.v1.CoordinatorService.Subscribe:input_type -> csar.v1.SubscribeRequest
+	40,  // 110: csar.v1.CoordinatorService.ReportHealth:input_type -> csar.v1.HealthReport
+	1,   // 111: csar.v1.CoordinatorService.Subscribe:output_type -> csar.v1.ConfigUpdate
+	41,  // 112: csar.v1.CoordinatorService.ReportHealth:output_type -> csar.v1.HealthAck
+	111, // [111:113] is the sub-list for method output_type
+	109, // [109:111] is the sub-list for method input_type
+	109, // [109:109] is the sub-list for extension type_name
+	109, // [109:109] is the sub-list for extension extendee
+	0,   // [0:109] is the sub-list for field type_name
 }
 
 func init() { file_proto_csar_v1_coordinator_proto_init() }

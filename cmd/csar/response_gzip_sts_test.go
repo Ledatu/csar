@@ -50,19 +50,21 @@ func TestResponseGzipSTSClientPreservesV1(t *testing.T) {
 		headers http.Header
 	}
 	baseline := make(map[string]sample)
+	var upstreamCalls atomic.Int32
 	for _, enabled := range []bool{false, true} {
 		upstream := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			upstreamCalls.Add(1)
 			if r.Header.Get(gatewayctx.HeaderCsarAuthorization) != "Bearer test-token" || r.Header.Get("Authorization") != "Bearer provider-test-key" {
 				t.Error("STS or caller authorization changed")
 			}
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("X-CSAR-Protocol-Version", "1")
 			switch r.URL.Path {
-			case "/rate-limited":
+			case "/rate-limited", "/svc/future/rate-limited":
 				w.Header().Set("Retry-After", "2")
 				w.WriteHeader(http.StatusTooManyRequests)
 				_, _ = io.WriteString(w, `{"error":"vendor quota"}`)
-			case "/unavailable":
+			case "/unavailable", "/svc/future/unavailable":
 				w.WriteHeader(http.StatusServiceUnavailable)
 				_, _ = io.WriteString(w, `{"error":"vendor unavailable"}`)
 			default:
@@ -71,7 +73,7 @@ func TestResponseGzipSTSClientPreservesV1(t *testing.T) {
 		})
 		observed := backpressure.New(upstream, backpressure.Config{Enabled: true}, nil, logger)
 		server := httptest.NewServer(withResponseGzip(observed, enabled, logger))
-		for _, path := range []string{"/ok", "/rate-limited", "/unavailable"} {
+		for _, path := range []string{"/ok", "/rate-limited", "/unavailable", "/svc/future/ok", "/svc/future/rate-limited", "/svc/future/unavailable"} {
 			req, requestErr := http.NewRequestWithContext(context.Background(), http.MethodPost, server.URL+path, http.NoBody)
 			if requestErr != nil {
 				t.Fatal(requestErr)
@@ -96,13 +98,15 @@ func TestResponseGzipSTSClientPreservesV1(t *testing.T) {
 			} else if !reflect.DeepEqual(got, baseline[path]) {
 				t.Errorf("gzip changed decoded body or v1 errors on %s", path)
 			}
-			if path == "/ok" && (resp.Uncompressed != enabled || string(body) != payload) {
+			ok := strings.HasSuffix(path, "/ok")
+			wantDecodedGzip := enabled
+			if ok && (resp.Uncompressed != wantDecodedGzip || string(body) != payload) {
 				t.Error("normal STS client did not transparently decode negotiated gzip")
 			}
-			if path != "/ok" && resp.Uncompressed {
+			if !ok && resp.Uncompressed {
 				t.Error("gzip encoded an existing v1 error")
 			}
-			if path == "/rate-limited" && (resp.StatusCode != 503 || resp.Header.Get("X-CSAR-Status") != "throttled") {
+			if strings.HasSuffix(path, "/rate-limited") && (resp.StatusCode != 503 || resp.Header.Get("X-CSAR-Status") != "throttled") {
 				t.Error("existing 429 normalization changed")
 			}
 		}
@@ -110,5 +114,8 @@ func TestResponseGzipSTSClientPreservesV1(t *testing.T) {
 	}
 	if exchanges.Load() != 1 {
 		t.Errorf("token exchanges=%d, want one cached token", exchanges.Load())
+	}
+	if upstreamCalls.Load() != 12 {
+		t.Fatalf("unexpected upstream replay: %d calls", upstreamCalls.Load())
 	}
 }
