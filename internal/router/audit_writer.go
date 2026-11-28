@@ -2,9 +2,12 @@ package router
 
 import (
 	"bufio"
+	"errors"
 	"io"
+	"mime"
 	"net"
 	"net/http"
+	"strings"
 
 	auditcore "github.com/ledatu/csar-core/audit"
 )
@@ -34,7 +37,10 @@ func (a *auditResponseCapture) WriteHeader(code int) {
 	a.statusCode = code
 	a.written = true
 	a.contentType = a.Header().Get("Content-Type")
-	a.contentEncoding = a.Header().Get("Content-Encoding")
+	a.contentEncoding = strings.Join(a.Header().Values("Content-Encoding"), ",")
+	if ct, _, err := mime.ParseMediaType(a.contentType); err == nil && ct == "text/event-stream" {
+		a.capture = false
+	}
 	a.ResponseWriter.WriteHeader(code)
 }
 
@@ -44,7 +50,7 @@ func (a *auditResponseCapture) Write(body []byte) (int, error) {
 	}
 	n, err := a.ResponseWriter.Write(body)
 	a.observedBytes += int64(n)
-	if err != nil {
+	if err != nil || n != len(body) {
 		a.failed = true
 	}
 	if a.capture && a.statusCode >= 400 {
@@ -67,10 +73,13 @@ func (a *auditResponseCapture) FlushError() error {
 	if !a.written {
 		a.WriteHeader(http.StatusOK)
 	}
-	// A flushed stream may outlive the request and is not a complete envelope.
-	a.capture = false
-	a.body = nil
-	return http.NewResponseController(a.ResponseWriter).Flush()
+	// Flush describes delivery timing, not whether finite JSON will complete.
+	// Keep the bounded copy; the handler's completion determines eligibility.
+	err := http.NewResponseController(a.ResponseWriter).Flush()
+	if err != nil && !errors.Is(err, http.ErrNotSupported) {
+		a.failed = true
+	}
+	return err
 }
 
 func (a *auditResponseCapture) Hijack() (net.Conn, *bufio.ReadWriter, error) {
@@ -82,5 +91,9 @@ func (a *auditResponseCapture) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 }
 
 func (a *auditResponseCapture) ReadFrom(src io.Reader) (int64, error) {
-	return io.Copy(struct{ io.Writer }{a}, src)
+	n, err := io.Copy(struct{ io.Writer }{a}, src)
+	if err != nil {
+		a.failed = true
+	}
+	return n, err
 }

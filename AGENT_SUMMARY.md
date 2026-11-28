@@ -312,7 +312,11 @@ and internal admin surfaces.
   exclusions. Identity/email must come from validated gateway/forwarded claims,
   never caller-supplied early-denial headers. The private proxy response observer
   distinguishes transport failures from empty upstream HTTP responses without
-  trusting upstream headers. Streaming/flush/hijack bodies are omitted.
+  trusting upstream headers. Finite JSON error capture survives flushes; actual
+  SSE/upgrades, failed writes/reads and canceled requests remain incomplete or
+  omitted. Core inspects gzip from the bounded copy after handler completion,
+  with independent 64 KiB encoded/decoded limits and checksum validation.
+  Forwarded bytes and the v1 envelope are unchanged.
 - JWKS handling is split between router-local logic and `csar-core/jwtx`.
 - `gatewayctx` trust depends on the surrounding transport and network policy.
 - KMS/profile enforcement lives in both config validation and the runtime

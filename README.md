@@ -1204,14 +1204,19 @@ without buffering the whole response or changing the response body.
 `metadata.http_response` is a version-1 diagnostic envelope defined in
 `csar-core/audit`: status, origin/stage, elapsed milliseconds, observed byte count,
 capture state/reason and optional code, message and sanitized body. At most
-64 KiB is inspected. Only complete, uncompressed JSON error envelopes are kept,
-and only allowlisted diagnostic fields survive. Built-in sensitive-field and
-reflected-credential redaction always applies, even without a request redaction
+64 KiB of the delivered representation is copied for inspection. Complete plain
+or gzip JSON error envelopes are eligible; gzip inspection has an independent
+64 KiB decoded limit and validates every member and checksum. Only allowlisted
+diagnostic fields survive. Built-in sensitive-field and reflected-credential
+redaction always applies, even without a request redaction
 policy; route redaction rules add protection. The stored body is limited to
 4096 UTF-8 bytes, and the entire event metadata stays within the existing 16 KiB
-budget. Invalid/oversized JSON, unsupported encodings/content types and streaming
-or hijacked responses get an omission reason instead of a raw prefix. A truncated
-sanitized body is a string, not a malformed JSON object.
+budget. Flushes preserve the bounded diagnostic copy and do not delay forwarding;
+inspection runs after normal handler completion. SSE and hijacked responses,
+incomplete/invalid/oversized JSON, unsupported encodings/content types and corrupt
+gzip get an omission reason instead of a raw prefix. `observed_bytes` counts the
+representation received by the audit writer (encoded for gzip pass-through).
+A truncated sanitized body is a string, not a malformed JSON object.
 
 The captured body is the final client response after response shaping, rather
 than the original upstream payload. Origin is `router` for local refusals and
