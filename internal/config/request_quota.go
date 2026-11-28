@@ -23,8 +23,11 @@ func (c *Config) ValidateRequestQuotas() error {
 			if t == nil || len(t.Quotas) == 0 {
 				continue
 			}
-			if t.Backend != "redis" || t.Key == "" || t.MaxWait.Duration != 0 || len(t.VIPOverrides) > 0 || len(t.ExcludeIPs) > 0 {
-				return fmt.Errorf("route %s %s: request quotas require dynamic Redis admission without waits or bypasses", method, path)
+			if t.Backend != "redis" || t.Key == "" || len(t.VIPOverrides) > 0 || len(t.ExcludeIPs) > 0 {
+				return fmt.Errorf("route %s %s: request quotas require dynamic Redis admission without bypasses", method, path)
+			}
+			if err := requestquota.ValidateWait(t.MaxWait.Duration); err != nil {
+				return fmt.Errorf("route %s %s: %w", method, path, err)
 			}
 			route := methods[method]
 			if route.OrdinaryRetryEnabled() {

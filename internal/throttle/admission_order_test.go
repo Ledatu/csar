@@ -3,6 +3,7 @@ package throttle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -128,5 +129,105 @@ func TestQuotaEligibilityCheckGrantsNothingAndCommitRechecks(t *testing.T) {
 	var denied *RetryAfterError
 	if err := d.admitQuotas(ctx); !errors.As(err, &denied) || denied.Key != "request-quota" {
 		t.Fatalf("stale eligibility check granted another admission: %v", err)
+	}
+}
+
+func TestQuotaParkingRechecksAllowanceBeforeAdmission(t *testing.T) {
+	for _, mode := range []string{"exhausted", "cancelled", "redis_lost", "available"} {
+		t.Run(mode, func(t *testing.T) {
+			mr := miniredis.RunT(t)
+			client := redis.NewClient(&redis.Options{Addr: mr.Addr(), ContextTimeoutEnabled: true, MaxRetries: -1})
+			t.Cleanup(func() {
+				if err := client.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			parked := make(chan struct{}, 1)
+			client.AddHook(&quotaParkingHook{seen: parked})
+			d := NewDynamicThrottler(client, "park:", "shared:{query.cabinet}", 100, 1, time.Second)
+			if err := d.SetQuotas(client, []RequestQuota{{Name: "day", Key: "method:{query.cabinet}", Requests: 1, Window: 24 * time.Hour}}); err != nil {
+				t.Fatal(err)
+			}
+			// An existing reader occupies the common slot. The next request must park,
+			// without spending any of its rolling allowance in the preliminary check.
+			mustSet := mr.Set("park:shared:dd", fmt.Sprint(time.Now().Add(400*time.Millisecond).UnixMilli()))
+			if mustSet != nil {
+				t.Fatal(mustSet)
+			}
+			parent, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			ctx := WithRequest(parent, httptest.NewRequest("GET", "/read?cabinet=dd", nil))
+			done := make(chan error, 1)
+			go func() { done <- d.Wait(ctx) }()
+			select {
+			case <-parked:
+			case <-time.After(2 * time.Second):
+				t.Fatal("request never tried the shared slot")
+			}
+			if len(mr.Keys()) != 1 {
+				t.Fatal("precheck charged quota", mr.Keys())
+			}
+			switch mode {
+			case "exhausted":
+				// Another replica consumes the method allowance after our precheck.
+				if err := d.admitQuotas(ctx); err != nil {
+					t.Fatal(err)
+				}
+			case "cancelled":
+				cancel()
+			case "redis_lost":
+				mr.Close()
+			}
+			var err error
+			select {
+			case err = <-done:
+			case <-time.After(3 * time.Second):
+				t.Fatal("unbounded parking")
+			}
+			var denied *RetryAfterError
+			switch mode {
+			case "exhausted":
+				if !errors.As(err, &denied) || denied.Key != "request-quota" {
+					t.Fatalf("stale precheck admitted request: %v", err)
+				}
+			case "cancelled":
+				if !errors.Is(err, context.Canceled) {
+					t.Fatal(err)
+				}
+			case "redis_lost":
+				if !errors.Is(err, ErrBackendUnavailable) {
+					t.Fatal(err)
+				}
+			case "available":
+				if err != nil {
+					t.Fatal(err)
+				}
+				if e := d.admitQuotas(ctx); !errors.As(e, &denied) {
+					t.Fatalf("admission not charged: %v", e)
+				}
+			}
+			if mode == "cancelled" && len(mr.Keys()) != 1 {
+				t.Fatal("cancelled wait charged quota")
+			}
+		})
+	}
+}
+
+type quotaParkingHook struct{ seen chan struct{} }
+
+func (h *quotaParkingHook) DialHook(next redis.DialHook) redis.DialHook { return next }
+func (h *quotaParkingHook) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return next
+}
+func (h *quotaParkingHook) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		err := next(ctx, cmd)
+		if len(cmd.Args()) > 1 && err == nil && ((cmd.Name() == "evalsha" && cmd.Args()[1] == redis.NewScript(gcraScript).Hash()) || (cmd.Name() == "eval" && cmd.Args()[1] == gcraScript)) {
+			select {
+			case h.seen <- struct{}{}:
+			default:
+			}
+		}
+		return err
 	}
 }

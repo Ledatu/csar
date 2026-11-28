@@ -1339,7 +1339,14 @@ attempts, so restore it or suspend affected routes before resuming. CSAR publish
 Retry-After/X-CSAR timing; workers own refresh schedules, not provider counters.
 A zero cap explicitly denies admission until an allowance is verified. Quota routes
 reject ordinary/transparent inline retries; each admitted request has one attempt.
-Config and runtime share policy validation. Backend causes remain in server logs,
+Quota routes may park for `max_wait` up to five seconds on the common GCRA
+bucket; the default remains fail-fast. Eligibility is checked before parking and
+all rolling caps are rechecked and charged only after pacing admits the request.
+Cancellation or a quota exhausted during the wait prevents dispatch. This reuses
+optimistic parking, not a FIFO reservation. Longer holds return timing to workers.
+Upgrade routers, coordinator and helper before publishing a nonzero wait on quota
+routes; older binaries reject that configuration. Restore zero waits before a
+binary rollback. Config and runtime share policy validation. Backend causes remain in server logs,
 while client errors stay generic.
 
 

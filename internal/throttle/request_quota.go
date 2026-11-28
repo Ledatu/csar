@@ -58,8 +58,8 @@ func (dt *DynamicThrottler) SetQuotas(client *redis.Client, quotas []RequestQuot
 		if client == nil || !client.Options().ContextTimeoutEnabled {
 			return fmt.Errorf("request quotas require a context-aware Redis client")
 		}
-		if dt.maxWait != 0 {
-			return fmt.Errorf("request quotas require immediate admission")
+		if err := requestquota.ValidateWait(dt.maxWait); err != nil {
+			return err
 		}
 	}
 
