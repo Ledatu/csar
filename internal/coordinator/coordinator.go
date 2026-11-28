@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	configv1 "github.com/ledatu/csar-proto/csar/config/v1"
 	throttlev1 "github.com/ledatu/csar-proto/csar/throttle/v1"
 	"github.com/ledatu/csar/internal/config"
 	"github.com/ledatu/csar/internal/configsource"
@@ -413,6 +414,9 @@ func (c *Coordinator) sendFullConfigSnapshot(stream csarv1.CoordinatorService_Su
 		if routes[i].Route.AuditRelease && metadata[config.AuditReleaseCapability] != "1" {
 			return status.Error(codes.FailedPrecondition, "router does not support audit release policies")
 		}
+		if routes[i].Route.ResponseCompression != nil && metadata[config.ResponseCompressionCapability] != "1" {
+			return status.Error(codes.FailedPrecondition, "router does not support response compression policies")
+		}
 		if routes[i].Route.OriginReceiver != "" && metadata[config.OriginPolicyCapability] != "1" {
 			return status.Error(codes.FailedPrecondition, "router does not support origin receiver policies")
 		}
@@ -668,6 +672,9 @@ func routeEntryToProto(r *statestore.RouteEntry) *csarv1.RouteConfig {
 		rc.Headers = r.Route.Headers
 	}
 	rc.MaxResponseSize = r.Route.MaxResponseSize
+	if p := r.Route.ResponseCompression; p != nil {
+		rc.ResponseCompression = &configv1.ResponseCompression{Mode: p.Mode, MinBytes: p.MinBytes}
+	}
 	if r.Route.Protocol != nil {
 		rc.Protocol = protocolToProto(r.Route.Protocol)
 	}

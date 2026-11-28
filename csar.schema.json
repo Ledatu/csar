@@ -1864,6 +1864,19 @@
         }
       }
     },
+    "ResponseCompressionConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["passthrough", "gzip"] },
+        "min_bytes": { "type": "integer", "minimum": 0, "maximum": 65536 }
+      },
+      "allOf": [{
+        "if": { "properties": { "mode": { "const": "passthrough" } } },
+        "then": { "properties": { "min_bytes": { "const": 0 } } }
+      }]
+    },
     "RouteConfig": {
       "type": "object",
       "description": "Single route entry with x-csar-* extensions.",
@@ -1907,6 +1920,7 @@
         "x-csar-tenant": { "$ref": "#/$defs/TenantConfig" },
         "x-csar-cors": { "$ref": "#/$defs/CORSConfig" },
         "x-csar-cache": { "$ref": "#/$defs/CacheConfig" },
+        "x-csar-response-compression": { "$ref": "#/$defs/ResponseCompressionConfig" },
         "x-csar-cache-invalidate": { "$ref": "#/$defs/CacheInvalidationConfig" },
         "max_response_size": {
           "type": "integer",

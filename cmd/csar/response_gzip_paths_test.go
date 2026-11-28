@@ -14,7 +14,7 @@ import (
 	"testing"
 )
 
-func TestInternalResponseEncodingPassThrough(t *testing.T) {
+func TestExplicitGzipDoesNotInferPolicyFromURL(t *testing.T) {
 	plain := []byte(`{"data":"` + strings.Repeat("synthetic", 2048) + `"}`)
 	var encoded bytes.Buffer
 	zw := gzip.NewWriter(&encoded)
@@ -53,7 +53,6 @@ func TestInternalResponseEncodingPassThrough(t *testing.T) {
 				req.Header.Set("Accept-Encoding", "gzip")
 				rec := httptest.NewRecorder()
 				handler.ServeHTTP(rec, req)
-				internal := req.URL.Path == "/svc" || strings.HasPrefix(req.URL.Path, "/svc/")
 				if calls.Load() != 1 || rec.Code != 200 || rec.Header().Get("X-CSAR-Protocol-Version") != "1" {
 					t.Fatal("upstream attempts/status/protocol changed")
 				}
@@ -61,10 +60,6 @@ func TestInternalResponseEncodingPassThrough(t *testing.T) {
 				case upstreamGzip:
 					if rec.Header().Get("Content-Encoding") != "gzip" || !bytes.Equal(rec.Body.Bytes(), encoded.Bytes()) {
 						t.Fatal("upstream gzip was transformed")
-					}
-				case internal:
-					if rec.Header().Get("Content-Encoding") != "" || !bytes.Equal(rec.Body.Bytes(), plain) {
-						t.Fatal("internal identity response was compressed")
 					}
 				default:
 					if rec.Header().Get("Content-Encoding") != "gzip" {

@@ -148,6 +148,9 @@ func protoToRouteConfig(r *csarv1.RouteConfig) config.RouteConfig {
 		rc.Headers = r.GetHeaders()
 	}
 	rc.MaxResponseSize = r.GetMaxResponseSize()
+	if p := r.GetResponseCompression(); p != nil {
+		rc.ResponseCompression = &config.ResponseCompressionConfig{Mode: p.GetMode(), MinBytes: p.GetMinBytes()}
+	}
 	if r.GetProtocol() != nil {
 		rc.Protocol = protoToProtocol(r.GetProtocol())
 	}

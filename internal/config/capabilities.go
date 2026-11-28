@@ -9,17 +9,21 @@ const DelegationV2Capability = "csar.delegation_contract_version"
 const AuditReleaseCapability = "csar.audit_release_policy_version"
 const RequestQuotaCapability = "csar.request_quota_policy_version"
 const UsageBudgetCapability = "csar.usage_budget_policy_version"
+const ResponseCompressionCapability = "csar.response_compression_policy_version"
 
 // PolicyCapabilities returns owned version metadata for distributed route
 // semantics. New policies extend this registry instead of another wire field.
 func PolicyCapabilities() map[string]uint32 {
-	return map[string]uint32{AccessResourceCapability: 1, AccountOriginCapability: 1, AuditReleaseCapability: 1, UsageBudgetCapability: 1, RequestQuotaCapability: 1, DelegationV2Capability: 2}
+	return map[string]uint32{AccessResourceCapability: 1, AccountOriginCapability: 1, AuditReleaseCapability: 1, UsageBudgetCapability: 1, RequestQuotaCapability: 1, DelegationV2Capability: 2, ResponseCompressionCapability: 1}
 }
 
 func (c *Config) RequiredCapabilities() map[string]uint32 {
 	required := make(map[string]uint32)
 	for _, methods := range c.Paths {
 		for method := range methods {
+			if methods[method].ResponseCompression != nil {
+				required[ResponseCompressionCapability] = 1
+			}
 			if traffic := methods[method].Traffic; traffic != nil && len(traffic.Quotas) > 0 {
 				required[RequestQuotaCapability] = 1
 			}

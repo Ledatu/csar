@@ -62,9 +62,13 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	state := &auditRequestState{stage: "authentication", operationID: uuid.NewString()}
 	req = req.WithContext(context.WithValue(req.Context(), auditRequestKey{}, state))
 	gatewayctx.StripTrusted(req.Header)
-	r.wrapUpstreamWithAudit(rt, http.HandlerFunc(func(aw http.ResponseWriter, ar *http.Request) {
+	handler := r.wrapUpstreamWithAudit(rt, http.HandlerFunc(func(aw http.ResponseWriter, ar *http.Request) {
 		r.serveMatchedRoute(aw, ar, rt, captures)
-	})).ServeHTTP(w, req)
+	}))
+	if rt.responseWrapper != nil {
+		handler = rt.responseWrapper(handler)
+	}
+	handler.ServeHTTP(w, req)
 }
 
 func (r *Router) serveMatchedRoute(w http.ResponseWriter, req *http.Request, rt *route, captures []string) {

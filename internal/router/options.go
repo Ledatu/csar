@@ -14,6 +14,12 @@ import (
 // Option configures the Router.
 type Option func(*Router)
 
+// WithResponseGzipDefault preserves the explicit legacy startup opt-in. Route
+// policy overrides this default; the zero-value router does not generate gzip.
+func WithResponseGzipDefault(enabled bool) Option {
+	return func(r *Router) { r.defaultResponseGzip = enabled }
+}
+
 // WithMetrics adds Prometheus metrics to the router.
 func WithMetrics(m *metrics.Metrics) Option {
 	return func(r *Router) { r.metrics = m }

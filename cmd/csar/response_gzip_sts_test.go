@@ -99,7 +99,7 @@ func TestResponseGzipSTSClientPreservesV1(t *testing.T) {
 				t.Errorf("gzip changed decoded body or v1 errors on %s", path)
 			}
 			ok := strings.HasSuffix(path, "/ok")
-			wantDecodedGzip := enabled && !strings.HasPrefix(path, "/svc/")
+			wantDecodedGzip := enabled
 			if ok && (resp.Uncompressed != wantDecodedGzip || string(body) != payload) {
 				t.Error("normal STS client did not transparently decode negotiated gzip")
 			}

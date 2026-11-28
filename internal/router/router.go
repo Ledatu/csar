@@ -38,6 +38,7 @@ type auditRecorder interface {
 
 // route holds a compiled route with its proxy and throttler.
 type route struct {
+	responseWrapper              func(http.Handler) http.Handler
 	rejectCredentialUnauthorized bool
 	rejectionHeader              string
 
@@ -90,6 +91,8 @@ type vipOverride struct {
 // It matches incoming requests to configured routes and applies
 // the pipeline: ip_check -> cors -> security_inject -> throttle.Wait -> circuit_breaker -> proxy.Forward.
 type Router struct {
+	defaultResponseGzip       bool
+	compressionWrappers       map[int]func(http.Handler) http.Handler
 	usageLimiter              *usagebudget.Limiter
 	quotaRedis                *redis.Client
 	usageRedis                *redis.Client
