@@ -170,6 +170,8 @@ github.com/ledatu/csar-core v0.1.48-0.20261127192941-6a27254e68ce h1:oKvh92wMeNr
 github.com/ledatu/csar-core v0.1.48-0.20261127192941-6a27254e68ce/go.mod h1:im0Oy/+WaoNQ+5nwpidQ5HU76LsRV9+1+GLHyG38vfs=
 github.com/ledatu/csar-core v0.1.48-0.20261128002703-18638cdc07ee h1:8sOSxA2CoSXZrrX/s5xnIvpVfvfalL1TwUPskWxderM=
 github.com/ledatu/csar-core v0.1.48-0.20261128002703-18638cdc07ee/go.mod h1:im0Oy/+WaoNQ+5nwpidQ5HU76LsRV9+1+GLHyG38vfs=
+github.com/ledatu/csar-core v0.1.48-0.20261128112717-29e6ebcf971b h1:FIwWoYFcxdx7MVNCFUYQBxxTSs+ObGbXpuIfRBpoahM=
+github.com/ledatu/csar-core v0.1.48-0.20261128112717-29e6ebcf971b/go.mod h1:im0Oy/+WaoNQ+5nwpidQ5HU76LsRV9+1+GLHyG38vfs=
 github.com/ledatu/csar-proto v0.1.6-0.20261122222626-66dbba1ea79b h1:SwzPTLG/WQOPjGtc6kuXxZMLiclmgBmDLeMwDgJh7EQ=
 github.com/ledatu/csar-proto v0.1.6-0.20261122222626-66dbba1ea79b/go.mod h1:ZGtHTVNny/O2IR7wsFUzRn0NZ9HgdPD/WIsVlbIF/sc=
 github.com/ledatu/csar-proto v0.1.6-0.20261125183040-b77b55b6adff h1:LHOd2y9HT33RBulYkeZJgmtVZfYfH+kIrERkxL09+a8=

@@ -249,7 +249,7 @@ func (r *Router) wrapUpstreamWithAudit(rt *route, next http.Handler) http.Handle
 			auditSecrets(req, state)
 			diag := auditcore.CaptureHTTPResponse(&auditcore.HTTPResponseInput{
 				Status: rec.statusCode, ContentType: rec.contentType, ContentEncoding: rec.contentEncoding,
-				Body: rec.body, ObservedBytes: rec.observedBytes, Complete: rec.capture && !rec.failed && rec.observedBytes <= auditcore.MaxHTTPInspectBytes,
+				Body: rec.body, ObservedBytes: rec.observedBytes, Complete: rec.capture && !rec.failed && req.Context().Err() == nil && rec.observedBytes <= auditcore.MaxHTTPInspectBytes,
 				MaxBodyBytes: int(responseCapture.ResponseMaxBytes), Secrets: state.secrets,
 				Redact: jsonredact.Config{PathFields: responseCapture.Fields, SensitiveKeys: responseCapture.SensitiveFields},
 			})

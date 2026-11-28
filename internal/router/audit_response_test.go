@@ -371,8 +371,8 @@ func TestAuditWriterPartialWriteAndFlushError(t *testing.T) {
 	if err := http.NewResponseController(capture).Flush(); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatalf("flush err=%v", err)
 	}
-	if capture.capture || len(capture.body) != 0 {
-		t.Fatal("flushed response captured as complete JSON")
+	if !capture.failed {
+		t.Fatal("flush error must make capture incomplete")
 	}
 }
 
@@ -420,7 +420,7 @@ func TestAuditAdmissionDenialsAreRecordedOnce(t *testing.T) {
 	}
 }
 
-func TestAuditFlushOmitsResponseBody(t *testing.T) {
+func TestAuditFlushPreservesFiniteResponseBody(t *testing.T) {
 	recorder := &stubAuditRecorder{}
 	r := &Router{auditClient: recorder}
 	rt := &route{method: "GET", auditMode: config.AuditModeAll, auditCapture: &config.AuditCaptureConfig{Response: "errors"}}
@@ -443,7 +443,7 @@ func TestAuditFlushOmitsResponseBody(t *testing.T) {
 	if err := json.Unmarshal(recorder.events[0].Metadata, &meta); err != nil {
 		t.Fatal(err)
 	}
-	if meta.Response.OmissionReason != "streaming" || meta.Response.State != "omitted" || meta.Response.Body != "" || meta.Response.CaptureComplete {
+	if meta.Response.OmissionReason != "" || meta.Response.State != "captured" || meta.Response.Message != "streamed" || !meta.Response.CaptureComplete {
 		t.Fatalf("response=%+v", meta.Response)
 	}
 }
